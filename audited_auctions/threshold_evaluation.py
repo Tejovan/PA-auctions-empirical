@@ -14,6 +14,10 @@ Main entry point: given a type distribution H and a common threshold function
                 bidder participates and the k highest positive welfare
                 contributions w = v + e win. This attains the first best.
 
+Exact computation and the welfare objective used for optimizing τ
+(expected_welfare) work on the type distribution itself; simulation is used
+only for per-auction welfare distributions and as a check.
+
 The penalties are not inputs. For VCG-PA and IVCG-PA the module computes the
 penalty function r(e) = ∫_0^{τ(e)} X^τ(b) db that induces τ (X^τ is the interim
 allocation of the respective auction), and reports it for plotting.
@@ -42,7 +46,11 @@ import numpy as np
 import pandas as pd
 
 from .auction_simulation import simulate_score_auction
-from .exact_computation import allocation_integral_from_table, build_score_auction_model
+from .exact_computation import (
+    VALUATION_BIDS,
+    WELFARE_CONTRIBUTION_BIDS,
+    build_score_auction_model,
+)
 from .scoring_rules import IdentityScore
 from .threshold_functions import as_threshold_function, describe_threshold
 
@@ -56,11 +64,12 @@ MECHANISM_LABELS = {
 }
 
 PARTICIPANT_AUDIT_MECHANISMS = ("vcg_pa", "ivcg_pa")
+AUDITED_MECHANISMS = ("vcg_pa", "ivcg_pa", "first_best")
 
 
 @dataclass
 class ThresholdEvaluation:
-    """Results of evaluate_threshold. Plain arrays and dicts only, so it pickles.
+    """Results of evaluate_threshold. Plain arrays, dicts and small objects, so it pickles.
 
     exact          : mechanism -> {metric -> expected value}; metrics are those
                      of ScoreAuctionModel.expected_outcomes plus "penalty_paid"
@@ -68,10 +77,11 @@ class ThresholdEvaluation:
                       "recipient"} -> arrays over the externality grid;
                      "threshold" is τ(e) (may contain ±inf)
     welfare_contribution_curves :
-                     {"bid_levels", "level_mass", "expected", "ironed"} for the
-                     participating valuations (IVCG-PA scoring)
-    penalty_tables : mechanism ("vcg_pa", "ivcg_pa") -> arrays determining the
-                     penalty function exactly; evaluate with penalty_from_table
+                     IVCG-PA segments: bid_start/end, welfare_start/end (ŵ^τ),
+                     score_start/end (ω̄^τ), quantile_start/end
+    penalty_tables : mechanism ("vcg_pa", "ivcg_pa") -> {"allocation_integral":
+                     callable R(b), "maximum_valuation": v̄}; evaluate the
+                     penalty function exactly with penalty_from_table
     simulated      : mechanism -> {metric -> (num_draws,) array}, or None
     """
 
@@ -86,14 +96,31 @@ class ThresholdEvaluation:
     simulated: Optional[dict] = None
     settings: dict = field(default_factory=dict)
 
+    def welfare_gains_over_vcg(self) -> dict:
+        """Exact welfare gain of each audited mechanism over unaudited VCG, and the
+        share of the first-best gain it captures:
+            gain_m = W_m − W_VCG,  share_m = gain_m / (W_first_best − W_VCG)."""
+        vcg_welfare = self.exact["vcg"]["welfare"]
+        first_best_gain = self.exact["first_best"]["welfare"] - vcg_welfare
+        gains = {}
+        for mechanism in AUDITED_MECHANISMS:
+            gain = self.exact[mechanism]["welfare"] - vcg_welfare
+            share = gain / first_best_gain if abs(first_best_gain) > 1e-15 else float("nan")
+            gains[mechanism] = {"gain": gain, "share_of_first_best_gain": share}
+        return gains
+
     def summary_table(self) -> pd.DataFrame:
-        """One row per mechanism: exact expectations and simulated means."""
+        """One row per mechanism: exact expectations, gains over VCG, simulated means."""
+        gains = self.welfare_gains_over_vcg()
         rows = []
         for mechanism in MECHANISMS:
             row = {"mechanism": MECHANISM_LABELS[mechanism]}
             row.update(
                 {f"exact_{metric}": value for metric, value in self.exact[mechanism].items()}
             )
+            row["exact_welfare_gain_over_vcg"] = gains.get(mechanism, {}).get("gain", 0.0)
+            row["share_of_first_best_gain"] = gains.get(mechanism, {}).get(
+                "share_of_first_best_gain", 0.0)
             if self.simulated is not None:
                 welfare = self.simulated[mechanism]["welfare"]
                 row["simulated_welfare_mean"] = float(welfare.mean())
@@ -114,7 +141,7 @@ class ThresholdEvaluation:
         welfare = {m: self.simulated[m]["welfare"] for m in MECHANISMS}
         return {
             f"{mechanism} - vcg": welfare[mechanism] - welfare["vcg"]
-            for mechanism in ("vcg_pa", "ivcg_pa", "first_best")
+            for mechanism in AUDITED_MECHANISMS
         }
 
     def save(self, path):
@@ -129,69 +156,70 @@ class ThresholdEvaluation:
 
 # ─── Building the four mechanisms ─────────────────────────────────────────────
 
+# mechanism -> (participation, bid kind, ironed)
+MECHANISM_SPECIFICATIONS = {
+    "vcg": ("everyone", VALUATION_BIDS, False),
+    "vcg_pa": ("threshold", VALUATION_BIDS, False),
+    "ivcg_pa": ("threshold", VALUATION_BIDS, True),
+    "first_best": ("everyone", WELFARE_CONTRIBUTION_BIDS, False),
+}
+
+
+def build_mechanism_model(mechanism, type_distribution, threshold_function, num_bidders,
+                          num_goods):
+    """Exact ScoreAuctionModel of one mechanism."""
+    participation, bid_kind, ironed = MECHANISM_SPECIFICATIONS[mechanism]
+    if participation == "everyone":
+        cell_thresholds = np.full(type_distribution.num_cells, -np.inf)
+    else:
+        cell_thresholds = threshold_function(type_distribution.externalities)
+    return build_score_auction_model(mechanism, type_distribution, cell_thresholds, bid_kind,
+                                     ironed, num_bidders, num_goods)
+
 
 def build_mechanism_models(type_distribution, threshold_function, num_bidders, num_goods):
-    """Exact ScoreAuctionModel of each mechanism, plus the atom participation mask."""
-    everyone = np.ones(type_distribution.num_atoms, dtype=bool)
-    participates = type_distribution.valuations >= threshold_function(
-        type_distribution.externalities
-    )
-    valuations = type_distribution.valuations
-    common = dict(
-        distribution=type_distribution, num_bidders=num_bidders, num_goods=num_goods
-    )
+    """Exact ScoreAuctionModel of each mechanism, plus the participating mass per cell."""
+    threshold_function = as_threshold_function(threshold_function)
     models = {
-        "vcg": build_score_auction_model(
-            "vcg", atom_participates=everyone, atom_bids=valuations, ironed=False, **common
-        ),
-        "vcg_pa": build_score_auction_model(
-            "vcg_pa", atom_participates=participates, atom_bids=valuations, ironed=False, **common
-        ),
-        "ivcg_pa": build_score_auction_model(
-            "ivcg_pa", atom_participates=participates, atom_bids=valuations, ironed=True, **common
-        ),
-        "first_best": build_score_auction_model(
-            "first_best",
-            atom_participates=everyone,
-            atom_bids=type_distribution.welfare_contributions,
-            ironed=False,
-            **common,
-        ),
+        mechanism: build_mechanism_model(mechanism, type_distribution, threshold_function,
+                                         num_bidders, num_goods)
+        for mechanism in MECHANISMS
     }
-    return models, participates
+    return models, models["vcg_pa"].cell_participation_mass
 
 
-def inducing_penalty(model, threshold_values, maximum_valuation):
-    """Penalty r(e) = R(τ(e)) inducing the thresholds in a normalized DSIC auction.
+def expected_welfare(type_distribution, threshold_function, num_bidders, num_goods,
+                     mechanism="vcg_pa"):
+    """Exact expected welfare of one mechanism for τ (the optimization objective).
 
-    Thresholds are clipped to [0, v̄]: τ <= 0 needs no penalty, and τ >= v̄
-    (including τ = +inf, exclusion) takes the penalty R(v̄) = G(v̄).
+    Returns 0 if nobody participates (no allocation, no welfare).
     """
-    return penalty_from_table(
-        {**model.allocation_integral_table(), "maximum_valuation": maximum_valuation},
-        threshold_values,
-    )
+    threshold_function = as_threshold_function(threshold_function)
+    try:
+        model = build_mechanism_model(mechanism, type_distribution, threshold_function,
+                                      num_bidders, num_goods)
+    except ValueError:
+        return 0.0
+    return model.expected_welfare()
 
 
 def penalty_from_table(penalty_table, threshold_values):
     """Penalty r(e) = R(clip(τ(e), 0, v̄)) from a stored penalty table.
 
-    penalty_table: ThresholdEvaluation.penalty_tables[mechanism], i.e. the
-    allocation-integral arrays plus "maximum_valuation" (v̄).
+    penalty_table: ThresholdEvaluation.penalty_tables[mechanism]. Thresholds are
+    clipped to [0, v̄]: τ <= 0 needs no penalty, and τ >= v̄ (including
+    τ = +inf, exclusion) takes the penalty R(v̄) = G(v̄).
     """
     clipped = np.clip(np.asarray(threshold_values, dtype=float), 0.0,
                       penalty_table["maximum_valuation"])
-    return allocation_integral_from_table(penalty_table, clipped)
+    return penalty_table["allocation_integral"](clipped)
 
 
 def default_externality_grid(type_distribution, num_points=400, tail_probability=0.005):
     """Grid over the central 99% of the externality distribution."""
-    lower = type_distribution.weighted_quantile(
-        type_distribution.externalities, tail_probability
-    )
-    upper = type_distribution.weighted_quantile(
-        type_distribution.externalities, 1 - tail_probability
-    )
+    lower = type_distribution.weighted_quantile(type_distribution.externalities, tail_probability)
+    upper = type_distribution.weighted_quantile(type_distribution.externalities,
+                                                1 - tail_probability)
     return np.linspace(lower, upper, num_points)
 
 
@@ -218,36 +246,32 @@ def evaluate_threshold(
     random_seed         : seed for the simulated draws
     simulation_draws    : optional (externalities, valuations) arrays of shape
                           (num_draws, n) to simulate on instead of sampling
-                          (used by the sweep scripts to reuse their test draws)
     externality_grid    : externalities at which to tabulate penalty curves
     """
     threshold_function = as_threshold_function(threshold_function)
-    models, atom_participates = build_mechanism_models(
+    models, cell_participation_mass = build_mechanism_models(
         type_distribution, threshold_function, num_bidders, num_goods
     )
-    maximum_valuation = float(type_distribution.valuations.max())
+    maximum_valuation = type_distribution.maximum_valuation
+    penalty_tables = {
+        mechanism: {"allocation_integral": models[mechanism].allocation_integral_function,
+                    "maximum_valuation": maximum_valuation}
+        for mechanism in PARTICIPANT_AUDIT_MECHANISMS
+    }
 
     def penalty_function(mechanism):
-        return lambda externalities: inducing_penalty(
-            models[mechanism], threshold_function(externalities), maximum_valuation
-        )
+        return lambda externalities: penalty_from_table(
+            penalty_tables[mechanism], threshold_function(externalities))
 
     # Exact expectations --------------------------------------------------------
     exact = {mechanism: models[mechanism].expected_outcomes() for mechanism in MECHANISMS}
-    atom_probabilities = type_distribution.probabilities
     exact["vcg"]["penalty_paid"] = 0.0
     for mechanism in PARTICIPANT_AUDIT_MECHANISMS:
-        atom_penalties = penalty_function(mechanism)(type_distribution.externalities)
+        cell_penalties = penalty_function(mechanism)(type_distribution.externalities)
         exact[mechanism]["penalty_paid"] = num_bidders * float(
-            np.sum(atom_probabilities * atom_participates * atom_penalties)
-        )
-    exact["first_best"]["penalty_paid"] = num_bidders * float(
-        np.sum(
-            atom_probabilities
-            * models["first_best"].atom_allocation()
-            * -type_distribution.externalities
-        )
-    )
+            np.sum(cell_participation_mass * cell_penalties))
+    # The recipient penalty −e is charged to winners: n E[x (−e)].
+    exact["first_best"]["penalty_paid"] = -exact["first_best"]["externality_welfare"]
 
     # Curves for plotting -------------------------------------------------------
     if externality_grid is None:
@@ -258,13 +282,6 @@ def evaluate_threshold(
         "vcg_pa": penalty_function("vcg_pa")(externality_grid),
         "ivcg_pa": penalty_function("ivcg_pa")(externality_grid),
         "recipient": -externality_grid,
-    }
-    ivcg_model = models["ivcg_pa"]
-    welfare_contribution_curves = {
-        "bid_levels": ivcg_model.bid_levels,
-        "level_mass": ivcg_model.level_mass,
-        "expected": ivcg_model.expected_welfare_contribution(),
-        "ironed": ivcg_model.level_scores,
     }
 
     # Simulation ----------------------------------------------------------------
@@ -288,18 +305,16 @@ def evaluate_threshold(
         num_goods=num_goods,
         exact=exact,
         penalty_curves=penalty_curves,
-        welfare_contribution_curves=welfare_contribution_curves,
-        penalty_tables={
-            mechanism: {**models[mechanism].allocation_integral_table(),
-                        "maximum_valuation": maximum_valuation}
-            for mechanism in PARTICIPANT_AUDIT_MECHANISMS
-        },
+        welfare_contribution_curves=models["ivcg_pa"].welfare_contribution_curves(),
+        penalty_tables=penalty_tables,
         simulated=simulated,
         settings={
             "num_simulated_draws": 0 if simulated is None else len(externalities),
             "random_seed": random_seed,
-            "num_atoms": type_distribution.num_atoms,
+            "num_cells": type_distribution.num_cells,
+            "distribution_kind": type_distribution.kind,
             "maximum_valuation": maximum_valuation,
+            "distribution_metadata": dict(type_distribution.metadata),
         },
     )
 
@@ -336,3 +351,43 @@ def simulate_mechanisms(
             penalty_function(mechanism)(externalities),
         )
     return {mechanism: simulated[mechanism] for mechanism in MECHANISMS}
+
+
+# ─── Grid-refinement check ────────────────────────────────────────────────────
+
+
+def grid_refinement_check(family, threshold_function, num_bidders, num_goods,
+                          externality_scale=1.0, refinement_factor=2, **options):
+    """Exact welfare on the default grid and on a grid refined by refinement_factor.
+
+    For a synthetic family, the gridded (piecewise-uniform) distribution
+    approximates a continuous density; the change in welfare under refinement
+    measures the discretization error. Returns a DataFrame with one row per
+    mechanism: welfare on both grids, their difference, and the same for the
+    welfare gain over VCG.
+    """
+    from .type_distributions import synthetic_distribution
+
+    base_nodes = options.pop("num_externality_nodes", 301)
+    base_cells = options.pop("num_valuation_cells", 600)
+    results = {}
+    for label, factor in (("base", 1), ("refined", refinement_factor)):
+        grid = {"num_externality_nodes": (base_nodes - 1) * factor + 1,
+                "num_valuation_cells": base_cells * factor}
+        if family == "example_n":
+            grid.pop("num_externality_nodes")
+        distribution = synthetic_distribution(family, externality_scale=externality_scale,
+                                              **grid, **options)
+        models, _ = build_mechanism_models(distribution, threshold_function, num_bidders,
+                                           num_goods)
+        results[label] = {m: models[m].expected_welfare() for m in MECHANISMS}
+    rows = []
+    for mechanism in MECHANISMS:
+        base, refined = results["base"][mechanism], results["refined"][mechanism]
+        base_gain = base - results["base"]["vcg"]
+        refined_gain = refined - results["refined"]["vcg"]
+        rows.append({"mechanism": MECHANISM_LABELS[mechanism], "welfare_base": base,
+                     "welfare_refined": refined, "welfare_change": refined - base,
+                     "gain_over_vcg_base": base_gain, "gain_over_vcg_refined": refined_gain,
+                     "gain_change": refined_gain - base_gain})
+    return pd.DataFrame(rows).set_index("mechanism")

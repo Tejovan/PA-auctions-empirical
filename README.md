@@ -6,16 +6,34 @@ Advertiser values (`v`) are proxied by tweet engagement (actions per month) and 
 
 ---
 
-## WEB27 Branch (`web27`): Exact Computation, IVCG-PA, Corrected Penalties
+## WEB27 Branch (`web27`): Exact Computation, IVCG-PA, Model-Consistent Distributions
 
-The `web27` branch updates the code to the WEB27 core draft (single-parameter model with a common participation threshold τ):
+The `web27` branch updates the code to the WEB27 core draft (single-parameter model with a common participation threshold τ). Everything below is documented in detail in [audited_auctions/README.md](audited_auctions/README.md).
 
-- **[audited_auctions/](audited_auctions/)** — new package (documented in [audited_auctions/README.md](audited_auctions/README.md)). Given a type distribution and a threshold function τ(e), it computes exactly and simulates VCG (no audit), **VCG-PA**, **IVCG-PA** (ironed VCG with participant audits) and the **first best** (optimal recipient audit), and computes the penalty functions r(e) that induce τ in VCG-PA and IVCG-PA. Reported per mechanism: expected welfare (and its valuation/externality parts), revenue, expected penalty paid, participation, number allocated; per-draw distributions of all of these from simulation.
-- **[evaluate_threshold.py](evaluate_threshold.py)** — command-line front end: one distribution and one τ → summary table, pickled evaluation, and two figures (types/threshold/penalties/expected welfare; welfare densities and paired differences).
-- **Corrected participant penalty.** The old penalty estimator `R(e) = A(e)(τ(e) − P(e))` from realized (k+1)-th prices was biased upward; it is replaced by the exact r(e) = ∫_0^{τ(e)} X^τ(b) db everywhere (sweep figures and post-analysis).
-- **IVCG-PA everywhere.** `run_sweep_genetic2.py` and `post_optimization_analysis.py` report and plot IVCG-PA next to VCG, VCG-PA and the first best; sweep records gain `ivcga_*` keys, revenue, penalty, participation keys, and the full `evaluation` (see the per-run README written by the sweep).
-- **Changed conventions.** Bidders are drawn i.i.d. (with replacement) from the population. VCG and VCG-PA allocate only to positive bids, also inside the genetic algorithm's fitness function (this matters only for samples a–f, which contain negative valuations).
-- **Tests:** [tests/](tests/), run with `python -m pytest tests -q`.
+- **[audited_auctions/](audited_auctions/)** — package. Given a type distribution and τ(e), it computes **exactly** (and simulates) VCG (no audit), **VCG-PA**, **IVCG-PA** (ironed VCG with participant audits) and the **first best** (optimal recipient audit), and the penalty functions r(e) inducing τ. Reported per mechanism: expected welfare (valuation and externality parts), gain over VCG and share of the first-best gain, revenue, expected penalty paid, participation, number allocated; per-auction distributions from simulation.
+- **Model-consistent distributions.** Valuations are non-negative and bounded (enforced). Continuous distributions are piecewise uniform (valuations uniform within grid cells, externalities on grid nodes), so valuation ties have probability zero and all quantities are exact for that distribution. Synthetic families: the mixtures a–f, h (valuation means shifted by +1, truncated at 0) and new families `example_n` (analytic benchmark), `independent`, `harm_rises`, `harmful_middle` (ironing binds), `heavy_tail`.
+- **Empirical pipeline.** CSV data are truncated at a valuation quantile (v̄), split into training and test halves, and kernel-smoothed (variance-preserving, in asinh e and log v) or kept atomic; τ is optimized on the training half and evaluated on the test half, with a bootstrap of exact welfare over test rows.
+- **Exact objective.** The genetic algorithm (`audited_auctions/genetic_search.py`) maximizes the exact expected welfare of VCG-PA (or IVCG-PA) on the distribution, not an average over simulated auction draws.
+- **Welfare comparisons** are gains over unaudited VCG (VCG-PA − VCG, IVCG-PA − VCG, first best − VCG).
+- **Corrected participant penalty.** The old estimator `R(e) = A(e)(τ(e) − P(e))` from realized (k+1)-th prices was biased upward; the exact r(e) = ∫_0^{τ(e)} X^τ(b) db replaces it everywhere.
+- **Scripts.** [evaluate_threshold.py](evaluate_threshold.py) (one distribution and one τ → table, pickle, two figures); [Collateralized_Auction_genetic2.py](Collateralized_Auction_genetic2.py) (optimize and evaluate one cell); [run_sweep_genetic2.py](run_sweep_genetic2.py) (sweeps over ζ, degree, k, n; writes a README describing its output); [post_optimization_analysis.py](post_optimization_analysis.py) (figures from a sweep).
+- **Tests:** [tests/](tests/), run with `python -m pytest tests -q` (43 tests).
+
+Typical runs:
+
+```bash
+# synthetic family, with a check of the discretization error
+python run_sweep_genetic2.py --data harm_rises --degrees 1,2 --k-values 1,2 --num-items 8 \
+    --ext-min 0.5 --ext-max 2 --num-ext 4 --grid-refinement --warm-start --tag harm
+# empirical data: train/test split, kernel smoothing, bootstrap
+python run_sweep_genetic2.py --data data/samples/g_full_tweets.csv --degrees 1,2 --k-values 1 \
+    --num-items 8 --ext-min 1 --ext-max 100 --num-ext 6 --log-scale --tag tweets
+python post_optimization_analysis.py output/sweep_genetic2_tweets_
+```
+
+Not yet done (planned): a grid representation of τ and the best-response ascent based on the first-order condition of the core draft's Appendix E; running large sweeps on the BU SCC cluster.
+
+The sections below describe the original (EC 2025 / EAAMO 2026) workflow; the legacy scripts `run_local.sh`, `run_sweep.sh`, `plot_sweep.py` still call `Collateralized_Auction_genetic2.py` with the same flags, and its output keeps the legacy fields they read.
 
 ### Setup
 
@@ -46,13 +64,13 @@ Processed tweet dataset. Each row is a tweet with `v_score` (advertiser value, p
 ### 2. Optimization Sweep
 
 **[Collateralized_Auction_genetic2.py](Collateralized_Auction_genetic2.py)**
-Core optimizer. Implements `run_genetic_search()`, which uses a genetic algorithm (PyGAD) to search for optimal τ polynomial coefficients that maximize social welfare across auction draws. Supports warm-starting via `initial_solution`. This module is called by `run_sweep_genetic2.py` and is not run directly.
+Single-cell run: genetic search (`audited_auctions/genetic_search.py`) for the polynomial τ maximizing exact expected welfare, then exact evaluation, simulation and (empirical data) bootstrap via `audited_auctions/pipeline.py`. `--data` is a CSV or a synthetic family name.
 
 **[run_sweep_genetic2.py](run_sweep_genetic2.py)**
-Sweep runner. Iterates over all combinations of `k` (slots), polynomial degree, number of bidders `n`, and externality cost ζ, calling `Collateralized_Auction_genetic2.py` for each cell. Results are saved to `output/sweep_<name>_<timestamp>/sweep_data.pkl` along with a per-run `README.md`.
+Sweep runner. Iterates over all combinations of `k` (goods), polynomial degree, number of bidders `n`, and externality scale ζ, running one pipeline cell each. Results are saved to `output/sweep_genetic2_<tag>_<timestamp>/sweep_data.pkl` along with a per-run `README.md`.
 
 ```bash
-python run_sweep_genetic2.py --name myrun --data full_tweets.csv
+python run_sweep_genetic2.py --tag myrun --data data/samples/g_full_tweets.csv
 ```
 
 ### 3. Analysis and Figures
@@ -61,10 +79,9 @@ python run_sweep_genetic2.py --name myrun --data full_tweets.csv
 Loads a completed sweep and generates all publication-ready figures. Accepts a sweep directory or path prefix; when given a prefix, processes all matching directories.
 
 Key flags:
-- `--empirical` — empirical (XNP400) mode; adjusts axis limits and skips simulated-only plots
-- `--no-ci` — omit 95% confidence interval error bars
+- `--empirical` — empirical mode; zooms axes to central percentiles of the types
+- `--no-ci` — omit bootstrap 95% interval error bars
 - `--font-scale N` — scale all figure text (default 1.2)
-- `--data CSV` — recompute welfare from a consistent held-out test set
 
 Individual plots can be generated selectively to avoid regenerating everything:
 ```bash
@@ -101,7 +118,7 @@ create_distribution.ipynb     → full_tweets.csv
 create_descriptive_stats.py   → output/descriptive_stats/
 
 run_sweep_genetic2.py
-  └─ Collateralized_Auction_genetic2.py → output/sweep_<name>/sweep_data.pkl
+  └─ audited_auctions/pipeline.py      → output/sweep_genetic2_<tag>_<timestamp>/sweep_data.pkl
 
 post_optimization_analysis.py → output/sweep_<name>/figures/
 

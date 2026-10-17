@@ -14,12 +14,17 @@ The threshold comes from one of
                                    (uses its tau_coeffs, k, num_items, ζ unless overridden)
 
 The distribution comes from --distribution:
-  a, b, c, d, e, f, h              gridded parametric Gaussian mixture (alternate_distributions.ipynb)
-  path/to/file.csv                 population with columns e_score, v_score; e = ζ e_score
+  a family name                    synthetic piecewise-uniform family (a–f, h, example_n,
+                                   independent, harm_rises, harmful_middle, heavy_tail;
+                                   see audited_auctions/README.md), externalities × ζ
+  path/to/file.csv                 population with columns e_score, v_score; e = ζ e_score,
+                                   truncated at a valuation quantile and kernel-smoothed
+                                   (--smoothing none keeps the rows as atoms); no train/test
+                                   split here (that is the sweep pipeline's job)
 
 Examples
 --------
-    python evaluate_threshold.py --distribution h --tau-coefficients 2,-1 --num-bidders 8 --num-goods 1
+    python evaluate_threshold.py --distribution harm_rises --tau-coefficients 0.5,-1 --num-bidders 8 --num-goods 1
     python evaluate_threshold.py --distribution data/samples/g_full_tweets.csv \\
         --externality-scale 5 --tau-coefficients 1e5,-50 --num-bidders 8 --num-goods 1
     python evaluate_threshold.py --sweep-result output/sweep_x/results/run_k1_deg1_n8_ext0.pkl \\
@@ -30,14 +35,10 @@ import argparse
 import os
 import pickle
 
-from audited_auctions import (
-    evaluate_threshold,
-    polynomial_threshold,
-    population_distribution_from_csv,
-    synthetic_distribution,
-)
+from audited_auctions import SYNTHETIC_FAMILIES, evaluate_threshold, polynomial_threshold
+from audited_auctions.empirical import SMOOTHING_CHOICES, load_empirical_sample, sample_distribution
 from audited_auctions.figures import plot_threshold_and_penalties, plot_welfare_distributions
-from audited_auctions.type_distributions import SYNTHETIC_DISTRIBUTION_PARAMETERS
+from audited_auctions.type_distributions import synthetic_distribution
 
 
 def parse_args():
@@ -45,15 +46,20 @@ def parse_args():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--distribution", required=True,
-                        help="letter of a synthetic distribution or a CSV path")
+                        help="synthetic family name or a CSV path")
     parser.add_argument("--externality-scale", type=float, default=None,
-                        help="ζ: e = ζ e_score for CSV populations (default 1, or the sweep's ζ)")
+                        help="ζ: externalities are multiplied by ζ (default 1, or the sweep's ζ)")
     parser.add_argument("--valuation-scale", type=float, default=None,
                         help="v = scale × v_score for CSV populations (default 1)")
     parser.add_argument("--tau-coefficients", default=None,
                         help='comma-separated polynomial coefficients of τ, lowest degree first')
     parser.add_argument("--sweep-result", default=None,
                         help="per-run pickle from run_sweep_genetic2.py supplying τ, k, n, ζ")
+    parser.add_argument("--truncation-quantile", type=float, default=0.995,
+                        help="CSV: valuations above this quantile are dropped; v̄ = the quantile")
+    parser.add_argument("--smoothing", choices=SMOOTHING_CHOICES, default="kernel",
+                        help="CSV: kernel smoothing (default) or atomic rows")
+    parser.add_argument("--bandwidth-scale", type=float, default=1.0)
     parser.add_argument("--num-bidders", type=int, default=None, help="n")
     parser.add_argument("--num-goods", type=int, default=None, help="k")
     parser.add_argument("--num-draws", type=int, default=20000,
@@ -83,15 +89,17 @@ def main():
     if num_bidders is None or num_goods is None:
         raise SystemExit("give --num-bidders and --num-goods (or --sweep-result)")
 
-    if args.distribution in SYNTHETIC_DISTRIBUTION_PARAMETERS:
-        type_distribution = synthetic_distribution(args.distribution)
+    externality_scale = args.externality_scale or sweep_record.get("externality_cost", 1.0)
+    if args.distribution in SYNTHETIC_FAMILIES:
+        type_distribution = synthetic_distribution(args.distribution,
+                                                   externality_scale=externality_scale)
     else:
-        externality_scale = args.externality_scale or sweep_record.get("externality_cost", 1.0)
         valuation_scale = args.valuation_scale or sweep_record.get("action_cost", 1.0)
-        type_distribution = population_distribution_from_csv(
-            args.distribution, externality_scale, valuation_scale,
-            name=f"{os.path.basename(args.distribution)} (ζ = {externality_scale:g})",
-        )
+        sample = load_empirical_sample(args.distribution, externality_scale, valuation_scale,
+                                       args.truncation_quantile)
+        type_distribution = sample_distribution(
+            sample, args.smoothing, args.bandwidth_scale,
+            name=f"{os.path.basename(args.distribution)} (ζ = {externality_scale:g})")
 
     evaluation = evaluate_threshold(
         type_distribution, polynomial_threshold(coefficients), num_bidders, num_goods,

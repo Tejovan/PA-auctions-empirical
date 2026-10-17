@@ -15,14 +15,14 @@ are the ones used before IVCG-PA was added, so older plotting code still works.
 
 Each sweep record also stores "evaluation", the full ThresholdEvaluation
 (exact expectations, penalty tables that determine r(e) exactly, ŵ^τ and ω̄^τ,
-and the simulated draws).
+and the simulated draws), "bootstrap" (empirical data) and "type_sample" (a
+sample of types for scatter plots); see audited_auctions/pipeline.py.
 """
 
 import numpy as np
 
-from .threshold_evaluation import evaluate_threshold, penalty_from_table
+from .threshold_evaluation import penalty_from_table
 from .threshold_functions import polynomial_threshold
-from .type_distributions import population_distribution
 
 MECHANISM_KEY_PREFIX = {"vcg": "vcg", "vcg_pa": "vcga", "ivcg_pa": "ivcga", "first_best": "ra"}
 
@@ -43,25 +43,6 @@ SWEEP_SERIES = [
     ("ivcga", "IVCG-PA", "#c0392b", "D"),
     ("ra", "First best (recipient audit)", "#1baf7a", "^"),
 ]
-
-
-def bidder_sets_to_arrays(bidder_sets):
-    """Convert sweep draws (lists of (v, e) tuples) to (externalities, valuations) arrays."""
-    draws = np.asarray(bidder_sets, dtype=float)  # (num_draws, num_bidders, 2)
-    return draws[:, :, 1], draws[:, :, 0]
-
-
-def evaluate_sweep_cell(population_externalities, population_valuations, tau_coeffs,
-                        num_bidders, num_goods, bidder_sets):
-    """Exact outcomes for the population, simulated outcomes on the sweep's draws."""
-    type_distribution = population_distribution(population_externalities, population_valuations)
-    return evaluate_threshold(
-        type_distribution,
-        polynomial_threshold(tau_coeffs),
-        num_bidders,
-        num_goods,
-        simulation_draws=bidder_sets_to_arrays(bidder_sets),
-    )
 
 
 def sweep_record_fields(evaluation):
@@ -92,3 +73,27 @@ def record_penalty_curves(record, externality_values):
         mechanism: penalty_from_table(table, threshold_values)
         for mechanism, table in record["evaluation"].penalty_tables.items()
     }
+
+
+def record_type_sample(record):
+    """(externalities, valuations) of the record's type sample (for scatter plots)."""
+    sample = record["type_sample"]
+    return np.asarray(sample["externalities"]), np.asarray(sample["valuations"])
+
+
+def record_exact_welfare(record, confidence_level=0.95):
+    """prefix -> {"welfare", "lower", "upper"}: exact expected welfare of each
+    mechanism on the evaluation distribution, with bootstrap percentile bounds
+    when the record has a bootstrap (empirical data), else None."""
+    evaluation = record["evaluation"]
+    bootstrap = record.get("bootstrap")
+    tail = (1 - confidence_level) / 2
+    result = {}
+    for mechanism, prefix in MECHANISM_KEY_PREFIX.items():
+        value = {"welfare": evaluation.exact[mechanism]["welfare"], "lower": None, "upper": None}
+        if bootstrap is not None and len(bootstrap.resamples):
+            column = bootstrap.resamples[f"welfare_{mechanism}"]
+            value["lower"], value["upper"] = (float(column.quantile(tail)),
+                                              float(column.quantile(1 - tail)))
+        result[prefix] = value
+    return result

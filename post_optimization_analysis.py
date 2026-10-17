@@ -2,18 +2,26 @@
 """
 post_optimization_analysis.py
 
-Generate publication-ready figures from a completed genetic2 sweep.
-Takes an output directory (or a path prefix) from run_sweep_genetic2.py.
+Generate publication-ready figures from a completed sweep of
+run_sweep_genetic2.py. Takes an output directory (or a path prefix).
+
+Welfare numbers are the exact expected welfare stored in each record's
+evaluation (on the evaluation distribution: the synthetic family, or the test
+half of an empirical population); intervals are bootstrap 95% intervals over
+test-row resamples (empirical data only). Per-auction distributions use the
+simulated draws stored in the records. Scatter plots use each record's
+type_sample. Sweeps written before the exact pipeline (records without
+"evaluation" and "type_sample") are not supported; rerun them.
 
 If the argument is an existing directory, only that directory is processed.
 Otherwise it is treated as a prefix and all directories whose path begins
 with that prefix are processed in alphabetical order.
 
 Produces (in <sweep_dir>/figures/) for each matched directory:
-  welfare_dist_k*_deg*_n*.png         - grouped-bar welfare distributions
+  welfare_dist_k*_deg*_n*.png         - grouped-bar per-auction welfare distributions (simulated)
   tau_degree_comparison_k*_n*.png     - tau lines per degree annotated with expected welfare
-  welfare_k*_deg*_n*.png              - expected welfare vs ext_cost with CIs and p-values
-  welfare_kn_deg*_zeta*.png           - expected welfare as k and n vary (simulated only)
+  welfare_k*_deg*_n*.png              - exact expected welfare vs ζ (bootstrap intervals if empirical)
+  welfare_kn_deg*_zeta*.png           - exact expected welfare as k and n vary
   tau_grid_k*_deg*_n*.png             - tested and optimal tau functions per ext_cost
   tau_grid_zoomed_k*_deg*_n*.png      - same, zoomed to 99th percentile
   penalty_grid_k*_deg*_n*.png         - threshold and penalty curves per ext_cost
@@ -42,9 +50,9 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from audited_auctions.sweep_support import (  # noqa: E402
     SWEEP_SERIES,
-    evaluate_sweep_cell,
+    record_exact_welfare,
     record_penalty_curves,
-    sweep_record_fields,
+    record_type_sample,
 )
 
 # ─── Paper-ready aesthetics ───────────────────────────────────────────────────
@@ -78,57 +86,6 @@ def _apply_font_scale(scale: float) -> None:
 
 _DPI = 300
 _ZETA_SCALE = 0.2126  # per-impression/rating -> per-action
-
-
-# ─── Consistent welfare recomputation ────────────────────────────────────────
-
-
-def _sample_sets(data, num_items, num_draws, rng):
-    """i.i.d. draws (with replacement) from the population, as in run_sweep_genetic2.py."""
-    v_arr = data["v"].values
-    e_arr = data["e"].values
-    sets = []
-    for _ in range(num_draws):
-        idx = rng.choice(len(data), size=num_items, replace=True)
-        sets.append(list(zip(v_arr[idx].tolist(), e_arr[idx].tolist())))
-    return sets
-
-
-def recompute_welfare_consistent(all_results, data_path, base_seed, num_test_auctions):
-    """Replace saved welfare numbers with ones from a consistent test set.
-
-    Uses a seed that excludes ext_idx, k, and degree so every zeta value for a
-    given (n) group evaluates on the same post draws.  Only the zeta scaling of e
-    differs, making the welfare-vs-zeta curve clean and comparable across cells.
-    """
-    data_raw = pd.read_csv(data_path)
-    num_items_list = sorted({n for k, d, n in all_results})
-
-    for (k, _, num_items), records in all_results.items():
-        n_idx = num_items_list.index(num_items)
-        # Seed: no ext_idx, no k, no degree — identical for all zeta at this n
-        consistent_seed = base_seed + 1_000_000 + n_idx * 10_000_000
-
-        for rec in records:
-            data = data_raw.copy()
-            data["v"] = data["v_score"] * rec.get("action_cost", 1.0)
-            data["e"] = data["e_score"] * rec["externality_cost"]
-
-            test_rng = np.random.default_rng(consistent_seed)
-            test_sets = _sample_sets(data, num_items, num_test_auctions, test_rng)
-
-            # Exact expectations and penalties for the population; simulated
-            # VCG, VCG-PA, IVCG-PA and first-best outcomes on the test draws.
-            evaluation = evaluate_sweep_cell(
-                data["e"].to_numpy(), data["v"].to_numpy(), rec["tau_coeffs"],
-                num_items, k, test_sets,
-            )
-            rec.update(sweep_record_fields(evaluation))
-
-    print(
-        f"Recomputed welfare for {sum(len(v) for v in all_results.values())} cells "
-        f"using consistent test seed (base={base_seed}, no ext_idx/k/degree component)."
-    )
 
 
 # ─── Data loading ─────────────────────────────────────────────────────────────
@@ -193,10 +150,13 @@ _PALETTE = [
 ]
 
 
-def _welfare_ci(arr):
-    """Return (mean, 95% CI half-width) for a welfare array."""
-    a = np.asarray(arr, dtype=float)
-    return float(a.mean()), 1.96 * float(a.std()) / np.sqrt(len(a))
+def _exact_welfare_interval(rec, prefix):
+    """(exact expected welfare, lower error, upper error) of one mechanism; the
+    errors come from the bootstrap 95% interval (empirical data), else 0."""
+    value = record_exact_welfare(rec)[prefix]
+    if value["lower"] is None:
+        return value["welfare"], 0.0, 0.0
+    return value["welfare"], value["welfare"] - value["lower"], value["upper"] - value["welfare"]
 
 
 _DEGREE_NAMES = {1: "Linear", 2: "Quadratic", 3: "Cubic", 4: "Quartic", 5: "Quintic"}
@@ -250,7 +210,7 @@ def plot_welfare_distributions_grouped(all_results, fig_dir):
         if not avail_cols:
             print(
                 f"  Skipping welfare distributions for k={k} deg={degree} n={num_items}: "
-                f"missing keys (rerun the sweep, or pass --data to recompute)"
+                f"missing keys (rerun the sweep)"
             )
             continue
 
@@ -342,8 +302,7 @@ def plot_tau_degree_comparison(
             for ext_idx in range(num_ext):
                 ax = axs[ext_idx // ncols][ext_idx % ncols]
                 ref_rec = all_results[(k, first_deg, num_items)][ext_idx]
-                all_e = np.array([a[1] for bs in ref_rec["bidder_sets"] for a in bs])
-                all_v = np.array([a[0] for bs in ref_rec["bidder_sets"] for a in bs])
+                all_e, all_v = record_type_sample(ref_rec)
                 e_lo, e_hi = _e_range(all_e, eff_pct)
                 v_hi = float(np.percentile(all_v, eff_pct))
 
@@ -353,9 +312,9 @@ def plot_tau_degree_comparison(
                 for d_idx, degree in enumerate(avail_degrees):
                     rec = all_results[(k, degree, num_items)][ext_idx]
                     y = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
-                    vcg_mean = float(np.mean(rec["vcg_welfare"]))
-                    delta_w = float(np.mean(rec["vcga_welfare"])) - vcg_mean
-                    delta_w_ironed = float(np.mean(rec["ivcga_welfare"])) - vcg_mean
+                    gains = rec["evaluation"].welfare_gains_over_vcg()
+                    delta_w = gains["vcg_pa"]["gain"]
+                    delta_w_ironed = gains["ivcg_pa"]["gain"]
                     ax.plot(
                         e_line,
                         y,
@@ -412,8 +371,9 @@ def plot_tau_by_k(all_results, fig_dir, degree=1, empirical=False, percentile=95
             for k in k_values:
                 rec = _find_rec(all_results, k, degree, num_items, ext_cost)
                 if rec:
-                    all_e_pool.extend(a[1] for bs in rec["bidder_sets"] for a in bs)
-                    all_v_pool.extend(a[0] for bs in rec["bidder_sets"] for a in bs)
+                    _sample_e, _sample_v = record_type_sample(rec)
+                    all_e_pool.extend(_sample_e)
+                    all_v_pool.extend(_sample_v)
             if not all_e_pool:
                 continue
             all_e_pool = np.array(all_e_pool)
@@ -433,8 +393,7 @@ def plot_tau_by_k(all_results, fig_dir, degree=1, empirical=False, percentile=95
                 if rec is None:
                     ax.set_visible(False)
                     continue
-                all_e = np.array([a[1] for bs in rec["bidder_sets"] for a in bs])
-                all_v = np.array([a[0] for bs in rec["bidder_sets"] for a in bs])
+                all_e, all_v = record_type_sample(rec)
 
                 _scatter_sample(all_e, all_v, ax, rng)
                 y = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
@@ -486,8 +445,9 @@ def plot_tau_by_n(all_results, fig_dir, degree=1, empirical=False, percentile=95
             for num_items in num_items_list:
                 rec = _find_rec(all_results, k, degree, num_items, ext_cost)
                 if rec:
-                    all_e_pool.extend(a[1] for bs in rec["bidder_sets"] for a in bs)
-                    all_v_pool.extend(a[0] for bs in rec["bidder_sets"] for a in bs)
+                    _sample_e, _sample_v = record_type_sample(rec)
+                    all_e_pool.extend(_sample_e)
+                    all_v_pool.extend(_sample_v)
             if not all_e_pool:
                 continue
             all_e_pool = np.array(all_e_pool)
@@ -510,8 +470,7 @@ def plot_tau_by_n(all_results, fig_dir, degree=1, empirical=False, percentile=95
                 if rec is None:
                     ax.set_visible(False)
                     continue
-                all_e = np.array([a[1] for bs in rec["bidder_sets"] for a in bs])
-                all_v = np.array([a[0] for bs in rec["bidder_sets"] for a in bs])
+                all_e, all_v = record_type_sample(rec)
 
                 _scatter_sample(all_e, all_v, ax, rng)
                 y = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
@@ -551,8 +510,7 @@ def plot_tau_grid(all_results, fig_dir, max_fns=200, zoomed=False, percentile=99
 
         for idx, rec in enumerate(records_sorted):
             ax = axs[idx // ncols][idx % ncols]
-            all_e = np.array([a[1] for bs in rec["bidder_sets"] for a in bs])
-            all_v = np.array([a[0] for bs in rec["bidder_sets"] for a in bs])
+            all_e, all_v = record_type_sample(rec)
 
             if zoomed:
                 e_lo, e_hi = _e_range(all_e, percentile)
@@ -640,8 +598,7 @@ def plot_tau_grid_by_degree(
                         ax.set_visible(False)
                         continue
 
-                    all_e = np.array([a[1] for bs in rec["bidder_sets"] for a in bs])
-                    all_v = np.array([a[0] for bs in rec["bidder_sets"] for a in bs])
+                    all_e, all_v = record_type_sample(rec)
 
                     if zoomed:
                         e_lo, e_hi = _e_range(all_e, percentile)
@@ -715,8 +672,7 @@ def plot_penalty_grid(all_results, fig_dir, percentile=95, empirical=False):
 
         for idx, rec in enumerate(records_sorted):
             ax = axs[idx // ncols][idx % ncols]
-            all_e = np.array([a[1] for bs in rec["bidder_sets"] for a in bs])
-            all_v = np.array([a[0] for bs in rec["bidder_sets"] for a in bs])
+            all_e, all_v = record_type_sample(rec)
 
             e_lo, e_hi = _e_range(all_e, eff_pct)
             v_hi = float(np.percentile(all_v, eff_pct))
@@ -804,8 +760,7 @@ def plot_penalty_by_degree(all_results, fig_dir, percentile=95, empirical=False)
                 ref_rec = _find_rec(all_results, k, avail[0], num_items, ext_cost)
                 if ref_rec is None:
                     continue
-                ref_e = np.array([a[1] for bs in ref_rec["bidder_sets"] for a in bs])
-                ref_v = np.array([a[0] for bs in ref_rec["bidder_sets"] for a in bs])
+                ref_e, ref_v = record_type_sample(ref_rec)
                 e_lo, e_hi = _e_range(ref_e, eff_pct)
                 ref_v_hi = float(np.percentile(ref_v, eff_pct))
                 e_line_ref = np.linspace(e_lo, e_hi, 300)
@@ -829,8 +784,7 @@ def plot_penalty_by_degree(all_results, fig_dir, percentile=95, empirical=False)
                         ax.set_visible(False)
                         continue
 
-                    all_e = np.array([a[1] for bs in rec["bidder_sets"] for a in bs])
-                    all_v = np.array([a[0] for bs in rec["bidder_sets"] for a in bs])
+                    all_e, all_v = record_type_sample(rec)
 
                     _scatter_sample(all_e, all_v, ax, rng)
                     e_line = np.linspace(e_lo, e_hi, 300)
@@ -895,29 +849,31 @@ def plot_penalty_by_degree(all_results, fig_dir, percentile=95, empirical=False)
 
 
 def plot_welfare_comparison(all_results, fig_dir, empirical=False, show_ci=True):
-    """Expected welfare vs ext_cost for VCG, VCG-PA, IVCG-PA, first best, with optional 95% CIs."""
+    """Exact expected welfare vs ζ for VCG, VCG-PA, IVCG-PA and the first best, with
+    bootstrap 95% intervals for empirical data; prints the gains over VCG."""
     for (k, degree, num_items), records in all_results.items():
         records_sorted = sorted(records, key=lambda r: r["externality_cost"])
         ext_costs = [r["externality_cost"] for r in records_sorted]
 
-        # means[prefix], half_widths[prefix]: arrays over ext_costs
-        means, half_widths = {}, {}
+        # means[prefix]: exact expected welfare; errors[prefix]: (2, len) bootstrap
+        # 95% interval half-lengths below/above (zero for synthetic families).
+        means, errors = {}, {}
         for prefix, *_ in SWEEP_SERIES:
-            stats = [_welfare_ci(r[f"{prefix}_welfare"]) for r in records_sorted]
-            means[prefix] = np.array([t[0] for t in stats])
-            half_widths[prefix] = np.array([t[1] for t in stats])
+            stats = np.array([_exact_welfare_interval(r, prefix) for r in records_sorted])
+            means[prefix] = stats[:, 0]
+            errors[prefix] = stats[:, 1:].T
 
         fig, ax = plt.subplots(figsize=(8, 5))
         for prefix, label, color, marker in SWEEP_SERIES:
-            if show_ci:
-                ax.errorbar(ext_costs, means[prefix], yerr=half_widths[prefix], marker=marker,
+            if show_ci and errors[prefix].any():
+                ax.errorbar(ext_costs, means[prefix], yerr=errors[prefix], marker=marker,
                             label=label, color=color, capsize=3, capthick=1.0, elinewidth=0.9)
             else:
                 ax.plot(ext_costs, means[prefix], marker=marker, color=color, label=label)
 
-        spread = half_widths if show_ci else {p: 0 * means[p] for p in means}
-        all_lo = np.concatenate([means[p] - spread[p] for p in means])
-        all_hi = np.concatenate([means[p] + spread[p] for p in means])
+        spread = errors if show_ci else {p: 0 * errors[p] for p in errors}
+        all_lo = np.concatenate([means[p] - spread[p][0] for p in means])
+        all_hi = np.concatenate([means[p] + spread[p][1] for p in means])
 
         # Tight y-axis
         y_lo, y_hi = float(all_lo.min()), float(all_hi.max())
@@ -951,7 +907,7 @@ def plot_welfare_comparison(all_results, fig_dir, empirical=False, show_ci=True)
             print(row)
 
 
-# ─── Welfare vs k and n (simulated only) ──────────────────────────────────────
+# ─── Welfare vs k and n ───────────────────────────────────────────────────────
 
 
 def plot_welfare_kn_comparison(all_results, fig_dir):
@@ -977,14 +933,14 @@ def plot_welfare_kn_comparison(all_results, fig_dir):
             for ki, k in enumerate(k_values):
                 ax = axs[ki][0]
                 ns_avail = []
-                stats = {prefix: [] for prefix, *_ in SWEEP_SERIES}  # (mean, ci) per n
+                stats = {prefix: [] for prefix, *_ in SWEEP_SERIES}  # (welfare, errors) per n
 
                 for num_items in num_items_list:
                     rec = _find_rec(all_results, k, degree, num_items, ext_cost)
                     if rec is None:
                         continue
                     for prefix in stats:
-                        stats[prefix].append(_welfare_ci(rec[f"{prefix}_welfare"]))
+                        stats[prefix].append(_exact_welfare_interval(rec, prefix))
                     ns_avail.append(num_items)
 
                 if not ns_avail:
@@ -995,7 +951,7 @@ def plot_welfare_kn_comparison(all_results, fig_dir):
                     ax.errorbar(
                         ns_avail,
                         [t[0] for t in stats[prefix]],
-                        yerr=[t[1] for t in stats[prefix]],
+                        yerr=np.array([t[1:] for t in stats[prefix]]).T,
                         marker=marker, label=label, color=color,
                         capsize=3, capthick=1.0, elinewidth=0.9,
                     )
@@ -1047,26 +1003,6 @@ def parse_args():
         "--figures-subdir",
         default="figures",
         help="Subdirectory inside each sweep dir for output figures (default: figures)",
-    )
-    p.add_argument(
-        "--data",
-        default=None,
-        metavar="CSV",
-        help="Original data CSV (must have v_score and e_score columns). "
-        "When provided, welfare is recomputed from a consistent test "
-        "set whose seed excludes ext_idx, k, and degree.",
-    )
-    p.add_argument(
-        "--base-seed",
-        type=int,
-        default=1234,
-        help="Base random seed used in the original sweep (default: 1234)",
-    )
-    p.add_argument(
-        "--num-test-auctions",
-        type=int,
-        default=2000,
-        help="Test draws for recomputed welfare (default: 2000)",
     )
     p.add_argument(
         "--empirical",
@@ -1122,7 +1058,7 @@ def parse_args():
     g.add_argument(
         "--welfare-kn",
         action="store_true",
-        help="Expected welfare vs k and n (simulated only)",
+        help="Expected welfare vs k and n",
     )
     return p.parse_args()
 
@@ -1130,9 +1066,6 @@ def parse_args():
 def run_one_dir(
     sweep_dir,
     figures_subdir,
-    data_path=None,
-    base_seed=1234,
-    num_test_auctions=2000,
     empirical=False,
     show_ci=True,
     font_scale=1.2,
@@ -1144,12 +1077,6 @@ def run_one_dir(
     os.makedirs(fig_dir, exist_ok=True)
 
     all_results = load_sweep(sweep_dir)
-
-    if data_path is not None:
-        print(f"Recomputing welfare with consistent test set from: {data_path}")
-        recompute_welfare_consistent(
-            all_results, data_path, base_seed, num_test_auctions
-        )
 
     k_values, degrees, num_items_list = get_dimensions(all_results)
     print(f"k values       : {k_values}")
@@ -1207,8 +1134,8 @@ def run_one_dir(
             all_results, fig_dir, empirical=empirical, show_ci=show_ci
         )
 
-    if _run("welfare_kn") and not empirical:
-        print("\n--- Expected welfare vs k and n (simulated) ---")
+    if _run("welfare_kn"):
+        print("\n--- Expected welfare vs k and n ---")
         plot_welfare_kn_comparison(all_results, fig_dir)
 
     print(f"\nAll figures saved to: {fig_dir}")
@@ -1242,9 +1169,6 @@ def main():
         run_one_dir(
             sweep_dir,
             args.figures_subdir,
-            data_path=args.data,
-            base_seed=args.base_seed,
-            num_test_auctions=args.num_test_auctions,
             empirical=args.empirical,
             show_ci=not args.no_ci,
             font_scale=args.font_scale,

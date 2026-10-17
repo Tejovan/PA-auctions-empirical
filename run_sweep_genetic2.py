@@ -2,87 +2,39 @@
 """
 run_sweep_genetic2.py
 
-Multi-dimensional sweep runner for the collateralized auction genetic2 optimizer.
-Sweeps over externality cost values, polynomial degrees, k (slots) values, and
-num_items (bidders per auction draw).  Only the genetic2 algorithm is used.
+Sweep runner for the τ optimization. Sweeps over the externality scale ζ,
+polynomial degrees, k (goods) and n (bidders). Each (k, degree, n, ζ) cell runs
+audited_auctions.pipeline:
 
-Each (k, degree, num_items, externality_cost) combination:
-  1. Runs the genetic algorithm (optionally with multiple restarts) to find the
-     optimal tau polynomial.
-  2. Simulates auctions with that tau, recording per-auction:
-       - VCG welfare  (counterfactual, no threshold)
-       - VCGA welfare (participant audit, top-k admitted bidders)
-       - Participant audit payment  (k+1th highest v above tau; 0 if <k+1 admitted)
-       - Recipient audit welfare    (sum of top-k positive v+e over all bidders)
-  3. Computes and plots the expected participant penalty R(e).
+  1. Distributions. --data is a synthetic family name (H known; τ optimized and
+     evaluated on the same piecewise-uniform distribution) or a CSV with
+     columns e_score, v_score (empirical: scaled, truncated at a valuation
+     quantile v̄, split into training and test halves with a seed common to
+     all cells, each half kernel-smoothed or kept atomic).
+  2. Genetic search (with restarts and optional warm start across degrees) for
+     the polynomial τ maximizing the exact expected welfare of VCG-PA (or
+     IVCG-PA, --objective) on the training distribution.
+  3. Exact evaluation on the evaluation distribution of VCG, VCG-PA, IVCG-PA and
+     the first best: welfare, gains over VCG and share of the first-best gain,
+     revenue, penalty paid, participation, and the exact penalties r(e)
+     inducing τ.
+  4. One simulation (--test-auctions draws, common random numbers across
+     mechanisms, k and degree) for per-auction welfare distributions.
+  5. Empirical data: bootstrap of exact welfare over the test rows
+     (--bootstrap-samples resamples, re-smoothed); synthetic families:
+     optional grid-refinement check (--grid-refinement).
 
-Output goes to a timestamped subdirectory so each run is isolated.
+Output goes to a timestamped subdirectory with a README describing the files.
 
 Usage:
-    python run_sweep_genetic2.py \\
-        --data data/samples/g_full_tweets.csv \\
-        --degrees 1,2,3 --k-values 1,2 --num-items 10,20,50 \\
-        --ext-min 1.0 --ext-max 100.0 --num-ext 8 --log-scale \\
-        --num-generations 500 --sol-per-pop 50 --num-restarts 3 \\
-        --tag my_run --warm-start
+    python run_sweep_genetic2.py --data harm_rises --degrees 1,2 --k-values 1,2 \
+        --num-items 8 --ext-min 0.5 --ext-max 2 --num-ext 4 --tag harm
+    python run_sweep_genetic2.py --data data/samples/g_full_tweets.csv \
+        --degrees 1,2,3 --k-values 1,2 --num-items 8,16 \
+        --ext-min 1 --ext-max 100 --num-ext 8 --log-scale --num-restarts 3 \
+        --warm-start --tag tweets
 
-Arguments:
-  Data
-  ----
-  --data PATH                     Input CSV; must have v_score and e_score columns.
-
-  Sweep dimensions
-  ----------------
-  --degrees  "1,2,3"              Comma-separated polynomial degrees to sweep (default: 1).
-  --k-values "1,2"                Comma-separated k (allocation slots) values (default: 1).
-  --num-items "10,20,50"          Comma-separated bidder counts per auction draw (default: 20).
-                                  Only (k, n) pairs where k < n are run.
-  --ext-min FLOAT                 Minimum externality cost (default: 0.01).
-  --ext-max FLOAT                 Maximum externality cost (default: 100.0).
-  --num-ext INT                   Number of externality cost values to sweep (default: 8).
-  --log-scale                     Use log spacing for externality values (default: linear).
-
-  Genetic algorithm
-  -----------------
-  --num-generations INT           GA generations per restart (default: 500).
-  --sol-per-pop INT               Population size (default: 50).
-  --num-parents-mating INT        Parents selected per generation (default: 15).
-  --mutation-probability FLOAT    Per-gene mutation probability (default: 0.25).
-  --range-multiplier FLOAT        Gene range = ±mult × std_v / mean(|e|^k) (default: 3.0).
-  --num-restarts INT              Independent GA restarts per cell; the best result across
-                                  all restarts is kept.  Restart 0 uses the warm-start
-                                  initial solution (if --warm-start is set); restarts 1+
-                                  use a fresh random population for diversity.  Runtime
-                                  scales linearly with this value (default: 1).
-
-  Simulation
-  ----------
-  --num-auctions INT              Training auction draws per cell, used by the GA for
-                                  fitness evaluation (default: 500).
-  --test-auctions INT             Fixed evaluation draws per cell, used only for final
-                                  welfare reporting (default: 2000).  The test seed
-                                  excludes k and degree so welfare numbers are directly
-                                  comparable across those dimensions for the same (n, ζ).
-  --action-cost FLOAT             Multiplier on v_score to obtain v (default: 1.0).
-  --seed INT                      Base random seed.  Training draws exclude k so that
-                                  all k values see the same posts for a given (n, ζ).
-                                  Test draws use seed+1_000_000 as base so they are
-                                  independent of training draws (default: 1234).
-
-  Warm start
-  ----------
-  --warm-start                    Seed the first restart for degree d with the best
-                                  coefficients found for degree d-1 (padded with 0 for
-                                  the new term).  Subsequent restarts within the same cell
-                                  use fresh random populations for diversity.  Degrees are
-                                  always processed in ascending order when this flag is set.
-
-  Output
-  ------
-  --tag STR                       Label for this run; included in the output directory
-                                  name (default: sweep).
-  --output-base DIR               Parent directory for all output (default: output).
-  --no-plot                       Skip figure generation after the sweep completes.
+Arguments: see --help. ζ multiplies the externalities of every source.
 """
 
 import argparse
@@ -102,149 +54,58 @@ import pandas as pd
 
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _here)
-from Collateralized_Auction_genetic2 import run_genetic_search  # noqa: E402
+from audited_auctions.empirical import SMOOTHING_CHOICES  # noqa: E402
 from audited_auctions.figures import (  # noqa: E402
     plot_threshold_and_penalties,
     plot_welfare_distributions as plot_welfare_distribution_densities,
 )
+from audited_auctions.pipeline import (  # noqa: E402
+    is_synthetic_source,
+    optimize_and_evaluate,
+    prepare_distributions,
+)
 from audited_auctions.sweep_support import (  # noqa: E402
     SWEEP_SERIES,
-    evaluate_sweep_cell,
+    record_exact_welfare,
     record_penalty_curves,
+    record_type_sample,
     sweep_record_fields,
 )
-from audited_auctions.type_distributions import population_distribution  # noqa: E402
-
-
-# ─── Sampling ─────────────────────────────────────────────────────────────────
-
-
-def sample_bidder_sets(data, num_items, num_auctions, rng):
-    """Draw num_auctions auctions of num_items bidders i.i.d. from the population.
-
-    Bidders are drawn with replacement, so types are independent across
-    bidders, as in the model and in the exact computations of audited_auctions.
-    """
-    n = len(data)
-    v_arr = data["v"].values
-    e_arr = data["e"].values
-    sets = []
-    for _ in range(num_auctions):
-        idx = rng.choice(n, size=num_items, replace=True)
-        sets.append(list(zip(v_arr[idx].tolist(), e_arr[idx].tolist())))
-    return sets
 
 
 # ─── One sweep cell ───────────────────────────────────────────────────────────
 
 
-def run_one(
-    data_raw,
-    k,
-    degree,
-    ext_cost,
-    action_cost,
-    num_items,
-    num_auctions,
-    num_generations,
-    sol_per_pop,
-    num_parents_mating,
-    mutation_probability,
-    range_multiplier,
-    sample_seed,
-    seed,
-    num_restarts=1,
-    initial_solution=None,
-    test_seed=None,
-    num_test_auctions=2000,
-):
-    data = data_raw.copy()
-    data["v"] = data["v_score"] * action_cost
-    data["e"] = data["e_score"] * ext_cost
-
-    # Training draws: used by the GA for fitness evaluation
-    sample_rng = np.random.default_rng(sample_seed)
-    bidder_sets = sample_bidder_sets(data, num_items, num_auctions, sample_rng)
-
-    # Evaluation draws: fixed across k and degree; used only for welfare reporting
-    test_rng = np.random.default_rng(test_seed)
-    test_bidder_sets = sample_bidder_sets(data, num_items, num_test_auctions, test_rng)
-
+def run_one(prepared, k, degree, ext_cost, action_cost, num_items, ga_options, ga_seed,
+            num_restarts, initial_solution, simulation_seed, num_test_auctions,
+            objective_mechanism, num_bootstrap, bootstrap_seed, grid_refinement):
+    """Optimize τ for one cell and evaluate it; returns the sweep record."""
     print(f"\n{'=' * 60}")
-    print(
-        f"  k={k}  degree={degree}  ext_cost={ext_cost:.6g}  "
-        f"sample_seed={sample_seed}  base_ga_seed={seed}  "
-        f"test_seed={test_seed}  restarts={num_restarts}"
-    )
+    print(f"  k={k}  degree={degree}  ζ={ext_cost:.6g}  n={num_items}  ga_seed={ga_seed}  "
+          f"simulation_seed={simulation_seed}  restarts={num_restarts}")
     if initial_solution is not None:
-        print(f"  warm-start (restart 0): {[f'{c:.4g}' for c in initial_solution]}")
+        print(f"  warm start (restart 0): {[f'{c:.4g}' for c in initial_solution]}")
     print(f"{'=' * 60}")
-
-    best_coeffs = None
-    best_welfare = -np.inf
-    all_trajectories = []
-
-    for restart in range(num_restarts):
-        restart_seed = seed + restart
-        # Warm start only on restart 0 — later restarts explore fresh random regions.
-        restart_init = initial_solution if restart == 0 else None
-
-        if num_restarts > 1:
-            print(
-                f"\n  -- Restart {restart + 1}/{num_restarts}  ga_seed={restart_seed} --"
-            )
-
-        coeffs, welfare, trajectory = run_genetic_search(
-            advertisers=bidder_sets,
-            polynomial_degree=degree,
-            k=k,
-            num_generations=num_generations,
-            sol_per_pop=sol_per_pop,
-            num_parents_mating=num_parents_mating,
-            mutation_probability=mutation_probability,
-            range_multiplier=range_multiplier,
-            seed=restart_seed,
-            initial_solution=restart_init,
-        )
-        all_trajectories.extend(trajectory)
-
-        if welfare > best_welfare:
-            best_welfare = welfare
-            best_coeffs = coeffs
-            if num_restarts > 1:
-                print(
-                    f"  * New best  welfare={welfare:.6f}  "
-                    f"b={[f'{c:.4g}' for c in coeffs]}"
-                )
-        elif num_restarts > 1:
-            print(f"  . welfare={welfare:.6f}  (best so far: {best_welfare:.6f})")
-
-    # Evaluate the optimal tau on the held-out test set, not the training draws:
-    # exact expectations for the population, and simulated per-draw outcomes of
-    # VCG, VCG-PA, IVCG-PA and the first best on the test draws.
-    evaluation = evaluate_sweep_cell(
-        data["e"].to_numpy(), data["v"].to_numpy(), best_coeffs, num_items, k, test_bidder_sets
-    )
-
+    record = optimize_and_evaluate(
+        prepared, degree, num_items, k, objective_mechanism=objective_mechanism,
+        ga_options=ga_options, ga_seed=ga_seed, num_restarts=num_restarts,
+        initial_solution=initial_solution, num_simulated_draws=num_test_auctions,
+        simulation_seed=simulation_seed, num_bootstrap=num_bootstrap,
+        bootstrap_seed=bootstrap_seed, grid_refinement=grid_refinement)
+    print(record["evaluation"].summary_table()[
+        ["exact_welfare", "exact_welfare_gain_over_vcg", "share_of_first_best_gain"]
+    ].to_string(float_format=lambda x: f"{x:.5g}"))
     return {
+        **record,
+        # Keys used by the plotting code (names kept from earlier sweeps).
         "k": k,
-        "polynomial_degree": degree,
+        "num_items": num_items,
         "externality_cost": ext_cost,
         "action_cost": action_cost,
-        "tau_coeffs": best_coeffs,
-        "ga_welfare": best_welfare,
-        "trajectory": all_trajectories,
-        "bidder_sets": bidder_sets,  # training draws (for tau trajectory plots)
-        "test_bidder_sets": test_bidder_sets,  # evaluation draws (for all welfare metrics)
-        # vcg_*, vcga_*, ivcga_*, ra_* per-draw lists and the full evaluation
-        **sweep_record_fields(evaluation),
-        "num_items": num_items,
-        "num_auctions": num_auctions,
+        "ga_welfare": record["training_welfare"],
         "num_test_auctions": num_test_auctions,
-        "num_restarts": num_restarts,
-        "sample_seed": sample_seed,
-        "test_seed": test_seed,
-        "seed": seed,
+        # vcg_*, vcga_*, ivcga_*, ra_* per-draw lists from the simulation
+        **sweep_record_fields(record["evaluation"]),
     }
 
 
@@ -288,8 +149,7 @@ def plot_tau_grid(records, out_dir, tag, max_fns=200, zoomed=False, percentile=9
 
     for idx, rec in enumerate(records):
         ax = axs[idx // ncols][idx % ncols]
-        all_e = np.array([a[1] for bs in rec["bidder_sets"] for a in bs])
-        all_v = np.array([a[0] for bs in rec["bidder_sets"] for a in bs])
+        all_e, all_v = record_type_sample(rec)
 
         if zoomed:
             e_lo, e_hi = _e_range(all_e, percentile)
@@ -350,8 +210,7 @@ def plot_penalty_grid(records, out_dir, tag, percentile=99):
 
     for idx, rec in enumerate(records):
         ax = axs[idx // ncols][idx % ncols]
-        all_e = np.array([a[1] for bs in rec["bidder_sets"] for a in bs])
-        all_v = np.array([a[0] for bs in rec["bidder_sets"] for a in bs])
+        all_e, all_v = record_type_sample(rec)
 
         e_lo, e_hi = _e_range(all_e, percentile)
         v_hi = float(np.percentile(all_v, percentile))
@@ -413,19 +272,24 @@ def plot_penalty_grid(records, out_dir, tag, percentile=99):
 
 
 def plot_welfare_comparison(records, out_dir, tag):
-    """Mean welfare of VCG, VCG-PA, IVCG-PA and the first best vs externality cost (zeta)."""
+    """Exact expected welfare of VCG, VCG-PA, IVCG-PA and the first best vs ζ,
+    with bootstrap 95% intervals when the records have them (empirical data)."""
     ext_costs = [r["externality_cost"] for r in records]
 
     fig, ax = plt.subplots(figsize=(8, 5))
     for prefix, label, color, marker in SWEEP_SERIES:
-        means = [float(np.mean(r[f"{prefix}_welfare"])) for r in records]
+        values = [record_exact_welfare(r)[prefix] for r in records]
+        means = [value["welfare"] for value in values]
         ax.plot(ext_costs, means, marker=marker, linewidth=1.8, label=label, color=color)
+        if all(value["lower"] is not None for value in values):
+            ax.fill_between(ext_costs, [v["lower"] for v in values], [v["upper"] for v in values],
+                            color=color, alpha=0.15, linewidth=0)
 
     ax.axhline(0, color="black", linewidth=0.7, linestyle="--", alpha=0.5)
-    ax.set_xlabel("Externality Cost per Impression (ζ)", fontsize=11)
-    ax.set_ylabel("Mean Welfare", fontsize=11)
+    ax.set_xlabel("Externality scale ζ", fontsize=11)
+    ax.set_ylabel("Expected welfare (exact)", fontsize=11)
     ax.set_title(
-        f"Average Auction Welfare vs Externality Cost\n"
+        f"Expected Welfare vs Externality Scale\n"
         f"k={records[0]['k']}, degree={records[0]['polynomial_degree']}, n={records[0]['num_items']}",
         fontsize=12,
     )
@@ -444,14 +308,10 @@ def plot_welfare_comparison(records, out_dir, tag):
     print(f"Saved: {path}")
 
 
-def plot_cell_evaluation_figures(records, data_raw, out_dir, tag):
+def plot_cell_evaluation_figures(records, prepared_by_ext, out_dir, tag):
     """For each record: the threshold/penalty figure and the welfare-density figure."""
     for ext_idx, rec in enumerate(records):
-        type_distribution = population_distribution(
-            data_raw["e_score"].to_numpy() * rec["externality_cost"],
-            data_raw["v_score"].to_numpy() * rec["action_cost"],
-            name=f"ζ = {rec['externality_cost']:.4g}, degree {rec['polynomial_degree']}",
-        )
+        type_distribution = prepared_by_ext[ext_idx].evaluation
         evaluation = rec["evaluation"]
         path = os.path.join(out_dir, f"threshold_penalties_{tag}_ext{ext_idx}.png")
         plot_threshold_and_penalties(evaluation, type_distribution, path)
@@ -498,8 +358,7 @@ def plot_tau_degree_comparison(
             for ext_idx in range(num_ext):
                 ax = axs[ext_idx // ncols][ext_idx % ncols]
                 ref_rec = all_results[(k, first_deg, num_items)][ext_idx]
-                all_e = np.array([a[1] for bs in ref_rec["bidder_sets"] for a in bs])
-                all_v = np.array([a[0] for bs in ref_rec["bidder_sets"] for a in bs])
+                all_e, all_v = record_type_sample(ref_rec)
                 e_lo, e_hi = _e_range(all_e, percentile)
                 v_hi = float(np.percentile(all_v, percentile))
 
@@ -590,37 +449,41 @@ def plot_welfare_distributions(all_results, fig_dir):
 def write_readme(out_dir, args, ext_values, timestamp):
     dir_name = os.path.basename(out_dir)
     ext_list = [f"{v:.4g}" for v in ext_values]
+    empirical = not is_synthetic_source(args.data)
+    data_rows = (
+        f"""| Source | empirical CSV `{args.data}` |
+| Valuation scale (action cost) | {args.action_cost} |
+| Truncation quantile (v̄) | {args.truncation_quantile} |
+| Train fraction / split seed | {args.train_fraction} / {args.split_seed} |
+| Smoothing | {args.smoothing} (bandwidth scale {args.bandwidth_scale}) |
+| Bootstrap resamples | {args.bootstrap_samples} |"""
+        if empirical else
+        f"""| Source | synthetic family `{args.data}` (piecewise-uniform grid) |
+| Grid-refinement check | {args.grid_refinement} |"""
+    )
     content = f"""\
-# Genetic2 Sweep Results
+# τ Optimization Sweep
 
 **Generated:** {timestamp}
 **Tag:** `{args.tag}`
-**Data:** `{args.data}`
 
 ---
 
-## Sweep Parameters
+## Parameters
 
 | Parameter | Value |
 |-----------|-------|
+{data_rows}
+| Objective (exact expected welfare of) | `{args.objective}` |
 | k values | `{args.k_values}` |
 | Polynomial degrees | `{args.degrees}` |
-| Externality range | [{args.ext_min}, {args.ext_max}] ({args.num_ext} points, {"log" if args.log_scale else "linear"} spacing) |
-| Externality values | `{ext_list}` |
-| Num bidders per auction | {args.num_items} (list: {[int(n.strip()) for n in args.num_items.split(",")]}) |
-| Num simulated auctions | {args.num_auctions} |
-| Action cost multiplier | {args.action_cost} |
+| Bidders n | `{args.num_items}` |
+| Externality scale ζ | [{args.ext_min}, {args.ext_max}] ({args.num_ext} values, {"log" if args.log_scale else "linear"} spacing): `{ext_list}` |
+| Simulated auctions per cell | {args.test_auctions} |
 | Base random seed | {args.seed} |
-
-## GA Parameters
-
-| Parameter | Value |
-|-----------|-------|
-| Generations | {args.num_generations} |
-| Population size | {args.sol_per_pop} |
-| Parents mating | {args.num_parents_mating} |
-| Mutation probability | {args.mutation_probability} |
-| Range multiplier | {args.range_multiplier} |
+| GA generations / population / parents | {args.num_generations} / {args.sol_per_pop} / {args.num_parents_mating} |
+| GA mutation probability / range multiplier | {args.mutation_probability} / {args.range_multiplier} |
+| GA restarts / warm start | {args.num_restarts} / {args.warm_start} |
 
 ---
 
@@ -629,15 +492,15 @@ def write_readme(out_dir, args, ext_values, timestamp):
 ```
 {dir_name}/
 ├── results/
-│   └── run_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.pkl        # one file per (k, degree, num_items, ext_index)
+│   └── run_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.pkl        # one record per (k, degree, n, ζ index)
 ├── figures/
-│   ├── tau_grid_k{{k}}_deg{{d}}_n{{n}}.png             # tested tau functions, full axes
-│   ├── tau_grid_zoomed_k{{k}}_deg{{d}}_n{{n}}.png      # same, 1st-99th percentile zoom
-│   ├── penalty_grid_k{{k}}_deg{{d}}_n{{n}}.png         # tau, exact r(e) for VCG-PA and IVCG-PA, -e
-│   ├── welfare_k{{k}}_deg{{d}}_n{{n}}.png              # mean welfare by mechanism vs ζ
-│   ├── threshold_penalties_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.png  # types + tau, penalties, exact welfare
-│   └── welfare_densities_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.png    # welfare densities, paired differences
-├── sweep_data.pkl                                # all results consolidated
+│   ├── tau_grid_k{{k}}_deg{{d}}_n{{n}}.png             # GA candidates and optimal τ over a type sample
+│   ├── tau_grid_zoomed_k{{k}}_deg{{d}}_n{{n}}.png      # same, central 98% of types
+│   ├── penalty_grid_k{{k}}_deg{{d}}_n{{n}}.png         # τ, exact r(e) for VCG-PA and IVCG-PA, −e
+│   ├── welfare_k{{k}}_deg{{d}}_n{{n}}.png              # exact expected welfare by mechanism vs ζ
+│   ├── threshold_penalties_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.png  # types + τ, penalties, exact welfare
+│   └── welfare_densities_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.png    # per-auction welfare, paired gains over VCG
+├── sweep_data.pkl                                # all records, keyed by (k, degree, n)
 └── README.md                                     # this file
 ```
 
@@ -645,7 +508,8 @@ def write_readme(out_dir, args, ext_values, timestamp):
 
 ## Mechanisms
 
-All mechanisms allocate only to positive scores and break ties uniformly at random.
+All mechanisms allocate only to positive scores, break ties uniformly at random,
+and charge critical-value payments.
 
 | Prefix | Mechanism | Participants | Ranking score |
 |--------|-----------|--------------|---------------|
@@ -654,82 +518,55 @@ All mechanisms allocate only to positive scores and break ties uniformly at rand
 | `ivcga` | IVCG-PA (ironed VCG, participant audit) | types with v ≥ τ(e) | ironed welfare contribution ω̄^τ(v) |
 | `ra` | first best (recipient audit, penalty −e) | all bidders | welfare contribution w = v + e |
 
-The ironed welfare contribution ω̄^τ irons ŵ^τ(v) = v + E[e | v, v ≥ τ(e)] over the
-participating valuations (see `audited_auctions/README.md`).
-
 ---
 
 ## Per-Run Result Files
 
-Each `results/run_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.pkl` deserializes to a single Python `dict`:
+Each `results/run_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.pkl` holds one `dict`:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `k` | `int` | Number of auction slots |
-| `polynomial_degree` | `int` | Degree of τ polynomial |
-| `externality_cost` | `float` | ζ — the externality cost multiplier for this run |
-| `action_cost` | `float` | Action cost multiplier |
-| `tau_coeffs` | `list[float]` | Optimal τ polynomial coefficients [β₀, β₁, β₂, …] |
-| `ga_welfare` | `float` | Best average VCG-PA welfare found by the GA (training draws) |
-| `trajectory` | `list[list[float]]` | Every candidate coefficient vector evaluated during the GA |
-| `bidder_sets` | `list[list[tuple]]` | Training auction draws used by the GA; each draw is a list of `(v, e)` tuples |
-| `test_bidder_sets` | `list[list[tuple]]` | Held-out evaluation draws; seed excludes k and degree |
-| `{{prefix}}_welfare` | `list[float]` | Per-draw welfare Σ x(v + e) on the test draws |
-| `{{prefix}}_adv_welfare` | `list[float]` | Per-draw valuation part Σ x v |
-| `{{prefix}}_ext_welfare` | `list[float]` | Per-draw externality part Σ x e |
-| `{{prefix}}_revenue` | `list[float]` | Per-draw critical-value payments |
-| `{{prefix}}_penalty_paid` | `list[float]` | Per-draw penalties: Σ r(e) over participants (PA); Σ x(−e) over winners (RA) |
-| `{{prefix}}_num_participants` | `list[float]` | Per-draw number of participants |
-| `{{prefix}}_num_allocated` | `list[float]` | Per-draw number of goods allocated |
-| `evaluation` | `ThresholdEvaluation` | Exact expectations, exact penalty functions, ŵ^τ and ω̄^τ, simulated draws |
-| `num_items` | `int` | Bidders per auction draw |
-| `num_auctions` | `int` | Number of training draws |
-| `num_test_auctions` | `int` | Number of evaluation draws |
-| `seed` | `int` | Base GA random seed for this run |
-| `test_seed` | `int` | Seed used for evaluation draws |
+| Field | Description |
+|-------|-------------|
+| `k`, `num_items`, `polynomial_degree`, `externality_cost`, `action_cost` | cell coordinates (k goods, n bidders, degree, ζ, valuation scale) |
+| `objective_mechanism` | mechanism whose exact welfare the GA maximized |
+| `tau_coeffs` | optimal τ coefficients [β₀, β₁, …] (τ(e) = Σ β_m e^m) |
+| `training_welfare` (= `ga_welfare`) | exact objective at the optimum on the training distribution |
+| `trajectory` | every coefficient vector in every GA generation |
+| `evaluation` | `ThresholdEvaluation` on the evaluation distribution: exact outcomes (`exact`), `summary_table()`, `welfare_gains_over_vcg()`, exact penalty functions (`penalty_tables`, `penalty_curves`), ŵ^τ and ω̄^τ, simulated draws |
+| `bootstrap` | empirical data: `BootstrapResult` (`resamples` DataFrame and `summary()` with percentile intervals) of exact welfare, paired gains over VCG and shares of the first-best gain over test-row resamples; `None` for synthetic families |
+| `grid_refinement` | synthetic families with `--grid-refinement`: DataFrame of exact welfare and gains on the base and twice finer grid; else `None` |
+| `type_sample` | 4000 types drawn from the evaluation distribution (for scatter plots) |
+| `distribution_settings` | how the distributions were built (family/CSV, ζ, truncation, split, smoothing, grid) |
+| `{{prefix}}_welfare`, `_adv_welfare`, `_ext_welfare`, `_revenue`, `_penalty_paid`, `_num_participants`, `_num_allocated` | per-draw simulated outcomes (lists) on `num_test_auctions` auctions |
+| `ga_seed`, `simulation_seed`, `bootstrap_seed`, `num_restarts` | seeds and restarts |
 
-Allocations x are probabilities (the tie-breaking lottery is averaged out). Bidders are
-drawn i.i.d. (with replacement) from the population.
+Welfare comparisons are gains over unaudited VCG. Allocations in simulated draws are
+probabilities (the tie-breaking lottery is averaged out). Bidders are i.i.d. draws
+from the evaluation distribution.
 
 ---
 
 ## Consolidated Data File (`sweep_data.pkl`)
 
-Deserializes to a Python `dict` keyed by `(k, degree, num_items)` tuples.  Each value is a
-`list` of per-run result dicts sorted by `externality_cost`.  This is the same data
-as the individual pkl files, bundled for convenient cross-run analysis.
+A `dict` keyed by `(k, degree, num_items)`; each value is the list of records sorted by ζ.
 
 ```python
 import pickle
 with open('sweep_data.pkl', 'rb') as f:
     data = pickle.load(f)
-# data[(1, 2, 20)]  →  list of dicts for k=1, degree=2, num_items=20, sorted by externality_cost
-record = data[(1, 2, 20)][0]
-print(record["evaluation"].summary_table())   # exact expectations per mechanism
+record = data[(1, 2, 8)][0]
+print(record["evaluation"].summary_table())        # exact outcomes per mechanism
+if record["bootstrap"] is not None:
+    print(record["bootstrap"].summary())           # bootstrap intervals (empirical data)
 ```
 
 ---
 
 ## Figures
 
-### `tau_grid_k{{k}}_deg{{d}}_n{{n}}.png`
-One subplot per ζ: sample of (e, v) bidder points (blue), up to 200 τ candidates evaluated
-by the GA (gray), optimal τ (red).
-
-### `penalty_grid_k{{k}}_deg{{d}}_n{{n}}.png`
-One subplot per ζ: sample of (e, v) points, optimal τ (black), and the penalty functions
-that induce τ, computed exactly for the population:
-
-    r(e) = ∫_0^τ(e) X^τ(b) db,
-
-where X^τ(b) is the interim allocation of a participant bidding b when rivals use the
-threshold strategy (blue: VCG-PA; red dashed: IVCG-PA), and the recipient penalty −e (green).
-
-### `welfare_k{{k}}_deg{{d}}_n{{n}}.png`
-Mean welfare on the test draws vs ζ for the four mechanisms.
-
-### `threshold_penalties_..._ext{{i}}.png`, `welfare_densities_..._ext{{i}}.png`
-See `audited_auctions/README.md` (figures section).
+- `tau_grid_*`: sample of types (blue), up to 200 τ candidates evaluated by the GA (gray), optimal τ (red).
+- `penalty_grid_*`: optimal τ (black) and the exact penalty functions inducing it, r(e) = ∫_0^τ(e) X^τ(b) db (blue: VCG-PA; red dashed: IVCG-PA), and the recipient penalty −e (green).
+- `welfare_*`: exact expected welfare vs ζ for the four mechanisms (with bootstrap 95% intervals for empirical data).
+- `threshold_penalties_*`, `welfare_densities_*`: see `audited_auctions/README.md` (Figures).
 """
     path = os.path.join(out_dir, "README.md")
     with open(path, "w", encoding="utf-8") as f:
@@ -741,125 +578,60 @@ See `audited_auctions/README.md` (figures section).
 
 
 def parse_args():
-    p = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
 
     # Data
-    p.add_argument(
-        "--data",
-        required=True,
-        help="Input CSV (must have v_score and e_score columns)",
-    )
+    p.add_argument("--data", required=True,
+                   help="synthetic family name or CSV with columns e_score, v_score")
+    p.add_argument("--action-cost", type=float, default=1.0,
+                   help="CSV data: v = action_cost × v_score (default: 1)")
+    p.add_argument("--truncation-quantile", type=float, default=0.995,
+                   help="CSV data: valuations above this quantile are dropped; v̄ = the quantile")
+    p.add_argument("--train-fraction", type=float, default=0.5,
+                   help="CSV data: share of rows used to optimize τ (default: 0.5)")
+    p.add_argument("--split-seed", type=int, default=0,
+                   help="CSV data: seed of the train/test split, common to all cells")
+    p.add_argument("--smoothing", choices=SMOOTHING_CHOICES, default="kernel",
+                   help="CSV data: kernel smoothing (default) or atomic rows")
+    p.add_argument("--bandwidth-scale", type=float, default=1.0,
+                   help="CSV data: multiplier on Scott's bandwidth")
+    p.add_argument("--bootstrap-samples", type=int, default=200,
+                   help="CSV data: bootstrap resamples of the test rows (0 = none)")
+    p.add_argument("--grid-refinement", action="store_true",
+                   help="synthetic families: evaluate τ also on a twice finer grid")
 
     # Sweep dimensions
-    p.add_argument(
-        "--degrees",
-        default="1",
-        help='Comma-separated polynomial degrees, e.g. "1,2,3" (default: 1)',
-    )
-    p.add_argument(
-        "--k-values",
-        default="1",
-        help='Comma-separated k values, e.g. "1,2" (default: 1)',
-    )
-    p.add_argument(
-        "--ext-min",
-        type=float,
-        default=0.01,
-        help="Minimum externality cost (default: 0.01)",
-    )
-    p.add_argument(
-        "--ext-max",
-        type=float,
-        default=100.0,
-        help="Maximum externality cost (default: 100.0)",
-    )
-    p.add_argument(
-        "--num-ext",
-        type=int,
-        default=8,
-        help="Number of externality values to sweep (default: 8)",
-    )
-    p.add_argument(
-        "--log-scale",
-        action="store_true",
-        help="Use log spacing for externality values",
-    )
+    p.add_argument("--degrees", default="1", help='polynomial degrees, e.g. "1,2,3"')
+    p.add_argument("--k-values", default="1", help='numbers of goods k, e.g. "1,2"')
+    p.add_argument("--num-items", default="20", help='numbers of bidders n, e.g. "8,16"')
+    p.add_argument("--ext-min", type=float, default=1.0, help="smallest ζ (default: 1)")
+    p.add_argument("--ext-max", type=float, default=1.0, help="largest ζ (default: 1)")
+    p.add_argument("--num-ext", type=int, default=1, help="number of ζ values (default: 1)")
+    p.add_argument("--log-scale", action="store_true", help="log spacing of ζ")
 
-    # GA parameters (passed through to genetic2)
+    # Optimization
+    p.add_argument("--objective", choices=("vcg_pa", "ivcg_pa"), default="vcg_pa",
+                   help="mechanism whose exact expected welfare the GA maximizes")
     p.add_argument("--num-generations", type=int, default=500)
     p.add_argument("--sol-per-pop", type=int, default=50)
     p.add_argument("--num-parents-mating", type=int, default=15)
     p.add_argument("--mutation-probability", type=float, default=0.25)
     p.add_argument("--range-multiplier", type=float, default=3.0)
-    p.add_argument(
-        "--num-restarts",
-        type=int,
-        default=1,
-        help="Independent GA restarts per cell; best result is kept. "
-        "Restart 0 uses the warm-start seed; restarts 1+ are random. "
-        "Runtime scales linearly (default: 1)",
-    )
+    p.add_argument("--num-restarts", type=int, default=1,
+                   help="independent GA restarts per cell; the best is kept")
+    p.add_argument("--warm-start", action="store_true",
+                   help="seed the degree-d search with the degree-(d−1) optimum")
 
-    # Simulation
-    p.add_argument(
-        "--num-items",
-        default="20",
-        help='Comma-separated bidder counts per auction draw, e.g. "10,20,50" (default: 20)',
-    )
-    p.add_argument(
-        "--num-auctions",
-        type=int,
-        default=500,
-        help="Training auction draws per cell, used by the GA (default: 500)",
-    )
-    p.add_argument(
-        "--test-auctions",
-        type=int,
-        default=2000,
-        help="Fixed evaluation draws per cell for welfare reporting; "
-        "excludes k and degree from seed so results are comparable "
-        "across those dimensions (default: 2000)",
-    )
-    p.add_argument(
-        "--action-cost",
-        type=float,
-        default=1.0,
-        help="Multiplier applied to v_score to get v (default: 1.0)",
-    )
-    p.add_argument(
-        "--seed",
-        type=int,
-        default=1234,
-        help="Base random seed (each cell gets a unique derived seed)",
-    )
+    # Evaluation
+    p.add_argument("--test-auctions", type=int, default=2000,
+                   help="simulated auctions per cell for welfare distributions")
+    p.add_argument("--seed", type=int, default=1234, help="base random seed")
 
     # Output
-    p.add_argument(
-        "--tag",
-        default="sweep",
-        help="Label for this run (part of output directory name)",
-    )
-    p.add_argument(
-        "--output-base",
-        default="output",
-        help="Parent directory for output (default: output)",
-    )
-    p.add_argument(
-        "--no-plot",
-        action="store_true",
-        help="Skip figure generation after the sweep completes",
-    )
-    p.add_argument(
-        "--warm-start",
-        action="store_true",
-        help="Seed each degree-d GA with the best coefficients found for "
-        "degree d-1 (padded with 0 for the new term). "
-        "Degrees are always processed in ascending order when this is set.",
-    )
-
+    p.add_argument("--tag", default="sweep", help="label in the output directory name")
+    p.add_argument("--output-base", default="output", help="parent output directory")
+    p.add_argument("--no-plot", action="store_true", help="skip figures")
     return p.parse_args()
 
 
@@ -873,157 +645,102 @@ def main():
     degrees = [int(d.strip()) for d in args.degrees.split(",")]
     k_values = [int(k.strip()) for k in args.k_values.split(",")]
     num_items_list = [int(n.strip()) for n in args.num_items.split(",")]
-
     if args.log_scale:
-        ext_values = list(
-            np.logspace(np.log10(args.ext_min), np.log10(args.ext_max), args.num_ext)
-        )
+        ext_values = list(np.logspace(np.log10(args.ext_min), np.log10(args.ext_max), args.num_ext))
     else:
         ext_values = list(np.linspace(args.ext_min, args.ext_max, args.num_ext))
 
-    # Timestamped output directory
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = f"sweep_genetic2_{args.tag}_{timestamp}"
-    out_dir = os.path.join(args.output_base, run_name)
+    out_dir = os.path.join(args.output_base, f"sweep_genetic2_{args.tag}_{timestamp}")
     res_dir = os.path.join(out_dir, "results")
     fig_dir = os.path.join(out_dir, "figures")
     os.makedirs(res_dir, exist_ok=True)
     os.makedirs(fig_dir, exist_ok=True)
-
     print(f"Output directory : {out_dir}")
     print(f"k values         : {k_values}")
     print(f"Degrees          : {degrees}")
-    print(f"Num items        : {num_items_list}")
-    print(f"Externality vals : {[f'{v:.4g}' for v in ext_values]}")
-
-    data_raw = pd.read_csv(args.data)
-    print(f"Loaded {len(data_raw):,} rows from {args.data}")
-
-    # Write README early so the directory is documented even on partial runs
+    print(f"Bidders n        : {num_items_list}")
+    print(f"ζ values         : {[f'{v:.4g}' for v in ext_values]}")
     write_readme(out_dir, args, ext_values, timestamp)
 
-    # ── Sweep ─────────────────────────────────────────────────────────────────
-    # With --warm-start degrees must be processed lowest-first so each search can
-    # inherit the best solution from the previous degree.
+    # Distributions depend only on ζ: build them once per ζ.
+    prepared_by_ext = [
+        prepare_distributions(
+            args.data, externality_scale=ext_cost, valuation_scale=args.action_cost,
+            truncation_quantile=args.truncation_quantile, train_fraction=args.train_fraction,
+            split_seed=args.split_seed, smoothing=args.smoothing,
+            bandwidth_scale=args.bandwidth_scale)
+        for ext_cost in ext_values
+    ]
+    print(f"Evaluation distribution: {prepared_by_ext[0].evaluation.name} "
+          f"({prepared_by_ext[0].evaluation.num_cells:,} cells)")
+
+    ga_options = {"num_generations": args.num_generations, "sol_per_pop": args.sol_per_pop,
+                  "num_parents_mating": args.num_parents_mating,
+                  "mutation_probability": args.mutation_probability,
+                  "range_multiplier": args.range_multiplier}
     degrees_ordered = sorted(degrees) if args.warm_start else degrees
-    if args.warm_start and degrees_ordered != degrees:
-        print(f"Note: --warm-start reorders degrees to ascending: {degrees_ordered}")
-
-    all_results = {}  # (k, degree, num_items) → sorted list of result dicts
-
-    # Only run (k, num_items) pairs where k < num_items
     valid_kn = [(k, n) for k in k_values for n in num_items_list if k < n]
     skipped_kn = [(k, n) for k in k_values for n in num_items_list if k >= n]
     if skipped_kn:
-        print(f"Skipping (k, n) pairs where k >= n: {skipped_kn}")
-    print(f"Valid (k, n) pairs: {valid_kn}")
+        print(f"Skipping (k, n) pairs with k >= n: {skipped_kn}")
     total_cells = len(valid_kn) * len(degrees_ordered) * len(ext_values)
+    all_results = {}
     cell = 0
 
     for k in k_values:
         for n_idx, num_items in enumerate(num_items_list):
             if k >= num_items:
                 continue
-
-            # Initialise result lists for all degrees before any ext_idx runs.
             for degree in degrees_ordered:
                 all_results[(k, degree, num_items)] = []
-
             for ext_idx, ext_cost in enumerate(ext_values):
-                # Warm-start carries from one degree to the next within this ext_idx.
-                # Reset at each new ext_idx so degrees are always compared on the same footing.
-                prev_coeffs = None
-
+                previous_coefficients = None  # warm start carries across degrees within one ζ
                 for degree in degrees_ordered:
                     cell += 1
-                    # sample_seed: no degree, no k → same training draws for all degrees
-                    # and all k values at the same (n, ext_idx), for fair comparison.
-                    sample_seed = args.seed + ext_idx + n_idx * 10000000
-                    ga_seed = (
-                        args.seed
-                        + ext_idx
-                        + degree * 1000
-                        + k * 100000
-                        + n_idx * 10000000
-                    )
-                    # test_seed: offset by 1_000_000 so test draws are independent of
-                    # training draws; also excludes k and degree.
-                    test_seed = args.seed + 1_000_000 + ext_idx + n_idx * 10000000
-
-                    initial_solution = None
-                    if args.warm_start and prev_coeffs is not None:
-                        initial_solution = prev_coeffs + [0.0]
-
-                    print(
-                        f"\n[{cell}/{total_cells}] k={k}  n={num_items}  degree={degree}  "
-                        f"ext_cost={ext_cost:.6g}  sample_seed={sample_seed}  "
-                        f"ga_seed={ga_seed}  test_seed={test_seed}"
-                    )
-
+                    ga_seed = args.seed + ext_idx + degree * 1000 + k * 100000 + n_idx * 10000000
+                    # Same simulated auctions for all k and degrees at a given (n, ζ).
+                    simulation_seed = args.seed + 1_000_000 + ext_idx + n_idx * 10000000
+                    bootstrap_seed = args.seed + 2_000_000 + ext_idx
+                    initial_solution = (previous_coefficients + [0.0]
+                                        if args.warm_start and previous_coefficients else None)
+                    print(f"\n[{cell}/{total_cells}]")
                     rec = run_one(
-                        data_raw=data_raw,
-                        k=k,
-                        degree=degree,
-                        ext_cost=ext_cost,
-                        action_cost=args.action_cost,
-                        num_items=num_items,
-                        num_auctions=args.num_auctions,
-                        num_generations=args.num_generations,
-                        sol_per_pop=args.sol_per_pop,
-                        num_parents_mating=args.num_parents_mating,
-                        mutation_probability=args.mutation_probability,
-                        range_multiplier=args.range_multiplier,
-                        sample_seed=sample_seed,
-                        seed=ga_seed,
-                        num_restarts=args.num_restarts,
-                        initial_solution=initial_solution,
-                        test_seed=test_seed,
-                        num_test_auctions=args.test_auctions,
-                    )
+                        prepared_by_ext[ext_idx], k, degree, ext_cost, args.action_cost, num_items,
+                        ga_options, ga_seed, args.num_restarts, initial_solution, simulation_seed,
+                        args.test_auctions, args.objective, args.bootstrap_samples,
+                        bootstrap_seed, args.grid_refinement)
                     all_results[(k, degree, num_items)].append(rec)
-                    prev_coeffs = rec["tau_coeffs"]
-
+                    previous_coefficients = rec["tau_coeffs"]
                     fname = f"run_k{k}_deg{degree}_n{num_items}_ext{ext_idx}.pkl"
                     with open(os.path.join(res_dir, fname), "wb") as f:
                         pickle.dump(rec, f)
                     print(f"  -> saved {fname}")
 
-    # Consolidated pickle
     consolidated = os.path.join(out_dir, "sweep_data.pkl")
     with open(consolidated, "wb") as f:
         pickle.dump(all_results, f)
     print(f"\nConsolidated data saved: {consolidated}")
 
-    # ── Plots ─────────────────────────────────────────────────────────────────
-    if args.no_plot:
-        elapsed = time.time() - t_start
-        h, rem = divmod(int(elapsed), 3600)
-        m, s = divmod(rem, 60)
-        print(f"\nTotal time: {h:02d}:{m:02d}:{s:02d}  ({elapsed:.1f}s)")
-        print(f"Skipping plots (--no-plot). Results in: {out_dir}")
-        return
-
-    print("\nGenerating figures...")
-    for (k, degree, num_items), records in all_results.items():
-        records_sorted = sorted(records, key=lambda r: r["externality_cost"])
-        tag_kdn = f"k{k}_deg{degree}_n{num_items}"
-
-        plot_tau_grid(records_sorted, fig_dir, tag_kdn, zoomed=False)
-        plot_tau_grid(records_sorted, fig_dir, tag_kdn, zoomed=True)
-        plot_penalty_grid(records_sorted, fig_dir, tag_kdn)
-        plot_welfare_comparison(records_sorted, fig_dir, tag_kdn)
-        plot_cell_evaluation_figures(records_sorted, data_raw, fig_dir, tag_kdn)
-
-    plot_tau_degree_comparison(
-        all_results, degrees_ordered, fig_dir, k_values, num_items_list
-    )
-    plot_welfare_distributions(all_results, fig_dir)
+    if not args.no_plot:
+        print("\nGenerating figures...")
+        for (k, degree, num_items), records in all_results.items():
+            records_sorted = sorted(records, key=lambda r: r["externality_cost"])
+            tag_kdn = f"k{k}_deg{degree}_n{num_items}"
+            plot_tau_grid(records_sorted, fig_dir, tag_kdn, zoomed=False)
+            plot_tau_grid(records_sorted, fig_dir, tag_kdn, zoomed=True)
+            plot_penalty_grid(records_sorted, fig_dir, tag_kdn)
+            plot_welfare_comparison(records_sorted, fig_dir, tag_kdn)
+            plot_cell_evaluation_figures(records_sorted, prepared_by_ext, fig_dir, tag_kdn)
+        plot_tau_degree_comparison(all_results, degrees_ordered, fig_dir, k_values,
+                                   num_items_list)
+        plot_welfare_distributions(all_results, fig_dir)
 
     elapsed = time.time() - t_start
     h, rem = divmod(int(elapsed), 3600)
     m, s = divmod(rem, 60)
     print(f"\nTotal time: {h:02d}:{m:02d}:{s:02d}  ({elapsed:.1f}s)")
-    print(f"All done. Results in: {out_dir}")
+    print(f"Results in: {out_dir}")
 
 
 if __name__ == "__main__":

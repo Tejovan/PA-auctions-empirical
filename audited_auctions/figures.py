@@ -106,16 +106,24 @@ def _type_plot_limits(type_distribution):
     quantile = type_distribution.weighted_quantile
     e_low = quantile(type_distribution.externalities, tail_probability)
     e_high = quantile(type_distribution.externalities, 1 - tail_probability)
-    v_low = quantile(type_distribution.valuations, tail_probability)
-    v_high = quantile(type_distribution.valuations, 1 - tail_probability)
+    v_low = quantile(type_distribution.valuation_midpoints, tail_probability)
+    v_high = quantile(type_distribution.valuation_midpoints, 1 - tail_probability)
     e_pad, v_pad = 0.05 * (e_high - e_low), 0.05 * (v_high - v_low)
     return (e_low - e_pad, e_high + e_pad), (v_low - v_pad, v_high + v_pad)
 
 
 def draw_type_distribution(ax, type_distribution, e_limits, v_limits):
-    """Shade the type density: filled contours for gridded densities, a 2-D
-    histogram for finite populations."""
+    """Shade the type density: filled contours for gridded synthetic densities,
+    log-shaded density for kernel-smoothed populations, and a log-shaded 2-D
+    histogram for atomic populations."""
     grid = type_distribution.density_grid
+    if grid is not None and type_distribution.metadata.get("smoothing") == "kernel":
+        # Smoothed empirical densities are skewed: logarithmic shading, as for populations.
+        density = np.ma.masked_less_equal(grid["density"], grid["density"].max() * 1e-5)
+        ax.pcolormesh(grid["externality_grid"], grid["valuation_grid"], density, cmap="Greys",
+                      shading="auto", norm=LogNorm(vmin=density.min(), vmax=density.max()),
+                      alpha=0.75, rasterized=True, zorder=1)
+        return
     if grid is not None:
         density = grid["density"]
         levels = np.linspace(0, density.max(), 9)[1:]
@@ -125,7 +133,7 @@ def draw_type_distribution(ax, type_distribution, e_limits, v_limits):
         return
     histogram, e_edges, v_edges = np.histogram2d(
         type_distribution.externalities,
-        type_distribution.valuations,
+        type_distribution.valuation_midpoints,
         bins=[90, 90],
         range=[e_limits, v_limits],
         weights=type_distribution.probabilities,
