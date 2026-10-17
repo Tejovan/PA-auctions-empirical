@@ -82,7 +82,7 @@ This replaces the old estimator R(e) = A(e)(τ(e) − P(e)) built from the reali
 
 `plot_welfare_distributions(evaluation, path)`:
 - **(a)** Gaussian-KDE densities of per-draw welfare, with means.
-- **(b)** paired per-draw welfare differences (IVCG-PA − VCG-PA, first best − IVCG-PA, first best − VCG-PA). Differences are exactly zero in many draws (same winners); the panel shows the density of the nonzero differences scaled by their share and reports the share of zeros.
+- **(b)** paired per-draw welfare gains over unaudited VCG (VCG-PA − VCG, IVCG-PA − VCG, first best − VCG); all welfare comparisons use VCG as the baseline. Differences are exactly zero in many draws (same winners); the panel shows the density of the nonzero differences scaled by their share and reports the share of zeros.
 
 Colors are a fixed, color-vision-checked assignment per mechanism (`MECHANISM_COLORS`); each series also has its own line style.
 

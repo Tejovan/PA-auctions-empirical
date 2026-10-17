@@ -14,8 +14,9 @@ plot_threshold_and_penalties
 
 plot_welfare_distributions
     (a) smoothed densities (Gaussian KDE) of per-draw welfare;
-    (b) smoothed densities of paired per-draw welfare differences on the same
-        draws, which remove the common variation across mechanisms.
+    (b) smoothed densities of paired per-draw welfare gains over unaudited VCG
+        on the same draws (VCG-PA − VCG, IVCG-PA − VCG, first best − VCG),
+        which remove the common variation across mechanisms.
 
 Colors: one fixed color per mechanism (MECHANISM_COLORS), validated for
 color-vision deficiencies; every series also has a distinct line style and a
@@ -43,13 +44,14 @@ MECHANISM_LINESTYLES = {"vcg": ":", "vcg_pa": "-", "ivcg_pa": "--", "first_best"
 THRESHOLD_COLOR = "#0b0b0b"
 TEXT_SECONDARY = "#52514e"
 
+# Welfare gains are measured against unaudited VCG; each gain wears the color
+# and line style of its audited mechanism.
 DIFFERENCE_STYLES = {
-    "ivcg_pa - vcg_pa": dict(color=MECHANISM_COLORS["ivcg_pa"], linestyle="--",
-                             label="IVCG-PA − VCG-PA"),
-    "first_best - ivcg_pa": dict(color=MECHANISM_COLORS["first_best"], linestyle="-.",
-                                 label="First best − IVCG-PA"),
-    "first_best - vcg_pa": dict(color=MECHANISM_COLORS["vcg_pa"], linestyle="-",
-                                label="First best − VCG-PA"),
+    f"{mechanism} - vcg": dict(color=MECHANISM_COLORS[mechanism],
+                               linestyle=MECHANISM_LINESTYLES[mechanism],
+                               label=f"{label} − VCG")
+    for mechanism, label in (("vcg_pa", "VCG-PA"), ("ivcg_pa", "IVCG-PA"),
+                             ("first_best", "First best"))
 }
 
 PAPER_STYLE = {
@@ -306,9 +308,9 @@ def plot_welfare_distributions(evaluation, output_path, include_vcg=True, title=
         axes[1].axvline(0, color=TEXT_SECONDARY, linewidth=0.7, zorder=0)
         axes[1].set_xlim(difference_range)
         axes[1].xaxis.set_major_formatter(FuncFormatter(_compact_number))
-        axes[1].set_xlabel("welfare difference on the same auction (nonzero part)")
+        axes[1].set_xlabel("welfare gain over VCG on the same auction (nonzero part)")
         axes[1].set_ylabel("share × density")
-        axes[1].set_title("(b) Paired welfare differences", loc="left")
+        axes[1].set_title("(b) Paired welfare gains over VCG", loc="left")
         axes[1].legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), ncol=1)
 
         num_draws = len(next(iter(welfare.values())))

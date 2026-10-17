@@ -104,15 +104,17 @@ class ThresholdEvaluation:
         return pd.DataFrame(rows).set_index("mechanism")
 
     def paired_welfare_differences(self) -> dict:
-        """Per-draw welfare differences between mechanisms on the same draws."""
+        """Per-draw welfare gains over unaudited VCG on the same draws.
+
+        Every audited mechanism is measured against the baseline VCG (no audit):
+        keys "vcg_pa - vcg", "ivcg_pa - vcg", "first_best - vcg".
+        """
         if self.simulated is None:
             raise ValueError("no simulated draws; rerun with num_simulated_draws > 0")
         welfare = {m: self.simulated[m]["welfare"] for m in MECHANISMS}
         return {
-            "ivcg_pa - vcg_pa": welfare["ivcg_pa"] - welfare["vcg_pa"],
-            "first_best - ivcg_pa": welfare["first_best"] - welfare["ivcg_pa"],
-            "first_best - vcg_pa": welfare["first_best"] - welfare["vcg_pa"],
-            "vcg_pa - vcg": welfare["vcg_pa"] - welfare["vcg"],
+            f"{mechanism} - vcg": welfare[mechanism] - welfare["vcg"]
+            for mechanism in ("vcg_pa", "ivcg_pa", "first_best")
         }
 
     def save(self, path):
