@@ -118,8 +118,9 @@ def _eval_population_on_auction(population, v, e, e_powers, k):
     # tau_mat[g, i] = tau(e_i) under population[g]  →  (G, n)
     tau_mat = population @ e_powers.T
 
-    # admitted[g, i] = True when advertiser i clears the threshold under population[g]
-    admitted = v[np.newaxis, :] >= tau_mat  # (G, n)
+    # admitted[g, i] = True when advertiser i clears the threshold under population[g].
+    # VCG-PA allocates only to positive bids, so nonpositive valuations never win.
+    admitted = (v[np.newaxis, :] >= tau_mat) & (v[np.newaxis, :] > 0)  # (G, n)
 
     # Sort by v descending so top-k selection is a prefix cumsum
     order = np.argsort(-v)

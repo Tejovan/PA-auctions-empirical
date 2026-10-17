@@ -102,113 +102,35 @@ import pandas as pd
 
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _here)
-from Collateralized_Auction_genetic2 import run_genetic_search, tau as _eval_tau  # noqa: E402
-
-
-# ─── Auction simulation ───────────────────────────────────────────────────────
-
-
-def simulate_auctions(bidder_sets, tau_coeffs, k):
-    """Simulate all auction draws with tau_coeffs, returning per-draw metric lists.
-
-    Returns
-    -------
-    dict with keys:
-      vcg_welfare, vcg_adv_welfare, vcg_ext_welfare
-      vcga_welfare, vcga_adv_welfare, vcga_ext_welfare
-      pa_payments
-      ra_welfare, ra_adv_welfare, ra_ext_welfare
-    """
-    vcg_welfares, vcg_adv_welfares, vcg_ext_welfares = [], [], []
-    vcga_welfares, vcga_adv_welfares, vcga_ext_welfares = [], [], []
-    pa_payments = []
-    ra_welfares, ra_adv_welfares, ra_ext_welfares = [], [], []
-
-    for bidder_set in bidder_sets:
-        v = np.array([a[0] for a in bidder_set])
-        e = np.array([a[1] for a in bidder_set])
-
-        # VCG: top-k by v, all bidders
-        order = np.argsort(-v)
-        top_k = order[:k]
-        vcg_welfares.append(float(np.sum(v[top_k] + e[top_k])))
-        vcg_adv_welfares.append(float(np.sum(v[top_k])))
-        vcg_ext_welfares.append(float(np.sum(e[top_k])))
-
-        # VCGA: top-k by v, admitted only
-        tau_vals = np.array([_eval_tau(ei, tau_coeffs) for ei in e])
-        mask = v >= tau_vals
-        adm_v, adm_e = v[mask], e[mask]
-        if len(adm_v) == 0:
-            vcga_welfares.append(0.0)
-            vcga_adv_welfares.append(0.0)
-            vcga_ext_welfares.append(0.0)
-            pa_payments.append(0.0)
-        else:
-            ord_a = np.argsort(-adm_v)
-            top_ka = ord_a[:k]
-            vcga_welfares.append(float(np.sum(adm_v[top_ka] + adm_e[top_ka])))
-            vcga_adv_welfares.append(float(np.sum(adm_v[top_ka])))
-            vcga_ext_welfares.append(float(np.sum(adm_e[top_ka])))
-            sorted_adm_v = adm_v[ord_a]
-            pa_payments.append(
-                float(sorted_adm_v[k]) if len(sorted_adm_v) >= k + 1 else 0.0
-            )
-
-        # Recipient audit: top-k positive (v+e), all bidders
-        ve = v + e
-        sort_idx = np.argsort(-ve)
-        selected = sort_idx[ve[sort_idx] > 0][:k]
-        ra_welfares.append(float(np.sum(ve[selected])))
-        ra_adv_welfares.append(float(np.sum(v[selected])))
-        ra_ext_welfares.append(float(np.sum(e[selected])))
-
-    return {
-        "vcg_welfare": vcg_welfares,
-        "vcg_adv_welfare": vcg_adv_welfares,
-        "vcg_ext_welfare": vcg_ext_welfares,
-        "vcga_welfare": vcga_welfares,
-        "vcga_adv_welfare": vcga_adv_welfares,
-        "vcga_ext_welfare": vcga_ext_welfares,
-        "pa_payments": pa_payments,
-        "ra_welfare": ra_welfares,
-        "ra_adv_welfare": ra_adv_welfares,
-        "ra_ext_welfare": ra_ext_welfares,
-    }
-
-
-# ─── Expected participant penalty ─────────────────────────────────────────────
-
-
-def participant_penalty_curve(e_values, tau_coeffs, pa_payments):
-    """Compute R(e) for each e in e_values.
-
-    R(e) = A(e) * (tau(e) - P(e))
-      A(e) = fraction of payments strictly below tau(e)
-      P(e) = mean of those payments (0 if none)
-    """
-    payments = np.asarray(pa_payments, dtype=float)
-    n = len(payments)
-    R = np.empty(len(e_values))
-    for i, e in enumerate(e_values):
-        tau_val = float(_eval_tau(e, tau_coeffs))
-        below = payments[payments < tau_val]
-        A = len(below) / n if n > 0 else 0.0
-        P = float(np.mean(below)) if len(below) > 0 else 0.0
-        R[i] = A * (tau_val - P)
-    return R
+from Collateralized_Auction_genetic2 import run_genetic_search  # noqa: E402
+from audited_auctions.figures import (  # noqa: E402
+    plot_threshold_and_penalties,
+    plot_welfare_distributions as plot_welfare_distribution_densities,
+)
+from audited_auctions.sweep_support import (  # noqa: E402
+    SWEEP_SERIES,
+    evaluate_sweep_cell,
+    record_penalty_curves,
+    sweep_record_fields,
+)
+from audited_auctions.type_distributions import population_distribution  # noqa: E402
 
 
 # ─── Sampling ─────────────────────────────────────────────────────────────────
 
 
 def sample_bidder_sets(data, num_items, num_auctions, rng):
+    """Draw num_auctions auctions of num_items bidders i.i.d. from the population.
+
+    Bidders are drawn with replacement, so types are independent across
+    bidders, as in the model and in the exact computations of audited_auctions.
+    """
     n = len(data)
     v_arr = data["v"].values
     e_arr = data["e"].values
     sets = []
     for _ in range(num_auctions):
-        idx = rng.choice(n, size=num_items, replace=False)
+        idx = rng.choice(n, size=num_items, replace=True)
         sets.append(list(zip(v_arr[idx].tolist(), e_arr[idx].tolist())))
     return sets
 
@@ -297,8 +219,12 @@ def run_one(
         elif num_restarts > 1:
             print(f"  . welfare={welfare:.6f}  (best so far: {best_welfare:.6f})")
 
-    # Evaluate final welfare on the held-out test set, not the training draws
-    sim = simulate_auctions(test_bidder_sets, best_coeffs, k)
+    # Evaluate the optimal tau on the held-out test set, not the training draws:
+    # exact expectations for the population, and simulated per-draw outcomes of
+    # VCG, VCG-PA, IVCG-PA and the first best on the test draws.
+    evaluation = evaluate_sweep_cell(
+        data["e"].to_numpy(), data["v"].to_numpy(), best_coeffs, num_items, k, test_bidder_sets
+    )
 
     return {
         "k": k,
@@ -310,16 +236,8 @@ def run_one(
         "trajectory": all_trajectories,
         "bidder_sets": bidder_sets,  # training draws (for tau trajectory plots)
         "test_bidder_sets": test_bidder_sets,  # evaluation draws (for all welfare metrics)
-        "vcg_welfare": sim["vcg_welfare"],
-        "vcg_adv_welfare": sim["vcg_adv_welfare"],
-        "vcg_ext_welfare": sim["vcg_ext_welfare"],
-        "vcga_welfare": sim["vcga_welfare"],
-        "vcga_adv_welfare": sim["vcga_adv_welfare"],
-        "vcga_ext_welfare": sim["vcga_ext_welfare"],
-        "pa_payments": sim["pa_payments"],
-        "ra_welfare": sim["ra_welfare"],
-        "ra_adv_welfare": sim["ra_adv_welfare"],
-        "ra_ext_welfare": sim["ra_ext_welfare"],
+        # vcg_*, vcga_*, ivcga_*, ra_* per-draw lists and the full evaluation
+        **sweep_record_fields(evaluation),
         "num_items": num_items,
         "num_auctions": num_auctions,
         "num_test_auctions": num_test_auctions,
@@ -443,17 +361,20 @@ def plot_penalty_grid(records, out_dir, tag, percentile=99):
         e_line = np.linspace(e_lo, e_hi, 300)
 
         y_tau = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
-        R = participant_penalty_curve(e_line, rec["tau_coeffs"], rec["pa_payments"])
+        penalties = record_penalty_curves(rec, e_line)  # exact r(e) inducing tau
         neg_e = -e_line
 
-        (p1,) = ax.plot(e_line, y_tau, color="tab:red", linewidth=2.0, zorder=3)
-        (p2,) = ax.plot(e_line, R, color="tab:blue", linewidth=1.8, zorder=4)
+        (p1,) = ax.plot(e_line, y_tau, color="black", linewidth=2.0, zorder=3)
+        (p2,) = ax.plot(e_line, penalties["vcg_pa"], color="#2a78d6", linewidth=1.8, zorder=4)
+        (p2b,) = ax.plot(
+            e_line, penalties["ivcg_pa"], color="#c0392b", linewidth=1.8, linestyle="--", zorder=5
+        )
         (p3,) = ax.plot(
-            e_line, neg_e, color="tab:green", linewidth=1.5, linestyle="--", zorder=3
+            e_line, neg_e, color="#1baf7a", linewidth=1.5, linestyle="-.", zorder=3
         )
 
-        # Y limits: include all three curves and the scatter body
-        y_all = np.concatenate([y_tau, R, neg_e, all_v])
+        # Y limits: include all curves and the scatter body
+        y_all = np.concatenate([y_tau, penalties["vcg_pa"], neg_e, all_v])
         y_lo_plot = min(float(np.percentile(y_all, 1)), 0.0)
         y_hi_plot = max(float(np.percentile(y_all, 99)), v_hi) * 1.05
         ax.set_xlim(e_lo, e_hi)
@@ -466,10 +387,11 @@ def plot_penalty_grid(records, out_dir, tag, percentile=99):
 
         if not legend_done:
             ax.legend(
-                [p1, p2, p3],
+                [p1, p2, p2b, p3],
                 [
                     "τ (optimal threshold)",
-                    "R(e) (participant penalty)",
+                    "r(e) for VCG-PA",
+                    "r(e) for IVCG-PA",
                     "−e (recipient penalty)",
                 ],
                 fontsize=6,
@@ -491,37 +413,13 @@ def plot_penalty_grid(records, out_dir, tag, percentile=99):
 
 
 def plot_welfare_comparison(records, out_dir, tag):
-    """Mean welfare of VCG, VCGA, and recipient audit vs externality cost (zeta)."""
+    """Mean welfare of VCG, VCG-PA, IVCG-PA and the first best vs externality cost (zeta)."""
     ext_costs = [r["externality_cost"] for r in records]
-    vcg_means = [float(np.mean(r["vcg_welfare"])) for r in records]
-    vcga_means = [float(np.mean(r["vcga_welfare"])) for r in records]
-    ra_means = [float(np.mean(r["ra_welfare"])) for r in records]
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(
-        ext_costs,
-        vcg_means,
-        marker="o",
-        linewidth=1.8,
-        label="VCG (counterfactual)",
-        color="steelblue",
-    )
-    ax.plot(
-        ext_costs,
-        vcga_means,
-        marker="s",
-        linewidth=1.8,
-        label="Participant Audit (VCGA)",
-        color="firebrick",
-    )
-    ax.plot(
-        ext_costs,
-        ra_means,
-        marker="^",
-        linewidth=1.8,
-        label="Recipient Audit",
-        color="seagreen",
-    )
+    for prefix, label, color, marker in SWEEP_SERIES:
+        means = [float(np.mean(r[f"{prefix}_welfare"])) for r in records]
+        ax.plot(ext_costs, means, marker=marker, linewidth=1.8, label=label, color=color)
 
     ax.axhline(0, color="black", linewidth=0.7, linestyle="--", alpha=0.5)
     ax.set_xlabel("Externality Cost per Impression (ζ)", fontsize=11)
@@ -544,6 +442,23 @@ def plot_welfare_comparison(records, out_dir, tag):
     fig.savefig(path, dpi=150)
     plt.close(fig)
     print(f"Saved: {path}")
+
+
+def plot_cell_evaluation_figures(records, data_raw, out_dir, tag):
+    """For each record: the threshold/penalty figure and the welfare-density figure."""
+    for ext_idx, rec in enumerate(records):
+        type_distribution = population_distribution(
+            data_raw["e_score"].to_numpy() * rec["externality_cost"],
+            data_raw["v_score"].to_numpy() * rec["action_cost"],
+            name=f"ζ = {rec['externality_cost']:.4g}, degree {rec['polynomial_degree']}",
+        )
+        evaluation = rec["evaluation"]
+        path = os.path.join(out_dir, f"threshold_penalties_{tag}_ext{ext_idx}.png")
+        plot_threshold_and_penalties(evaluation, type_distribution, path)
+        print(f"Saved: {path}")
+        path = os.path.join(out_dir, f"welfare_densities_{tag}_ext{ext_idx}.png")
+        plot_welfare_distribution_densities(evaluation, path)
+        print(f"Saved: {path}")
 
 
 def plot_tau_degree_comparison(
@@ -624,19 +539,9 @@ def plot_tau_degree_comparison(
 def plot_welfare_distributions(all_results, fig_dir):
     """For each (k, degree, n): grid of rows=ext_costs × cols=[total, adv, ext] histograms."""
     col_specs = [
-        ("vcg_welfare", "vcga_welfare", "ra_welfare", "Total Welfare"),
-        (
-            "vcg_adv_welfare",
-            "vcga_adv_welfare",
-            "ra_adv_welfare",
-            "Advertiser Welfare (v)",
-        ),
-        (
-            "vcg_ext_welfare",
-            "vcga_ext_welfare",
-            "ra_ext_welfare",
-            "Externality Welfare (e)",
-        ),
+        ("welfare", "Total Welfare"),
+        ("adv_welfare", "Advertiser Welfare (v)"),
+        ("ext_welfare", "Externality Welfare (e)"),
     ]
 
     for (k, degree, num_items), records in all_results.items():
@@ -647,24 +552,19 @@ def plot_welfare_distributions(all_results, fig_dir):
 
         for row_idx, rec in enumerate(records_sorted):
             ext_cost = rec["externality_cost"]
-            for col_idx, (vcg_key, vcga_key, ra_key, col_title) in enumerate(col_specs):
+            for col_idx, (suffix, col_title) in enumerate(col_specs):
                 ax = axs[row_idx][col_idx]
-                vcg_vals = np.array(rec[vcg_key])
-                vcga_vals = np.array(rec[vcga_key])
-                ra_vals = np.array(rec[ra_key])
+                series_values = [np.array(rec[f"{prefix}_{suffix}"]) for prefix, *_ in SWEEP_SERIES]
 
-                all_vals = np.concatenate([vcg_vals, vcga_vals, ra_vals])
+                all_vals = np.concatenate(series_values)
                 vmin = float(np.percentile(all_vals, 1))
                 vmax = float(np.percentile(all_vals, 99))
                 if vmax <= vmin:
                     vmax = vmin + 1.0
                 bins = np.linspace(vmin, vmax, 40)
 
-                ax.hist(vcg_vals, bins=bins, alpha=0.5, color="steelblue", label="VCG")
-                ax.hist(
-                    vcga_vals, bins=bins, alpha=0.5, color="firebrick", label="VCGA"
-                )
-                ax.hist(ra_vals, bins=bins, alpha=0.5, color="seagreen", label="RA")
+                for values, (_, label, color, _) in zip(series_values, SWEEP_SERIES):
+                    ax.hist(values, bins=bins, histtype="step", linewidth=1.4, color=color, label=label)
 
                 ax.set_title(f"ζ={ext_cost:.4g} — {col_title}", fontsize=8)
                 ax.tick_params(labelsize=7)
@@ -729,15 +629,33 @@ def write_readme(out_dir, args, ext_values, timestamp):
 ```
 {dir_name}/
 ├── results/
-│   └── run_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.pkl   # one file per (k, degree, num_items, ext_index)
+│   └── run_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.pkl        # one file per (k, degree, num_items, ext_index)
 ├── figures/
-│   ├── tau_grid_k{{k}}_deg{{d}}_n{{n}}.png        # tested tau functions, full axes
-│   ├── tau_grid_zoomed_k{{k}}_deg{{d}}_n{{n}}.png # same, 5th-95th percentile zoom
-│   ├── penalty_grid_k{{k}}_deg{{d}}_n{{n}}.png    # tau + R(e) + -e curves
-│   └── welfare_k{{k}}_deg{{d}}_n{{n}}.png         # mean welfare by auction type vs ζ
-├── sweep_data.pkl                           # all results consolidated
-└── README.md                               # this file
+│   ├── tau_grid_k{{k}}_deg{{d}}_n{{n}}.png             # tested tau functions, full axes
+│   ├── tau_grid_zoomed_k{{k}}_deg{{d}}_n{{n}}.png      # same, 1st-99th percentile zoom
+│   ├── penalty_grid_k{{k}}_deg{{d}}_n{{n}}.png         # tau, exact r(e) for VCG-PA and IVCG-PA, -e
+│   ├── welfare_k{{k}}_deg{{d}}_n{{n}}.png              # mean welfare by mechanism vs ζ
+│   ├── threshold_penalties_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.png  # types + tau, penalties, exact welfare
+│   └── welfare_densities_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.png    # welfare densities, paired differences
+├── sweep_data.pkl                                # all results consolidated
+└── README.md                                     # this file
 ```
+
+---
+
+## Mechanisms
+
+All mechanisms allocate only to positive scores and break ties uniformly at random.
+
+| Prefix | Mechanism | Participants | Ranking score |
+|--------|-----------|--------------|---------------|
+| `vcg` | VCG without audits | all bidders | valuation v |
+| `vcga` | VCG-PA (participant audit) | types with v ≥ τ(e) | bid = v |
+| `ivcga` | IVCG-PA (ironed VCG, participant audit) | types with v ≥ τ(e) | ironed welfare contribution ω̄^τ(v) |
+| `ra` | first best (recipient audit, penalty −e) | all bidders | welfare contribution w = v + e |
+
+The ironed welfare contribution ω̄^τ irons ŵ^τ(v) = v + E[e | v, v ≥ τ(e)] over the
+participating valuations (see `audited_auctions/README.md`).
 
 ---
 
@@ -752,32 +670,26 @@ Each `results/run_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.pkl` deserializes to a single 
 | `externality_cost` | `float` | ζ — the externality cost multiplier for this run |
 | `action_cost` | `float` | Action cost multiplier |
 | `tau_coeffs` | `list[float]` | Optimal τ polynomial coefficients [β₀, β₁, β₂, …] |
-| `ga_welfare` | `float` | Best average VCGA welfare found by the GA |
+| `ga_welfare` | `float` | Best average VCG-PA welfare found by the GA (training draws) |
 | `trajectory` | `list[list[float]]` | Every candidate coefficient vector evaluated during the GA |
 | `bidder_sets` | `list[list[tuple]]` | Training auction draws used by the GA; each draw is a list of `(v, e)` tuples |
-| `test_bidder_sets` | `list[list[tuple]]` | Held-out evaluation draws (2000 by default); seed excludes k and degree |
-| `vcg_welfare` | `list[float]` | Per-auction VCG total welfare (from test draws) |
-| `vcga_welfare` | `list[float]` | Per-auction participant audit (VCGA) total welfare (from test draws) |
-| `pa_payments` | `list[float]` | Per-auction participant audit payment (from test draws; see below) |
-| `ra_welfare` | `list[float]` | Per-auction recipient audit welfare (from test draws; see below) |
+| `test_bidder_sets` | `list[list[tuple]]` | Held-out evaluation draws; seed excludes k and degree |
+| `{{prefix}}_welfare` | `list[float]` | Per-draw welfare Σ x(v + e) on the test draws |
+| `{{prefix}}_adv_welfare` | `list[float]` | Per-draw valuation part Σ x v |
+| `{{prefix}}_ext_welfare` | `list[float]` | Per-draw externality part Σ x e |
+| `{{prefix}}_revenue` | `list[float]` | Per-draw critical-value payments |
+| `{{prefix}}_penalty_paid` | `list[float]` | Per-draw penalties: Σ r(e) over participants (PA); Σ x(−e) over winners (RA) |
+| `{{prefix}}_num_participants` | `list[float]` | Per-draw number of participants |
+| `{{prefix}}_num_allocated` | `list[float]` | Per-draw number of goods allocated |
+| `evaluation` | `ThresholdEvaluation` | Exact expectations, exact penalty functions, ŵ^τ and ω̄^τ, simulated draws |
 | `num_items` | `int` | Bidders per auction draw |
 | `num_auctions` | `int` | Number of training draws |
 | `num_test_auctions` | `int` | Number of evaluation draws |
 | `seed` | `int` | Base GA random seed for this run |
 | `test_seed` | `int` | Seed used for evaluation draws |
 
-### Participant audit payment (`pa_payments`)
-
-For each auction draw, the payment equals the **(k+1)th highest v** among bidders
-admitted above the τ threshold (v ≥ τ(e)).  If fewer than k+1 bidders are admitted,
-the payment is **0**.  This generalises the second-price auction rule to k slots.
-
-### Recipient audit welfare (`ra_welfare`)
-
-For each auction draw, compute each bidder's **individual welfare** = v + e (regardless
-of the threshold).  Sum the individual welfares of the **k bidders with the largest
-positive** individual welfare across all bidders.  If fewer than k bidders have positive
-individual welfare, include only those that do.
+Allocations x are probabilities (the tie-breaking lottery is averaged out). Bidders are
+drawn i.i.d. (with replacement) from the population.
 
 ---
 
@@ -792,6 +704,8 @@ import pickle
 with open('sweep_data.pkl', 'rb') as f:
     data = pickle.load(f)
 # data[(1, 2, 20)]  →  list of dicts for k=1, degree=2, num_items=20, sorted by externality_cost
+record = data[(1, 2, 20)][0]
+print(record["evaluation"].summary_table())   # exact expectations per mechanism
 ```
 
 ---
@@ -799,51 +713,23 @@ with open('sweep_data.pkl', 'rb') as f:
 ## Figures
 
 ### `tau_grid_k{{k}}_deg{{d}}_n{{n}}.png`
-Grid of subplots — one per externality cost value ζ.  Each subplot shows:
-- **Blue scatter**: random sample of (e, v) bidder points from the joint distribution
-- **Gray lines**: up to 200 randomly sampled τ candidate functions evaluated during the GA
-- **Red line**: optimal τ polynomial found by the GA
-
-Axes span the full data range for that run.
-
-### `tau_grid_zoomed_k{{k}}_deg{{d}}_n{{n}}.png`
-Same as `tau_grid` but x/y axes are clipped to the 1st–99th percentile of the data.
+One subplot per ζ: sample of (e, v) bidder points (blue), up to 200 τ candidates evaluated
+by the GA (gray), optimal τ (red).
 
 ### `penalty_grid_k{{k}}_deg{{d}}_n{{n}}.png`
-Grid of subplots — one per externality cost value ζ.  Each subplot shows:
-- **Blue scatter**: sample of (e, v) bidder points
-- **Red line**: optimal τ threshold function
-- **Blue line**: expected participant penalty R(e)
-- **Green dashed line**: expected recipient audit penalty = −e
+One subplot per ζ: sample of (e, v) points, optimal τ (black), and the penalty functions
+that induce τ, computed exactly for the population:
 
-**R(e) calculation:**
-Given the distribution of participant payments [p_1, p_2, ...] from all simulated auctions:
+    r(e) = ∫_0^τ(e) X^τ(b) db,
 
-1. tau(e) = optimal tau polynomial evaluated at externality value e
-2. A(e) = fraction of payments strictly below tau(e)
-3. P(e) = mean of payments strictly below tau(e) (0 if none)
-4. **R(e) = A(e) * (tau(e) - P(e))**
+where X^τ(b) is the interim allocation of a participant bidding b when rivals use the
+threshold strategy (blue: VCG-PA; red dashed: IVCG-PA), and the recipient penalty −e (green).
 
 ### `welfare_k{{k}}_deg{{d}}_n{{n}}.png`
-Line plot of **mean auction welfare vs externality cost ζ**.  Three series:
-- **Blue circles**: VCG counterfactual — top-k bidders by v, no threshold
-- **Red squares**: Participant audit (VCGA) — top-k admitted bidders by v
-- **Green triangles**: Recipient audit — top-k bidders by positive individual welfare v+e
+Mean welfare on the test draws vs ζ for the four mechanisms.
 
----
-
-## Auction Mechanisms
-
-**VCG (counterfactual)**
-All bidders participate. Top-k by v are selected. Welfare = Σ(v+e) for the k winners.
-
-**Participant Audit (VCGA)**
-Only bidders with v ≥ τ(e) are admitted. Top-k admitted bidders by v are selected.
-Payment = (k+1)th highest v among admitted bidders (0 if fewer than k+1 are admitted).
-
-**Recipient Audit**
-No participation threshold. The k bidders with the highest positive individual welfare
-(v+e > 0) are selected, regardless of v alone. Bidders with v+e ≤ 0 are never selected.
+### `threshold_penalties_..._ext{{i}}.png`, `welfare_densities_..._ext{{i}}.png`
+See `audited_auctions/README.md` (figures section).
 """
     path = os.path.join(out_dir, "README.md")
     with open(path, "w", encoding="utf-8") as f:
@@ -1126,6 +1012,7 @@ def main():
         plot_tau_grid(records_sorted, fig_dir, tag_kdn, zoomed=True)
         plot_penalty_grid(records_sorted, fig_dir, tag_kdn)
         plot_welfare_comparison(records_sorted, fig_dir, tag_kdn)
+        plot_cell_evaluation_figures(records_sorted, data_raw, fig_dir, tag_kdn)
 
     plot_tau_degree_comparison(
         all_results, degrees_ordered, fig_dir, k_values, num_items_list

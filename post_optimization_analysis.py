@@ -39,6 +39,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from audited_auctions.sweep_support import (  # noqa: E402
+    SWEEP_SERIES,
+    evaluate_sweep_cell,
+    record_penalty_curves,
+    sweep_record_fields,
+)
+
 # ─── Paper-ready aesthetics ───────────────────────────────────────────────────
 plt.rcParams.update(
     {
@@ -76,70 +84,14 @@ _ZETA_SCALE = 0.2126  # per-impression/rating -> per-action
 
 
 def _sample_sets(data, num_items, num_draws, rng):
+    """i.i.d. draws (with replacement) from the population, as in run_sweep_genetic2.py."""
     v_arr = data["v"].values
     e_arr = data["e"].values
     sets = []
     for _ in range(num_draws):
-        idx = rng.choice(len(data), size=num_items, replace=False)
+        idx = rng.choice(len(data), size=num_items, replace=True)
         sets.append(list(zip(v_arr[idx].tolist(), e_arr[idx].tolist())))
     return sets
-
-
-def _welfare_from_sets(bidder_sets, tau_coeffs, k):
-    """Simulate VCG, VCGA, and RA on bidder_sets; return welfare dict."""
-    vcg_w, vcg_av, vcg_ev = [], [], []
-    vcga_w, vcga_av, vcga_ev = [], [], []
-    pa_pay = []
-    ra_w, ra_av, ra_ev = [], [], []
-
-    for bs in bidder_sets:
-        v = np.array([a[0] for a in bs])
-        e = np.array([a[1] for a in bs])
-
-        # VCG: top-k by v
-        top = np.argsort(-v)[:k]
-        vcg_w.append(float(np.sum(v[top] + e[top])))
-        vcg_av.append(float(np.sum(v[top])))
-        vcg_ev.append(float(np.sum(e[top])))
-
-        # VCGA: top-k admitted (v >= tau(e))
-        tau_v = np.array([_eval_poly(tau_coeffs, ei) for ei in e])
-        mask = v >= tau_v
-        adm_v, adm_e = v[mask], e[mask]
-        if len(adm_v) == 0:
-            vcga_w.append(0.0)
-            vcga_av.append(0.0)
-            vcga_ev.append(0.0)  # noqa: E702
-            pa_pay.append(0.0)
-        else:
-            ord_a = np.argsort(-adm_v)
-            top_a = ord_a[:k]
-            vcga_w.append(float(np.sum(adm_v[top_a] + adm_e[top_a])))
-            vcga_av.append(float(np.sum(adm_v[top_a])))
-            vcga_ev.append(float(np.sum(adm_e[top_a])))
-            sv = adm_v[ord_a]
-            pa_pay.append(float(sv[k]) if len(sv) >= k + 1 else 0.0)
-
-        # RA: top-k by positive (v+e)
-        we = v + e
-        si = np.argsort(-we)
-        sel = si[we[si] > 0][:k]
-        ra_w.append(float(np.sum(we[sel])))
-        ra_av.append(float(np.sum(v[sel])))
-        ra_ev.append(float(np.sum(e[sel])))
-
-    return {
-        "vcg_welfare": vcg_w,
-        "vcg_adv_welfare": vcg_av,
-        "vcg_ext_welfare": vcg_ev,
-        "vcga_welfare": vcga_w,
-        "vcga_adv_welfare": vcga_av,
-        "vcga_ext_welfare": vcga_ev,
-        "pa_payments": pa_pay,
-        "ra_welfare": ra_w,
-        "ra_adv_welfare": ra_av,
-        "ra_ext_welfare": ra_ev,
-    }
 
 
 def recompute_welfare_consistent(all_results, data_path, base_seed, num_test_auctions):
@@ -165,8 +117,13 @@ def recompute_welfare_consistent(all_results, data_path, base_seed, num_test_auc
             test_rng = np.random.default_rng(consistent_seed)
             test_sets = _sample_sets(data, num_items, num_test_auctions, test_rng)
 
-            sim = _welfare_from_sets(test_sets, rec["tau_coeffs"], k)
-            rec.update(sim)
+            # Exact expectations and penalties for the population; simulated
+            # VCG, VCG-PA, IVCG-PA and first-best outcomes on the test draws.
+            evaluation = evaluate_sweep_cell(
+                data["e"].to_numpy(), data["v"].to_numpy(), rec["tau_coeffs"],
+                num_items, k, test_sets,
+            )
+            rec.update(sweep_record_fields(evaluation))
 
     print(
         f"Recomputed welfare for {sum(len(v) for v in all_results.values())} cells "
@@ -236,20 +193,6 @@ _PALETTE = [
 ]
 
 
-def _participant_penalty_curve(e_values, tau_coeffs, pa_payments):
-    """R(e) = A(e) * (tau(e) - P(e)), computed from the empirical payment distribution."""
-    payments = np.asarray(pa_payments, dtype=float)
-    n = len(payments)
-    R = np.empty(len(e_values))
-    for i, e in enumerate(e_values):
-        tau_val = float(_eval_poly(tau_coeffs, e))
-        below = payments[payments < tau_val]
-        A = len(below) / n if n > 0 else 0.0
-        P = float(np.mean(below)) if len(below) > 0 else 0.0
-        R[i] = A * (tau_val - P)
-    return R
-
-
 def _welfare_ci(arr):
     """Return (mean, 95% CI half-width) for a welfare array."""
     a = np.asarray(arr, dtype=float)
@@ -291,21 +234,23 @@ def plot_welfare_distributions_grouped(all_results, fig_dir):
     """Grid rows=ext_costs x cols=[total, adv, ext]; grouped side-by-side bars per bucket."""
     single_zeta = _single_zeta(all_results)
     col_specs = [
-        ("vcg_welfare", "vcga_welfare", "ra_welfare", "Total Welfare"),
-        ("vcg_adv_welfare", "vcga_adv_welfare", "ra_adv_welfare", "Valuation (v)"),
-        ("vcg_ext_welfare", "vcga_ext_welfare", "ra_ext_welfare", "Externality (e)"),
+        ("welfare", "Total Welfare"),
+        ("adv_welfare", "Valuation (v)"),
+        ("ext_welfare", "Externality (e)"),
     ]
+    num_series = len(SWEEP_SERIES)
 
     for (k, degree, num_items), records in all_results.items():
         records_sorted = sorted(records, key=lambda r: r["externality_cost"])
         first = records_sorted[0]
         avail_cols = [
-            s for s in col_specs if all(key in first for key in (s[0], s[1], s[2]))
+            spec for spec in col_specs
+            if all(f"{prefix}_{spec[0]}" in first for prefix, *_ in SWEEP_SERIES)
         ]
         if not avail_cols:
             print(
                 f"  Skipping welfare distributions for k={k} deg={degree} n={num_items}: "
-                f"missing adv/ext breakdown keys (rerun sweep to generate them)"
+                f"missing keys (rerun the sweep, or pass --data to recompute)"
             )
             continue
 
@@ -317,52 +262,26 @@ def plot_welfare_distributions_grouped(all_results, fig_dir):
 
         for row_idx, rec in enumerate(records_sorted):
             ext_cost = rec["externality_cost"]
-            for col_idx, (vcg_key, vcga_key, ra_key, col_title) in enumerate(
-                avail_cols
-            ):
+            for col_idx, (suffix, col_title) in enumerate(avail_cols):
                 ax = axs[row_idx][col_idx]
-                vcg_vals = np.array(rec[vcg_key])
-                vcga_vals = np.array(rec[vcga_key])
-                ra_vals = np.array(rec[ra_key])
+                series_values = [np.array(rec[f"{prefix}_{suffix}"]) for prefix, *_ in SWEEP_SERIES]
 
-                all_vals = np.concatenate([vcg_vals, vcga_vals, ra_vals])
+                all_vals = np.concatenate(series_values)
                 vmin = float(np.percentile(all_vals, 5))
                 vmax = float(np.percentile(all_vals, 95))
                 if vmax <= vmin:
                     vmax = vmin + 1.0
                 bins = np.linspace(vmin, vmax, 20)
-                bin_width = bins[1] - bins[0]
-                bar_w = bin_width / 3.5
+                bar_w = (bins[1] - bins[0]) / (num_series + 0.5)
                 centers = (bins[:-1] + bins[1:]) / 2
 
-                vcg_counts, _ = np.histogram(vcg_vals, bins=bins)
-                vcga_counts, _ = np.histogram(vcga_vals, bins=bins)
-                ra_counts, _ = np.histogram(ra_vals, bins=bins)
-
-                ax.bar(
-                    centers - bar_w,
-                    vcg_counts,
-                    width=bar_w,
-                    color="steelblue",
-                    label="vcg",
-                    alpha=0.85,
-                )
-                ax.bar(
-                    centers,
-                    vcga_counts,
-                    width=bar_w,
-                    color="firebrick",
-                    label="vcgPA",
-                    alpha=0.85,
-                )
-                ax.bar(
-                    centers + bar_w,
-                    ra_counts,
-                    width=bar_w,
-                    color="seagreen",
-                    label="vcgRA",
-                    alpha=0.85,
-                )
+                for series_idx, (values, (_, label, color, _)) in enumerate(
+                    zip(series_values, SWEEP_SERIES)
+                ):
+                    counts, _ = np.histogram(values, bins=bins)
+                    offset = (series_idx - (num_series - 1) / 2) * bar_w
+                    ax.bar(centers + offset, counts, width=bar_w, color=color,
+                           label=label, alpha=0.85)
 
                 ax.set_title(
                     col_title if single_zeta else f"ζ={ext_cost:.4g} -- {col_title}"
@@ -434,16 +353,16 @@ def plot_tau_degree_comparison(
                 for d_idx, degree in enumerate(avail_degrees):
                     rec = all_results[(k, degree, num_items)][ext_idx]
                     y = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
-                    delta_w = float(np.mean(rec["vcga_welfare"])) - float(
-                        np.mean(rec["vcg_welfare"])
-                    )
+                    vcg_mean = float(np.mean(rec["vcg_welfare"]))
+                    delta_w = float(np.mean(rec["vcga_welfare"])) - vcg_mean
+                    delta_w_ironed = float(np.mean(rec["ivcga_welfare"])) - vcg_mean
                     ax.plot(
                         e_line,
                         y,
                         color=degree_colors[d_idx],
                         linewidth=2.0,
                         zorder=3,
-                        label=f"deg {degree}  ΔW={delta_w:+.4g}",
+                        label=f"deg {degree}  ΔW: VCG-PA {delta_w:+.4g}, IVCG-PA {delta_w_ironed:+.4g}",
                     )
 
                 ax.set_xlim(e_lo, e_hi)
@@ -806,23 +725,25 @@ def plot_penalty_grid(all_results, fig_dir, percentile=95, empirical=False):
             e_line = np.linspace(e_lo, e_hi, 300)
 
             y_tau = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
-            R = _participant_penalty_curve(
-                e_line, rec["tau_coeffs"], rec["pa_payments"]
-            )
+            penalties = record_penalty_curves(rec, e_line)  # exact r(e) inducing tau
             neg_e = -e_line
 
-            (p1,) = ax.plot(e_line, y_tau, color="tab:red", linewidth=2.0, zorder=3)
-            (p2,) = ax.plot(e_line, R, color="tab:blue", linewidth=1.8, zorder=4)
+            (p1,) = ax.plot(e_line, y_tau, color="black", linewidth=2.0, zorder=3)
+            (p2,) = ax.plot(e_line, penalties["vcg_pa"], color="#2a78d6", linewidth=1.8, zorder=4)
+            (p2b,) = ax.plot(
+                e_line, penalties["ivcg_pa"], color="#c0392b", linewidth=1.8,
+                linestyle="--", zorder=5,
+            )
             (p3,) = ax.plot(
                 e_line,
                 neg_e,
-                color="tab:green",
+                color="#1baf7a",
                 linewidth=1.5,
-                linestyle="--",
+                linestyle="-.",
                 zorder=3,
             )
 
-            y_all = np.concatenate([y_tau, R, neg_e, all_v])
+            y_all = np.concatenate([y_tau, penalties["vcg_pa"], neg_e, all_v])
             y_lo_plot = min(float(np.percentile(y_all, 100 - eff_pct)), 0.0)
             y_hi_plot = max(float(np.percentile(y_all, eff_pct)), v_hi) * 1.05
             ax.set_xlim(e_lo, e_hi)
@@ -835,11 +756,12 @@ def plot_penalty_grid(all_results, fig_dir, percentile=95, empirical=False):
 
             if not legend_done:
                 ax.legend(
-                    [p1, p2, p3],
+                    [p1, p2, p2b, p3],
                     [
                         "tau (optimal threshold)",
-                        "r(e) (participant penalty)",
-                        "R(e) (recipient penalty)",
+                        "r(e) for VCG-PA",
+                        "r(e) for IVCG-PA",
+                        "-e (recipient penalty)",
                     ],
                     loc="best",
                 )
@@ -890,9 +812,7 @@ def plot_penalty_by_degree(all_results, fig_dir, percentile=95, empirical=False)
                 y_tau_ref = np.array(
                     [_eval_poly(ref_rec["tau_coeffs"], e) for e in e_line_ref]
                 )
-                R_ref = _participant_penalty_curve(
-                    e_line_ref, ref_rec["tau_coeffs"], ref_rec["pa_payments"]
-                )
+                R_ref = record_penalty_curves(ref_rec, e_line_ref)["vcg_pa"]
                 y_all_ref = np.concatenate([y_tau_ref, R_ref, -e_line_ref, ref_v])
                 shared_y_lo = min(float(np.percentile(y_all_ref, 100 - eff_pct)), 0.0)
                 shared_y_hi = max(float(np.percentile(y_all_ref, eff_pct)), ref_v_hi)
@@ -916,23 +836,25 @@ def plot_penalty_by_degree(all_results, fig_dir, percentile=95, empirical=False)
                     e_line = np.linspace(e_lo, e_hi, 300)
 
                     y_tau = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
-                    R = _participant_penalty_curve(
-                        e_line, rec["tau_coeffs"], rec["pa_payments"]
-                    )
+                    penalties = record_penalty_curves(rec, e_line)
                     neg_e = -e_line
 
                     (p1,) = ax.plot(
-                        e_line, y_tau, color="tab:red", linewidth=2.0, zorder=3
+                        e_line, y_tau, color="black", linewidth=2.0, zorder=3
                     )
                     (p2,) = ax.plot(
-                        e_line, R, color="tab:blue", linewidth=1.8, zorder=4
+                        e_line, penalties["vcg_pa"], color="#2a78d6", linewidth=1.8, zorder=4
+                    )
+                    (p2b,) = ax.plot(
+                        e_line, penalties["ivcg_pa"], color="#c0392b", linewidth=1.8,
+                        linestyle="--", zorder=5,
                     )
                     (p3,) = ax.plot(
                         e_line,
                         neg_e,
-                        color="tab:green",
+                        color="#1baf7a",
                         linewidth=1.5,
-                        linestyle="--",
+                        linestyle="-.",
                         zorder=3,
                     )
 
@@ -945,11 +867,12 @@ def plot_penalty_by_degree(all_results, fig_dir, percentile=95, empirical=False)
 
                     if di == 0:
                         ax.legend(
-                            [p1, p2, p3],
+                            [p1, p2, p2b, p3],
                             [
                                 "tau (threshold)",
-                                "r(e) (participant)",
-                                "R(e) (recipient)",
+                                "r(e) for VCG-PA",
+                                "r(e) for IVCG-PA",
+                                "-e (recipient)",
                             ],
                         )
 
@@ -972,67 +895,29 @@ def plot_penalty_by_degree(all_results, fig_dir, percentile=95, empirical=False)
 
 
 def plot_welfare_comparison(all_results, fig_dir, empirical=False, show_ci=True):
-    """Expected welfare vs ext_cost with optional 95% CIs and a Mann-Whitney p-value panel."""
+    """Expected welfare vs ext_cost for VCG, VCG-PA, IVCG-PA, first best, with optional 95% CIs."""
     for (k, degree, num_items), records in all_results.items():
         records_sorted = sorted(records, key=lambda r: r["externality_cost"])
-
-        # x-axis: convert per-impression/rating to per-action
         ext_costs = [r["externality_cost"] for r in records_sorted]
 
-        _vcg = [_welfare_ci(r["vcg_welfare"]) for r in records_sorted]
-        _vcga = [_welfare_ci(r["vcga_welfare"]) for r in records_sorted]
-        _ra = [_welfare_ci(r["ra_welfare"]) for r in records_sorted]
-        vcg_m = np.array([t[0] for t in _vcg])
-        vcg_ci = np.array([t[1] for t in _vcg])  # noqa: E702
-        vcga_m = np.array([t[0] for t in _vcga])
-        vcga_ci = np.array([t[1] for t in _vcga])  # noqa: E702
-        ra_m = np.array([t[0] for t in _ra])
-        ra_ci = np.array([t[1] for t in _ra])  # noqa: E702
+        # means[prefix], half_widths[prefix]: arrays over ext_costs
+        means, half_widths = {}, {}
+        for prefix, *_ in SWEEP_SERIES:
+            stats = [_welfare_ci(r[f"{prefix}_welfare"]) for r in records_sorted]
+            means[prefix] = np.array([t[0] for t in stats])
+            half_widths[prefix] = np.array([t[1] for t in stats])
 
         fig, ax = plt.subplots(figsize=(8, 5))
+        for prefix, label, color, marker in SWEEP_SERIES:
+            if show_ci:
+                ax.errorbar(ext_costs, means[prefix], yerr=half_widths[prefix], marker=marker,
+                            label=label, color=color, capsize=3, capthick=1.0, elinewidth=0.9)
+            else:
+                ax.plot(ext_costs, means[prefix], marker=marker, color=color, label=label)
 
-        if show_ci:
-            ax.errorbar(
-                ext_costs,
-                vcg_m,
-                yerr=vcg_ci,
-                marker="o",
-                label="VCG (unconstrained)",
-                color="steelblue",
-                capsize=3,
-                capthick=1.0,
-                elinewidth=0.9,
-            )
-            ax.errorbar(
-                ext_costs,
-                vcga_m,
-                yerr=vcga_ci,
-                marker="s",
-                label="Participant Audit",
-                color="firebrick",
-                capsize=3,
-                capthick=1.0,
-                elinewidth=0.9,
-            )
-            ax.errorbar(
-                ext_costs,
-                ra_m,
-                yerr=ra_ci,
-                marker="^",
-                label="Recipient Audit",
-                color="seagreen",
-                capsize=3,
-                capthick=1.0,
-                elinewidth=0.9,
-            )
-            all_lo = np.concatenate([vcg_m - vcg_ci, vcga_m - vcga_ci, ra_m - ra_ci])
-            all_hi = np.concatenate([vcg_m + vcg_ci, vcga_m + vcga_ci, ra_m + ra_ci])
-        else:
-            ax.plot(ext_costs, vcg_m, marker="o", color="steelblue", label="vcg")
-            ax.plot(ext_costs, vcga_m, marker="s", color="firebrick", label="vcgPA")
-            ax.plot(ext_costs, ra_m, marker="^", color="seagreen", label="vcgRA")
-            all_lo = np.concatenate([vcg_m, vcga_m, ra_m])
-            all_hi = all_lo
+        spread = half_widths if show_ci else {p: 0 * means[p] for p in means}
+        all_lo = np.concatenate([means[p] - spread[p] for p in means])
+        all_hi = np.concatenate([means[p] + spread[p] for p in means])
 
         # Tight y-axis
         y_lo, y_hi = float(all_lo.min()), float(all_hi.max())
@@ -1054,17 +939,16 @@ def plot_welfare_comparison(all_results, fig_dir, empirical=False, show_ci=True)
         print(f"Saved: {path}")
 
         print(f"  Welfare gains over VCG  [k={k}, degree={degree}, n={num_items}]")
-        print(
-            f"  {'zeta':>10}  {'VCGA-VCG':>12}  {'VCGA%':>8}  {'RA-VCG':>12}  {'RA%':>8}"
-        )
-        for ec, vm, pam, ram in zip(ext_costs, vcg_m, vcga_m, ra_m):
-            pa_delta = pam - vm
-            ra_delta = ram - vm
-            pa_pct = 100 * pa_delta / abs(vm) if vm != 0 else float("nan")
-            ra_pct = 100 * ra_delta / abs(vm) if vm != 0 else float("nan")
-            print(
-                f"  {ec:>10.4g}  {pa_delta:>+12.4g}  {pa_pct:>7.2f}%  {ra_delta:>+12.4g}  {ra_pct:>7.2f}%"
-            )
+        compared = [series for series in SWEEP_SERIES if series[0] != "vcg"]
+        print(f"  {'zeta':>10}" + "".join(f"  {label[:14]:>14}  {'%':>7}" for _, label, *_ in compared))
+        for ext_idx, ext_cost in enumerate(ext_costs):
+            vcg_mean = means["vcg"][ext_idx]
+            row = f"  {ext_cost:>10.4g}"
+            for prefix, *_ in compared:
+                delta = means[prefix][ext_idx] - vcg_mean
+                percent = 100 * delta / abs(vcg_mean) if vcg_mean != 0 else float("nan")
+                row += f"  {delta:>+14.4g}  {percent:>6.2f}%"
+            print(row)
 
 
 # ─── Welfare vs k and n (simulated only) ──────────────────────────────────────
@@ -1081,15 +965,11 @@ def plot_welfare_kn_comparison(all_results, fig_dir):
         ext_cost_keys = {}  # rounded key -> canonical float
         for k in k_values:
             for num_items in num_items_list:
-                key = (k, degree, num_items)
-                if key in all_results:
-                    for rec in all_results[key]:
-                        ec = rec["externality_cost"]
-                        ext_cost_keys[round(ec, 10)] = ec
+                for rec in all_results.get((k, degree, num_items), []):
+                    ext_cost_keys[round(rec["externality_cost"], 10)] = rec["externality_cost"]
 
         for ec_rounded in sorted(ext_cost_keys):
             ext_cost = ext_cost_keys[ec_rounded]
-            tol = 1e-9 * max(1.0, abs(ext_cost))
 
             nrows = len(k_values)
             fig, axs = plt.subplots(nrows, 1, figsize=(6, 3.5 * nrows), squeeze=False)
@@ -1097,64 +977,28 @@ def plot_welfare_kn_comparison(all_results, fig_dir):
             for ki, k in enumerate(k_values):
                 ax = axs[ki][0]
                 ns_avail = []
-                vcg_ms, vcga_ms, ra_ms = [], [], []
-                vcg_cis, vcga_cis, ra_cis = [], [], []
+                stats = {prefix: [] for prefix, *_ in SWEEP_SERIES}  # (mean, ci) per n
 
                 for num_items in num_items_list:
-                    cell = (k, degree, num_items)
-                    if cell not in all_results:
+                    rec = _find_rec(all_results, k, degree, num_items, ext_cost)
+                    if rec is None:
                         continue
-                    matched = [
-                        r
-                        for r in all_results[cell]
-                        if abs(r["externality_cost"] - ext_cost) <= tol
-                    ]
-                    if not matched:
-                        continue
-                    rec = matched[0]
-                    m, ci = _welfare_ci(rec["vcg_welfare"])
-                    vcg_ms.append(m)
-                    vcg_cis.append(ci)  # noqa: E702
-                    m, ci = _welfare_ci(rec["vcga_welfare"])
-                    vcga_ms.append(m)
-                    vcga_cis.append(ci)  # noqa: E702
-                    m, ci = _welfare_ci(rec["ra_welfare"])
-                    ra_ms.append(m)
-                    ra_cis.append(ci)  # noqa: E702
+                    for prefix in stats:
+                        stats[prefix].append(_welfare_ci(rec[f"{prefix}_welfare"]))
                     ns_avail.append(num_items)
 
                 if not ns_avail:
                     ax.set_visible(False)
                     continue
 
-                ebar_kw = dict(capsize=3, capthick=1.0, elinewidth=0.9)
-                ax.errorbar(
-                    ns_avail,
-                    vcg_ms,
-                    yerr=vcg_cis,
-                    marker="o",
-                    label="VCG (unconstrained)",
-                    color="steelblue",
-                    **ebar_kw,
-                )
-                ax.errorbar(
-                    ns_avail,
-                    vcga_ms,
-                    yerr=vcga_cis,
-                    marker="s",
-                    label="Participant Audit",
-                    color="firebrick",
-                    **ebar_kw,
-                )
-                ax.errorbar(
-                    ns_avail,
-                    ra_ms,
-                    yerr=ra_cis,
-                    marker="^",
-                    label="Recipient Audit",
-                    color="seagreen",
-                    **ebar_kw,
-                )
+                for prefix, label, color, marker in SWEEP_SERIES:
+                    ax.errorbar(
+                        ns_avail,
+                        [t[0] for t in stats[prefix]],
+                        yerr=[t[1] for t in stats[prefix]],
+                        marker=marker, label=label, color=color,
+                        capsize=3, capthick=1.0, elinewidth=0.9,
+                    )
 
                 ax.set_title(f"k = {k}")
                 ax.set_xlabel("Number of Bidders (n)")

@@ -6,6 +6,28 @@ Advertiser values (`v`) are proxied by tweet engagement (actions per month) and 
 
 ---
 
+## WEB27 Branch (`web27`): Exact Computation, IVCG-PA, Corrected Penalties
+
+The `web27` branch updates the code to the WEB27 core draft (single-parameter model with a common participation threshold τ):
+
+- **[audited_auctions/](audited_auctions/)** — new package (documented in [audited_auctions/README.md](audited_auctions/README.md)). Given a type distribution and a threshold function τ(e), it computes exactly and simulates VCG (no audit), **VCG-PA**, **IVCG-PA** (ironed VCG with participant audits) and the **first best** (optimal recipient audit), and computes the penalty functions r(e) that induce τ in VCG-PA and IVCG-PA. Reported per mechanism: expected welfare (and its valuation/externality parts), revenue, expected penalty paid, participation, number allocated; per-draw distributions of all of these from simulation.
+- **[evaluate_threshold.py](evaluate_threshold.py)** — command-line front end: one distribution and one τ → summary table, pickled evaluation, and two figures (types/threshold/penalties/expected welfare; welfare densities and paired differences).
+- **Corrected participant penalty.** The old penalty estimator `R(e) = A(e)(τ(e) − P(e))` from realized (k+1)-th prices was biased upward; it is replaced by the exact r(e) = ∫_0^{τ(e)} X^τ(b) db everywhere (sweep figures and post-analysis).
+- **IVCG-PA everywhere.** `run_sweep_genetic2.py` and `post_optimization_analysis.py` report and plot IVCG-PA next to VCG, VCG-PA and the first best; sweep records gain `ivcga_*` keys, revenue, penalty, participation keys, and the full `evaluation` (see the per-run README written by the sweep).
+- **Changed conventions.** Bidders are drawn i.i.d. (with replacement) from the population. VCG and VCG-PA allocate only to positive bids, also inside the genetic algorithm's fitness function (this matters only for samples a–f, which contain negative valuations).
+- **Tests:** [tests/](tests/), run with `python -m pytest tests -q`.
+
+### Setup
+
+With [uv](https://docs.astral.sh/uv/): `uv sync`. Without uv:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install numpy pandas matplotlib scipy seaborn tqdm pygad pytest
+```
+
+---
+
 ## Current Analysis Workflow
 
 The final analysis for the paper uses the following scripts. Start here.
