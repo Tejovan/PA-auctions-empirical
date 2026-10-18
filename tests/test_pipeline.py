@@ -149,3 +149,30 @@ def test_empirical_cell_atomic_evaluation_and_sensitivity(tmp_path):
     assert record["evaluation"].settings["ivcg_design"] == "external"
     assert list(record["bandwidth_sensitivity"].index) == [0.5, 1.0, 2.0]
     assert len(record["bootstrap"].resamples) == 4
+
+
+def test_tau_independent_results_are_cached_and_unchanged():
+    from audited_auctions import build_mechanism_models, evaluate_threshold
+    distribution = synthetic_distribution("harm_rises", num_externality_nodes=61,
+                                          num_valuation_cells=120)
+    first = evaluate_threshold(distribution, polynomial_threshold([0.4, -1.0]), 5, 2)
+    assert ("vcg", 5, 2, "outcomes") in distribution.cache
+    second = evaluate_threshold(distribution, polynomial_threshold([0.1, -0.5]), 5, 2)
+    models, _ = build_mechanism_models(distribution, polynomial_threshold([0.1]), 5, 2)
+    for mechanism in ("vcg", "first_best"):
+        assert second.exact[mechanism] == first.exact[mechanism]
+        assert first.exact[mechanism]["revenue"] == pytest.approx(
+            models[mechanism].expected_outcomes()["revenue"], rel=1e-12)
+    # A rescaled distribution starts with an empty cache.
+    assert distribution.with_externality_scale(2.0).cache == {}
+
+
+def test_bootstrap_reuses_baselines_with_identical_results():
+    sample = lognormal_sample(1200)
+    arguments = dict(num_resamples=4, seed=2)
+    first = bootstrap_welfare(sample, polynomial_threshold([0.5, -1.0]), 4, 1, **arguments)
+    assert len(sample.cache) == 1
+    again = bootstrap_welfare(sample, polynomial_threshold([0.5, -1.0]), 4, 1, **arguments)
+    other = bootstrap_welfare(sample, polynomial_threshold([0.2, -0.5]), 4, 1, **arguments)
+    assert again.resamples.equals(first.resamples)
+    np.testing.assert_array_equal(other.resamples["welfare_vcg"], first.resamples["welfare_vcg"])

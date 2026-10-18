@@ -33,13 +33,20 @@ pipeline therefore designs the IVCG-PA scoring rule on the smoothed training
 distribution and applies it to the test rows.
 """
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pandas as pd
 
 from .smoothing import kernel_density_distribution
-from .threshold_evaluation import AUDITED_MECHANISMS, MECHANISMS, build_mechanism_models
+from .threshold_evaluation import (
+    AUDITED_MECHANISMS,
+    MECHANISMS,
+    PARTICIPANT_AUDIT_MECHANISMS,
+    TAU_INDEPENDENT_MECHANISMS,
+    build_mechanism_model,
+    tau_independent_outcomes,
+)
 from .threshold_functions import as_threshold_function
 from .type_distributions import load_population_csv, population_distribution
 
@@ -55,6 +62,9 @@ class EmpiricalSample:
     maximum_valuation: float
     source: str
     settings: dict
+    # τ-independent bootstrap results (VCG and first-best welfare per resample),
+    # reused by every τ bootstrapped on this sample; not copied by replace.
+    cache: dict = field(default_factory=dict, init=False, repr=False, compare=False)
 
     @property
     def num_rows(self) -> int:
@@ -126,10 +136,21 @@ def sample_distribution(sample, smoothing="kernel", bandwidth_scale=1.0,
 
 def exact_welfare_by_mechanism(type_distribution, threshold_function, num_bidders, num_goods,
                                ivcg_scoring_rule=None):
-    """Exact expected welfare of the four mechanisms (no penalties, revenue or simulation)."""
-    models, _ = build_mechanism_models(type_distribution, threshold_function, num_bidders,
-                                       num_goods, ivcg_scoring_rule)
-    return {mechanism: models[mechanism].expected_welfare() for mechanism in MECHANISMS}
+    """Exact expected welfare of the four mechanisms (no penalties, revenue or simulation).
+
+    VCG and first-best welfare are cached on the distribution (they do not depend on τ).
+    """
+    threshold_function = as_threshold_function(threshold_function)
+    welfare = {
+        mechanism: build_mechanism_model(mechanism, type_distribution, threshold_function,
+                                         num_bidders, num_goods,
+                                         ivcg_scoring_rule).expected_welfare()
+        for mechanism in PARTICIPANT_AUDIT_MECHANISMS
+    }
+    for mechanism in TAU_INDEPENDENT_MECHANISMS:
+        welfare[mechanism] = tau_independent_outcomes(type_distribution, mechanism, num_bidders,
+                                                      num_goods, welfare_only=True)
+    return {mechanism: welfare[mechanism] for mechanism in MECHANISMS}
 
 
 @dataclass
@@ -165,15 +186,25 @@ def bootstrap_welfare(sample, threshold_function, num_bidders, num_goods, num_re
     """
     threshold_function = as_threshold_function(threshold_function)
     rng = np.random.default_rng(seed)
+    # VCG and first-best welfare of each resample do not depend on τ. The resamples
+    # are determined by the seed, so these values are computed once per (seed,
+    # distribution construction, n, k) and reused for every τ bootstrapped on this sample.
+    baseline_key = (seed, num_resamples, smoothing, bandwidth_scale,
+                    tuple(sorted(grid_options.items())), num_bidders, num_goods)
+    baselines = sample.cache.setdefault(baseline_key, {})
     rows = []
-    for _ in range(num_resamples):
+    for index in range(num_resamples):
         resample = sample.subset(rng.integers(0, sample.num_rows, sample.num_rows), "bootstrap")
         distribution = sample_distribution(resample, smoothing, bandwidth_scale, **grid_options)
+        if index in baselines:
+            distribution.cache.update(baselines[index])
         try:
             welfare = exact_welfare_by_mechanism(distribution, threshold_function, num_bidders,
                                                  num_goods, ivcg_scoring_rule)
         except ValueError:  # nobody participates in this resample
             continue
+        baselines[index] = {key: value for key, value in distribution.cache.items()
+                            if key[-1] == "welfare"}
         row = {f"welfare_{m}": welfare[m] for m in MECHANISMS}
         first_best_gain = welfare["first_best"] - welfare["vcg"]
         for mechanism in AUDITED_MECHANISMS:

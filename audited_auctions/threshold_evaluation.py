@@ -64,6 +64,8 @@ MECHANISM_LABELS = {
 }
 
 PARTICIPANT_AUDIT_MECHANISMS = ("vcg_pa", "ivcg_pa")
+# Everyone participates in these, so their outcomes do not depend on τ.
+TAU_INDEPENDENT_MECHANISMS = ("vcg", "first_best")
 AUDITED_MECHANISMS = ("vcg_pa", "ivcg_pa", "first_best")
 
 
@@ -184,6 +186,34 @@ def build_mechanism_model(mechanism, type_distribution, threshold_function, num_
                                      fixed_scoring_rule=fixed_rule)
 
 
+def tau_independent_outcomes(type_distribution, mechanism, num_bidders, num_goods,
+                             welfare_only=False):
+    """Exact outcomes of VCG or the first best, computed once per (distribution, n, k).
+
+    Everyone participates in these mechanisms, so their outcomes do not depend
+    on τ; they are cached on the distribution (type_distribution.cache) and
+    reused by every τ evaluated on it (all degrees, objectives and bandwidth
+    designs of a sweep cell). welfare_only skips revenue (no allocation integral).
+    Returns a copy of the expected_outcomes dict, or the welfare (a float).
+    """
+    if mechanism not in TAU_INDEPENDENT_MECHANISMS:
+        raise ValueError(f"{mechanism} depends on τ")
+    outcomes_key = (mechanism, num_bidders, num_goods, "outcomes")
+    welfare_key = (mechanism, num_bidders, num_goods, "welfare")
+    cache = type_distribution.cache
+    if welfare_only:
+        if welfare_key not in cache:
+            cache[welfare_key] = build_mechanism_model(
+                mechanism, type_distribution, None, num_bidders, num_goods).expected_welfare()
+        return cache[welfare_key]
+    if outcomes_key not in cache:
+        outcomes = build_mechanism_model(mechanism, type_distribution, None, num_bidders,
+                                         num_goods).expected_outcomes()
+        cache[outcomes_key] = outcomes
+        cache[welfare_key] = outcomes["welfare"]
+    return dict(cache[outcomes_key])
+
+
 def ivcg_scoring_rule_for(design_distribution, threshold_function, num_bidders, num_goods):
     """The IVCG-PA scoring rule (ironed welfare contribution as a function of the bid)
     designed on design_distribution for τ; apply it to another distribution with
@@ -270,9 +300,14 @@ def evaluate_threshold(
                           (ivcg_scoring_rule_for); default: iron type_distribution
     """
     threshold_function = as_threshold_function(threshold_function)
-    models, cell_participation_mass = build_mechanism_models(
-        type_distribution, threshold_function, num_bidders, num_goods, ivcg_scoring_rule
-    )
+    # VCG and the first best do not depend on τ: their exact outcomes are cached
+    # on the distribution; only the participant-audit mechanisms are built here.
+    models = {
+        mechanism: build_mechanism_model(mechanism, type_distribution, threshold_function,
+                                         num_bidders, num_goods, ivcg_scoring_rule)
+        for mechanism in PARTICIPANT_AUDIT_MECHANISMS
+    }
+    cell_participation_mass = models["vcg_pa"].cell_participation_mass
     maximum_valuation = type_distribution.maximum_valuation
     penalty_tables = {
         mechanism: {"allocation_integral": models[mechanism].allocation_integral_function,
@@ -285,7 +320,11 @@ def evaluate_threshold(
             penalty_tables[mechanism], threshold_function(externalities))
 
     # Exact expectations --------------------------------------------------------
-    exact = {mechanism: models[mechanism].expected_outcomes() for mechanism in MECHANISMS}
+    exact = {mechanism: (models[mechanism].expected_outcomes()
+                         if mechanism in models
+                         else tau_independent_outcomes(type_distribution, mechanism, num_bidders,
+                                                       num_goods))
+             for mechanism in MECHANISMS}
     exact["vcg"]["penalty_paid"] = 0.0
     for mechanism in PARTICIPANT_AUDIT_MECHANISMS:
         cell_penalties = penalty_function(mechanism)(type_distribution.externalities)

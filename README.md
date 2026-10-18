@@ -17,7 +17,7 @@ The `web27` branch updates the code to the WEB27 core draft (single-parameter mo
 - **Welfare comparisons** are gains over unaudited VCG (VCG-PA − VCG, IVCG-PA − VCG, first best − VCG).
 - **Corrected participant penalty.** The old estimator `R(e) = A(e)(τ(e) − P(e))` from realized (k+1)-th prices was biased upward; the exact r(e) = ∫_0^{τ(e)} X^τ(b) db replaces it everywhere.
 - **Scripts.** [evaluate_threshold.py](evaluate_threshold.py) (one distribution and one τ → table, pickle, two figures); [Collateralized_Auction_genetic2.py](Collateralized_Auction_genetic2.py) (optimize and evaluate one cell); [run_sweep_genetic2.py](run_sweep_genetic2.py) (sweeps over ζ, degree, k, n; writes a README describing its output); [post_optimization_analysis.py](post_optimization_analysis.py) (figures from a sweep).
-- **Tests:** [tests/](tests/), run with `python -m pytest tests -q` (46 tests).
+- **Tests:** [tests/](tests/), run with `python -m pytest tests -q` (48 tests).
 
 Typical runs:
 

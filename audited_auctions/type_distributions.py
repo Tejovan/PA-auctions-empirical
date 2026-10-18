@@ -62,6 +62,10 @@ class TypeDistribution:
                       "externality_grid", "valuation_grid", "density"
                       (density has shape (len(valuation_grid), len(externality_grid)))
     metadata        : free-form provenance (family parameters, smoothing settings)
+    cache           : results that depend only on this distribution (not on τ),
+                      e.g. VCG and first-best outcomes; filled by
+                      threshold_evaluation.tau_independent_outcomes. Not copied
+                      by dataclasses.replace, so transformed distributions start empty.
     """
 
     externalities: np.ndarray
@@ -71,6 +75,7 @@ class TypeDistribution:
     name: str = ""
     density_grid: Optional[dict] = field(default=None, repr=False)
     metadata: dict = field(default_factory=dict, repr=False)
+    cache: dict = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def __post_init__(self):
         self.externalities = np.asarray(self.externalities, dtype=float).ravel()
