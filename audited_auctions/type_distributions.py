@@ -476,7 +476,9 @@ def harmful_middle_distribution(band=(0.5, 0.75), harmful_share_in_band=0.8,
     return gridded_density_distribution(
         density,
         np.linspace(harmful_mean - 5 * harmful_sd, 5 * benign_sd, num_externality_nodes),
-        np.linspace(0.0, 1.0, num_valuation_cells + 1),
+        # band ends are cell edges, so no cell straddles the jump in the density
+        np.union1d(np.linspace(0.0, 1.0, num_valuation_cells + 1),
+                   [b for b in band if 0.0 < b < 1.0]),
         name="M harmful middle band",
         metadata={"family": "harmful_middle", "band": list(band),
                   "harmful_share_in_band": harmful_share_in_band,
