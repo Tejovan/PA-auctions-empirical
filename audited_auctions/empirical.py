@@ -4,26 +4,33 @@ empirical.py
 Pipeline pieces for an empirical population (a CSV with columns e_score,
 v_score), in the order they are used:
 
-1. load_empirical_sample: scale (e = ζ e_score, v = action_cost × v_score),
-   keep positive valuations, and truncate at a high valuation quantile, which
-   becomes the valuation bound v̄ of the model.
-2. split_sample: a random train/test split. τ is optimized on the training
-   half and evaluated on the test half, so the reported welfare is not inflated
-   by fitting τ to the noise of the same rows.
-3. sample_distribution: the type distribution of a sample, either smoothed
-   (kernel density, smoothing.py; the default, matching the model's continuous
-   valuations) or atomic (the rows as they are; a robustness check, mainly for
-   VCG and VCG-PA: with distinct valuations an atomic IVCG-PA ranks each row by
-   its own v + e, which overfits).
-4. bootstrap_welfare: resample the test rows with replacement, rebuild the
-   distribution the same way (re-smoothing, with the bandwidth re-chosen by
-   Scott's rule on each resample), and recompute expected welfare exactly for
-   every resample. The spread is the sampling uncertainty of the population
-   (not Monte Carlo error, which exact computation removes). Gains over VCG
-   are paired: all mechanisms are evaluated on the same resample.
+1. load_empirical_sample: scale (e = ζ e_score, v = action_cost × v_score) and
+   keep positive valuations.
+2. split_sample: a random train/test split of all rows. τ is optimized on the
+   training half and evaluated on the test half, so the reported welfare is
+   not inflated by fitting τ to the noise of the same rows. The split is made
+   before truncation, so it does not change with the truncation level.
+3. valuation_bound + truncate_sample: drop rows with v above a quantile of the
+   full sample's valuations; that quantile is the valuation bound v̄ of the
+   model. The training half is truncated at truncation_quantile (default
+   0.995: the top rows are few and noisy and would dominate the design); the
+   test half may use another level (1.0 keeps every row).
+4. sample_distribution: the type distribution of a sample, kernel-smoothed
+   (smoothing.py; used for the training half, where τ and the IVCG-PA scores
+   are designed) or atomic (the rows as they are; used by default for the test
+   half, so evaluation has no smoothing bias).
+5. bootstrap_welfare: resample the test rows with replacement, rebuild the
+   distribution the same way, and recompute expected welfare exactly for every
+   resample, with τ and the IVCG-PA scoring rule held fixed at their training
+   design. The spread is the sampling uncertainty of the test population (not
+   Monte Carlo error, which exact computation removes). Gains over VCG are
+   paired: all mechanisms are evaluated on the same resample.
 
-The truncation bound v̄ is fixed from the full sample and not re-estimated
-inside the bootstrap.
+IVCG-PA on atomic data must not be ironed on the data it is evaluated on: with
+distinct valuations, each valuation is one row, so ŵ^τ(v) = v + e of that row
+and the mechanism would rank bidders by their true welfare contribution. The
+pipeline therefore designs the IVCG-PA scoring rule on the smoothed training
+distribution and applies it to the test rows.
 """
 
 from dataclasses import dataclass, replace
@@ -60,21 +67,34 @@ class EmpiricalSample:
 
 
 def load_empirical_sample(csv_path, externality_scale=1.0, valuation_scale=1.0,
-                          truncation_quantile=0.995):
-    """Scaled population, truncated to valuations in (0, v̄], v̄ = valuation quantile."""
+                          truncation_quantile=None):
+    """Scaled population with positive valuations; optionally truncated at a valuation quantile."""
     externalities, valuations = load_population_csv(csv_path, externality_scale, valuation_scale)
     positive = valuations > 0
-    maximum_valuation = float(np.quantile(valuations[positive], truncation_quantile))
-    keep = positive & (valuations <= maximum_valuation)
-    return EmpiricalSample(
-        externalities=externalities[keep], valuations=valuations[keep],
-        maximum_valuation=maximum_valuation, source=str(csv_path),
+    sample = EmpiricalSample(
+        externalities=externalities[positive], valuations=valuations[positive],
+        maximum_valuation=float(valuations[positive].max()), source=str(csv_path),
         settings={"externality_scale": externality_scale, "valuation_scale": valuation_scale,
-                  "truncation_quantile": truncation_quantile,
                   "num_rows_loaded": int(len(valuations)),
-                  "num_rows_dropped_nonpositive": int((~positive).sum()),
-                  "num_rows_dropped_above_bound": int((positive & ~keep).sum())},
+                  "num_rows_dropped_nonpositive": int((~positive).sum())},
     )
+    if truncation_quantile is not None:
+        sample = truncate_sample(sample, valuation_bound(sample, truncation_quantile))
+    return sample
+
+
+def valuation_bound(sample, truncation_quantile):
+    """v̄ = the truncation_quantile of the sample's valuations (1.0: the maximum)."""
+    return float(np.quantile(sample.valuations, truncation_quantile))
+
+
+def truncate_sample(sample, maximum_valuation):
+    """Rows with v <= maximum_valuation; the bound becomes the sample's v̄."""
+    keep = sample.valuations <= maximum_valuation
+    return replace(sample, externalities=sample.externalities[keep],
+                   valuations=sample.valuations[keep], maximum_valuation=maximum_valuation,
+                   settings={**sample.settings,
+                             "num_rows_dropped_above_bound": int((~keep).sum())})
 
 
 def split_sample(sample, train_fraction=0.5, seed=0):
@@ -104,10 +124,11 @@ def sample_distribution(sample, smoothing="kernel", bandwidth_scale=1.0,
     raise ValueError(f"smoothing must be one of {SMOOTHING_CHOICES}")
 
 
-def exact_welfare_by_mechanism(type_distribution, threshold_function, num_bidders, num_goods):
+def exact_welfare_by_mechanism(type_distribution, threshold_function, num_bidders, num_goods,
+                               ivcg_scoring_rule=None):
     """Exact expected welfare of the four mechanisms (no penalties, revenue or simulation)."""
     models, _ = build_mechanism_models(type_distribution, threshold_function, num_bidders,
-                                       num_goods)
+                                       num_goods, ivcg_scoring_rule)
     return {mechanism: models[mechanism].expected_welfare() for mechanism in MECHANISMS}
 
 
@@ -130,9 +151,13 @@ class BootstrapResult:
 
 
 def bootstrap_welfare(sample, threshold_function, num_bidders, num_goods, num_resamples=200,
-                      seed=0, smoothing="kernel", bandwidth_scale=1.0, confidence_level=0.95,
-                      **grid_options):
+                      seed=0, smoothing="none", bandwidth_scale=1.0, confidence_level=0.95,
+                      ivcg_scoring_rule=None, **grid_options):
     """Bootstrap of exact expected welfare over resamples of the rows of `sample`.
+
+    smoothing: how each resample's distribution is built ("none": atomic, the
+    default evaluation; "kernel": re-smoothed). ivcg_scoring_rule: the IVCG-PA
+    design held fixed across resamples (None: iron each resample).
 
     Columns of the result: welfare_<mechanism>, gain_<mechanism> (paired gain
     over VCG on the same resample), share_<mechanism> (share of the first-best
@@ -146,7 +171,7 @@ def bootstrap_welfare(sample, threshold_function, num_bidders, num_goods, num_re
         distribution = sample_distribution(resample, smoothing, bandwidth_scale, **grid_options)
         try:
             welfare = exact_welfare_by_mechanism(distribution, threshold_function, num_bidders,
-                                                 num_goods)
+                                                 num_goods, ivcg_scoring_rule)
         except ValueError:  # nobody participates in this resample
             continue
         row = {f"welfare_{m}": welfare[m] for m in MECHANISMS}

@@ -83,6 +83,17 @@ class PiecewiseLinearScore:
         score = self.start_scores[safe] + rise * fraction
         return np.where(piece >= 0, score, -np.inf)
 
+    def left_limit(self, bids):
+        """lim_{t ↑ b} score(t): the score approached from below (−inf at or below knots[0])."""
+        bids = np.asarray(bids, dtype=float)
+        piece = np.searchsorted(self.knots, bids, side="left") - 1
+        safe = np.clip(piece, 0, len(self.knots) - 1)
+        rise = self.end_scores[safe] - self.start_scores[safe]
+        length = np.where(np.isfinite(self._piece_lengths[safe]), self._piece_lengths[safe], 1.0)
+        score = self.start_scores[safe] + np.where(rise > 0, rise * (bids - self.knots[safe]) / length,
+                                                   0.0)
+        return np.where(piece >= 0, score, -np.inf)
+
     def _inverse(self, score_values, strict):
         """inf{b : score(b) > c} (strict) or inf{b : score(b) >= c}."""
         score_values = np.asarray(score_values, dtype=float)

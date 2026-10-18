@@ -13,6 +13,7 @@ from .threshold_evaluation import (
     evaluate_threshold,
     expected_welfare,
     grid_refinement_check,
+    ivcg_scoring_rule_for,
     penalty_from_table,
 )
 from .threshold_functions import (

@@ -37,14 +37,14 @@ Command line: `python evaluate_threshold.py --distribution harm_rises --tau-coef
 |--------|----------|
 | `type_distributions.py` | `TypeDistribution` (cells: an externality, a valuation interval, a probability); populations (atomic), gridded densities (piecewise uniform), discrete externality levels; the synthetic families (`SYNTHETIC_FAMILIES`, `synthetic_distribution`). |
 | `smoothing.py` | `kernel_density_distribution`: kernel-smoothed piecewise-uniform distribution of a population. |
-| `empirical.py` | Empirical pipeline: load and truncate a CSV, train/test split, smoothed or atomic distribution, bootstrap of exact welfare. |
+| `empirical.py` | Empirical pipeline: load a CSV, train/test split, truncation, smoothed or atomic distribution, bootstrap of exact welfare. |
 | `threshold_functions.py` | τ(e) from polynomial coefficients, tabulated values, or a constant. τ = +inf excludes an externality (the threshold v̄⁺ of the paper). |
 | `scoring_rules.py` | `IdentityScore` (rank by bid) and `PiecewiseLinearScore` (rank by the ironed welfare contribution, a nondecreasing function of the bid), with the generalized inverses needed for payments. |
 | `exact_computation.py` | Quantile representation of a mechanism, exact ironing, interim allocation with ties, exact integration of welfare, revenue and the allocation integral R(b) (the penalty). |
 | `auction_simulation.py` | Vectorized Monte Carlo of a score-based auction on sampled type profiles. |
-| `threshold_evaluation.py` | `evaluate_threshold` (main entry point), `ThresholdEvaluation`, `expected_welfare` (optimization objective), `penalty_from_table`, `grid_refinement_check`. |
+| `threshold_evaluation.py` | `evaluate_threshold` (main entry point), `ThresholdEvaluation`, `expected_welfare` (optimization objective), `ivcg_scoring_rule_for` (IVCG-PA design to apply elsewhere), `penalty_from_table`, `grid_refinement_check`. |
 | `genetic_search.py` | Genetic algorithm over polynomial τ with the exact welfare objective. |
-| `pipeline.py` | One optimization-and-evaluation cell: `prepare_distributions`, `optimize_and_evaluate`. |
+| `pipeline.py` | One optimization-and-evaluation cell: `prepare_distributions`, `optimize_and_evaluate`, `bandwidth_sensitivity`. |
 | `figures.py` | `plot_threshold_and_penalties`, `plot_welfare_distributions`. |
 | `sweep_support.py` | Glue for `run_sweep_genetic2.py` and `post_optimization_analysis.py`. |
 
@@ -76,20 +76,23 @@ All families have v ∈ [0, v̄]. Grid options: `num_externality_nodes` (default
 | `harmful_middle` | v ~ U[0, 1]; given v, e ~ N(−1.5, 0.2²) with probability 0.8 for v ∈ [0.5, 0.75) and 0.1 otherwise, else e ~ N(0, 0.1²) | ŵ^τ is non-monotone, so IVCG-PA irons and beats VCG-PA (a continuous analogue of Example T) |
 | `heavy_tail` | log v ~ N(0, 1) truncated at its 99.5% quantile; given v, e ~ N(−0.5 √v, 0.4²) | skew like engagement data; harm grows with valuation |
 
-The mixtures a–f and h are those of `alternate_distributions.ipynb` with valuation means shifted up by 1 (h unchanged), truncated to v ≥ 0 and to ±5 standard deviations, and renormalized. The shift keeps the shapes while truncation at v = 0 removes almost no mass; the CSV samples in `data/samples/` are the old unshifted versions with negative valuations and are not used by the pipeline.
+The mixtures a–f and h are those of `legacy/alternate_distributions.ipynb` with valuation means shifted up by 1 (h unchanged), truncated to v ≥ 0 and to ±5 standard deviations, and renormalized. The shift keeps the shapes while truncation at v = 0 removes almost no mass; the old unshifted CSV samples with negative valuations are in `legacy/data/samples/` and are not used.
 
 ### Empirical populations
 
-`empirical.py` (used by the pipeline when the source is a CSV with columns `e_score`, `v_score`):
+`empirical.py` and `pipeline.prepare_distributions` (used when the source is a CSV with columns `e_score`, `v_score`):
 
-1. **Scale and truncate** (`load_empirical_sample`): e = ζ e_score, v = action_cost × v_score; rows with v ≤ 0 or v above the `truncation_quantile` (default 0.995) of v are dropped, and that quantile is the bound v̄. On the Community Notes data this drops 60 of 11,811 rows.
-2. **Split** (`split_sample`): a random train/test split (default ½/½) with a seed common to all sweep cells.
-3. **Distribution** (`sample_distribution`): kernel-smoothed (default) or atomic.
-4. **Bootstrap** (`bootstrap_welfare`): resample the test rows with replacement, rebuild the distribution the same way (re-smoothing with the bandwidth re-chosen on the resample), and recompute exact welfare of all four mechanisms. Reports per-resample welfare, paired gains over VCG and shares of the first-best gain, and percentile intervals. v̄ stays fixed. About 40 ms per resample on the Community Notes test half.
+1. **Scale** (`load_empirical_sample`): e = ζ e_score, v = action_cost × v_score; rows with v ≤ 0 are dropped.
+2. **Split** (`split_sample`): a random train/test split of all rows (default ½/½) with a seed common to all sweep cells. The split is made before truncation, so it does not depend on the truncation level.
+3. **Truncate** (`valuation_bound`, `truncate_sample`): each half drops rows with v above a quantile of the full sample's valuations; that quantile is the bound v̄. Training: `truncation_quantile` (default 0.995; on the Community Notes data the top 0.5% is 60 rows from 393k to 1.6M that would dominate the design and double the bootstrap noise). Test: `evaluation_truncation_quantile` (default the same; 1.0 keeps every row, a robustness check that reports welfare for the whole population at the cost of more noise).
+4. **Design distribution** (training half): kernel-smoothed by default (`--smoothing none` keeps atoms). τ is optimized on it, and the IVCG-PA scoring rule ω̄^τ is ironed on it (`ivcg_scoring_rule_for`).
+5. **Evaluation distribution** (test half): the atomic rows by default (`--evaluation smoothed` smooths them like the training half). τ and the IVCG-PA scoring rule designed on the training half are applied unchanged (`ivcg_scoring_rule=` arguments), so evaluation is out of sample and has no smoothing bias. Penalties r(e) are computed on the evaluation distribution, the population that plays the auction.
+6. **Bootstrap** (`bootstrap_welfare`): resample the test rows with replacement and recompute exact welfare of all four mechanisms, with τ and the IVCG-PA scoring rule fixed at the training design. Reports per-resample welfare, paired gains over VCG and shares of the first-best gain, and percentile intervals. Fast on atomic test rows (no smoothing per resample).
+7. **Bandwidth sensitivity** (`pipeline.bandwidth_sensitivity`, `--sensitivity-bandwidths 0.5,2`): redo the design (genetic search and IVCG-PA scores) on the training half smoothed with each bandwidth multiplier and evaluate each design exactly on the same test rows. Shows whether the results depend on the smoothing choice; it costs one extra genetic search per scale.
+
+**Why IVCG-PA is designed on the training half.** With distinct valuations, each valuation level of an atomic population is a single row, so ŵ^τ(v) = v + e of that row: IVCG-PA ironed on the rows it is evaluated on would rank bidders by their true welfare contribution and approach the first best in sample. Designing the scoring rule on the smoothed training half and applying it to the test rows avoids this.
 
 **Kernel smoothing** (`smoothing.py`). Coordinates u = asinh(e/s_e) (s_e = median |e|) and y = log v; Gaussian kernel with Scott's bandwidth matrix (× `bandwidth_scale`), computed by linear binning and FFT convolution; reflection at y = log v̄; cells with externality nodes on a uniform u-grid (241) and valuation cells on a uniform y-grid (400), the valuation uniform within a cell. The estimator is variance-preserving: the data are shrunk toward their mean by (1 + h²)^(−1/2), so the smoothed (u, y) keep the sample mean and covariance. Without this, smoothing in log v inflates the upper tail of v (expected VCG welfare +10% on the Community Notes data at bandwidth scale 1); with it, smoothed and atomic VCG welfare differ by under 1%. Check sensitivity with `bandwidth_scale` 0.5 and 2.
-
-**Why smoothing is the default.** With distinct valuations, each valuation level of an atomic population is a single row, so ŵ^τ(v) = v + e of that row and an atomic IVCG-PA ranks bidders by their true welfare contribution: in-sample it approaches the first best and it overfits. Smoothing makes E[e | v] a conditional mean. The atomic distribution remains available (`--smoothing none`) as a robustness check, mainly for VCG and VCG-PA.
 
 ## What is computed, and how
 
@@ -131,7 +134,7 @@ This replaces the old estimator R(e) = A(e)(τ(e) − P(e)) built from realized 
 | Source | τ optimized on | τ evaluated on | Uncertainty reported |
 |--------|----------------|----------------|----------------------|
 | synthetic family | the family's distribution | the same distribution | none (H known); optional grid-refinement check |
-| empirical CSV | training half (smoothed or atomic) | test half, same construction | bootstrap over test rows (exact welfare per resample) |
+| empirical CSV | training half (smoothed by default); IVCG-PA scoring rule designed there too | test half (atomic by default) | bootstrap over test rows (exact welfare per resample); optional bandwidth sensitivity |
 
 and in both cases one simulation of `num_simulated_draws` auctions on the evaluation distribution for the per-auction welfare figures.
 
@@ -156,7 +159,7 @@ Colors are a fixed, color-vision-checked assignment per mechanism (`MECHANISM_CO
 
 `tests/test_audited_auctions.py`: Example T (ironing pools valuations 2 and 3; IVCG-PA welfare 40/16; first best 41/16; VCG-PA ≤ 39/16); the second-price penalty τ² (exact for uniform valuations); Example N welfare and penalty (exact); exact ironing of piecewise-linear ŵ^τ against ironing of a fine atomic discretization; ironing binds and helps in `harmful_middle`; exact expectations equal simulated means for all mechanisms and metrics (atomic and piecewise-uniform); a threshold type is indifferent (its simulated auction-utility equals r(e)); IVCG-PA ≥ VCG-PA; inverses of the piecewise-linear score; negative valuations are rejected.
 
-`tests/test_pipeline.py`: every family has bounded non-negative continuous valuations; variance-preserving smoothing keeps the moments; the split is deterministic; bootstrap gains are paired; smoothed and atomic VCG welfare agree; the genetic search recovers the Example N optimum t* = 4c/3; a synthetic pipeline cell with grid refinement.
+`tests/test_pipeline.py`: every family has bounded non-negative continuous valuations; variance-preserving smoothing keeps the moments; the split is deterministic; bootstrap gains are paired; smoothed and atomic VCG welfare agree; the genetic search recovers the Example N optimum t* = 4c/3; a synthetic pipeline cell with grid refinement; an IVCG-PA scoring rule designed on a distribution and applied to the same distribution reproduces its ironing exactly (welfare, revenue, penalties; atomic and piecewise uniform); an empirical cell with atomic evaluation, untruncated test rows, bootstrap and bandwidth sensitivity.
 
 ## Conventions and limitations
 

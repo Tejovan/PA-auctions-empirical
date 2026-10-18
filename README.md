@@ -12,12 +12,12 @@ The `web27` branch updates the code to the WEB27 core draft (single-parameter mo
 
 - **[audited_auctions/](audited_auctions/)** — package. Given a type distribution and τ(e), it computes **exactly** (and simulates) VCG (no audit), **VCG-PA**, **IVCG-PA** (ironed VCG with participant audits) and the **first best** (optimal recipient audit), and the penalty functions r(e) inducing τ. Reported per mechanism: expected welfare (valuation and externality parts), gain over VCG and share of the first-best gain, revenue, expected penalty paid, participation, number allocated; per-auction distributions from simulation.
 - **Model-consistent distributions.** Valuations are non-negative and bounded (enforced). Continuous distributions are piecewise uniform (valuations uniform within grid cells, externalities on grid nodes), so valuation ties have probability zero and all quantities are exact for that distribution. Synthetic families: the mixtures a–f, h (valuation means shifted by +1, truncated at 0) and new families `example_n` (analytic benchmark), `independent`, `harm_rises`, `harmful_middle` (ironing binds), `heavy_tail`.
-- **Empirical pipeline.** CSV data are truncated at a valuation quantile (v̄), split into training and test halves, and kernel-smoothed (variance-preserving, in asinh e and log v) or kept atomic; τ is optimized on the training half and evaluated on the test half, with a bootstrap of exact welfare over test rows.
+- **Empirical pipeline.** CSV rows are split into training and test halves and truncated at a valuation quantile (v̄; default 0.995, set separately for the test rows). τ and the IVCG-PA scoring rule are designed on the kernel-smoothed training half (variance-preserving, in asinh e and log v) and evaluated exactly on the atomic test rows, with a bootstrap of exact welfare over test rows and an optional bandwidth sensitivity check.
 - **Exact objective.** The genetic algorithm (`audited_auctions/genetic_search.py`) maximizes the exact expected welfare of VCG-PA (or IVCG-PA) on the distribution, not an average over simulated auction draws.
 - **Welfare comparisons** are gains over unaudited VCG (VCG-PA − VCG, IVCG-PA − VCG, first best − VCG).
 - **Corrected participant penalty.** The old estimator `R(e) = A(e)(τ(e) − P(e))` from realized (k+1)-th prices was biased upward; the exact r(e) = ∫_0^{τ(e)} X^τ(b) db replaces it everywhere.
 - **Scripts.** [evaluate_threshold.py](evaluate_threshold.py) (one distribution and one τ → table, pickle, two figures); [Collateralized_Auction_genetic2.py](Collateralized_Auction_genetic2.py) (optimize and evaluate one cell); [run_sweep_genetic2.py](run_sweep_genetic2.py) (sweeps over ζ, degree, k, n; writes a README describing its output); [post_optimization_analysis.py](post_optimization_analysis.py) (figures from a sweep).
-- **Tests:** [tests/](tests/), run with `python -m pytest tests -q` (43 tests).
+- **Tests:** [tests/](tests/), run with `python -m pytest tests -q` (46 tests).
 
 Typical runs:
 
@@ -25,15 +25,17 @@ Typical runs:
 # synthetic family, with a check of the discretization error
 python run_sweep_genetic2.py --data harm_rises --degrees 1,2 --k-values 1,2 --num-items 8 \
     --ext-min 0.5 --ext-max 2 --num-ext 4 --grid-refinement --warm-start --tag harm
-# empirical data: train/test split, kernel smoothing, bootstrap
+# empirical data: design on smoothed training half, exact evaluation on atomic test rows,
+# bootstrap, bandwidth sensitivity
 python run_sweep_genetic2.py --data data/samples/g_full_tweets.csv --degrees 1,2 --k-values 1 \
-    --num-items 8 --ext-min 1 --ext-max 100 --num-ext 6 --log-scale --tag tweets
+    --num-items 8 --ext-min 1 --ext-max 100 --num-ext 6 --log-scale \
+    --sensitivity-bandwidths 0.5,2 --tag tweets
 python post_optimization_analysis.py output/sweep_genetic2_tweets_
 ```
 
 Not yet done (planned): a grid representation of τ and the best-response ascent based on the first-order condition of the core draft's Appendix E; running large sweeps on the BU SCC cluster.
 
-The sections below describe the original (EC 2025 / EAAMO 2026) workflow; the legacy scripts `run_local.sh`, `run_sweep.sh`, `plot_sweep.py` still call `Collateralized_Auction_genetic2.py` with the same flags, and its output keeps the legacy fields they read.
+The sections below describe the analysis workflow (data pipeline, optimization, figures, descriptive statistics). Material from the original EC 2025 / EAAMO 2026 workflow that the WEB27 code no longer uses is in [legacy/](legacy/).
 
 ### Setup
 
@@ -105,8 +107,8 @@ python csv_to_latex.py --input-dir output/descriptive_stats/tables
 
 ### 5. Supplemental
 
-**[supplemental/](supplemental/)**
-LaTeX source for the EC 2025 supplemental document, including the methodology and data collection description.
+**[legacy/supplemental/](legacy/supplemental/)**
+LaTeX source for the EC 2025 supplemental document, including the methodology and data collection description. **[value_externality_definitions/](value_externality_definitions/)** defines the valuation and externality scores of the data.
 
 ---
 
@@ -127,49 +129,8 @@ csv_to_latex.py               → output/descriptive_stats/tables/tables.tex
 
 ---
 
-## Alternate Optimization Algorithms
+---
 
-The scripts in [`alternate_optimization_algorithms/`](alternate_optimization_algorithms/) are earlier iterations of the optimizer included as alternate possibilities for readers interested in comparing approaches. They were **not used in the final EC 2025 analysis** and produced significantly worse results than the final genetic algorithm (`Collateralized_Auction_genetic2.py`). They can be exercised via `run_local.sh` and `run_sweep.sh` using the `--genetic`, `--sgd`, `--sgd-bb`, and `--grid` flags.
+## Legacy Material
 
-### Grid Search
-
-**[alternate_optimization_algorithms/Collateralized_Auction_grid_search.py](alternate_optimization_algorithms/Collateralized_Auction_grid_search.py)**
-Exhaustive vectorized grid search over polynomial coefficient space. Computes welfare for all coefficient combinations using matrix multiplication (`B @ E^T`); relies on BLAS threading rather than joblib. Useful for low-degree polynomials where the search space is small enough to enumerate.
-
-### SGD-Based Optimizers
-
-**[alternate_optimization_algorithms/Collateralized_Auction_sgd.py](alternate_optimization_algorithms/Collateralized_Auction_sgd.py)**
-Gradient-based optimizer using stochastic gradient descent on τ coefficients.
-
-**[alternate_optimization_algorithms/Collateralized_Auction_sgd_bb.py](alternate_optimization_algorithms/Collateralized_Auction_sgd_bb.py)**
-SGD variant with Barzilai–Borwein adaptive step size.
-
-### First-Generation Genetic Algorithm
-
-**[alternate_optimization_algorithms/Collateralized_Auction_genetic.py](alternate_optimization_algorithms/Collateralized_Auction_genetic.py)**
-Exploratory, percent-cell-structured script for running the GA interactively. Uses log-space coefficient search (`ln_coeffs_to_coeffs`). Superseded by `Collateralized_Auction_genetic2.py`.
-
-**[alternate_optimization_algorithms/Collateralized_Auction_genetic_script.py](alternate_optimization_algorithms/Collateralized_Auction_genetic_script.py)**
-CLI version of the first-generation GA designed for HPC cluster submission. Uses joint `[-1, 1]` normalization of `v` and `e` before running the GA, then converts coefficients back to original space. Superseded by `run_sweep_genetic2.py` + `Collateralized_Auction_genetic2.py`.
-
-### HPC Cluster Scripts (first-generation)
-
-**[alternate_optimization_algorithms/cluster_run.sh](alternate_optimization_algorithms/cluster_run.sh)**
-SGE array job that submits one distribution × one polynomial degree, running 7 parallel tasks (one per externality cost value). Used with `Collateralized_Auction_genetic_script.py`.
-
-**[alternate_optimization_algorithms/cluster_run_all.sh](alternate_optimization_algorithms/cluster_run_all.sh)**
-Submits all combinations of distributions × polynomial degrees by calling `cluster_run.sh` repeatedly.
-
-**[run_sweep.sh](run_sweep.sh)**
-Earlier local sweep runner, predating `run_sweep_genetic2.py`.
-
-### Older Analysis
-
-**[Create_Plots.ipynb](Create_Plots.ipynb)**
-Jupyter notebook that loaded first-generation GA pickle files and generated figures. Superseded by `post_optimization_analysis.py`.
-
-**[plot_sweep.py](plot_sweep.py)**
-Earlier sweep plotting script.
-
-**[alternate_distributions.ipynb](alternate_distributions.ipynb)**
-Generates synthetic 2D (e, v) distributions for controlled experiments: single-modal normal, two-modal side-by-side, diagonal variants, and four-modal. Saved to `data/samples/`.
+Superseded scripts, notebooks, synthetic samples and sweep outputs are in [legacy/](legacy/), described in [legacy/README.md](legacy/README.md).

@@ -23,9 +23,9 @@ Usage:
 name (see audited_auctions/README.md, "Type distributions").
 
 Output: output/results/genetic2_results_<id>.pkl, a one-element list holding
-the record of audited_auctions.pipeline.optimize_and_evaluate plus the fields
-read by the legacy plot_sweep.py (tau, tested_functions, advertisers,
-w_vcg_tot, w_coll_tot, ...), filled from the simulated auctions.
+the record of audited_auctions.pipeline.optimize_and_evaluate (fields: see the
+README that run_sweep_genetic2.py writes). The pre-WEB27 result format read by
+legacy/plot_sweep.py is no longer produced.
 """
 
 import argparse
@@ -36,30 +36,6 @@ import numpy as np
 
 from audited_auctions.empirical import SMOOTHING_CHOICES
 from audited_auctions.pipeline import optimize_and_evaluate, prepare_distributions
-
-
-def legacy_fields(record, externality_cost, num_items):
-    """Fields of the pre-WEB27 result format, from the simulated auctions (VCG-PA = "coll")."""
-    simulated = record["evaluation"].simulated
-    if simulated is None:
-        return {}
-    vcg, vcg_pa = simulated["vcg"], simulated["vcg_pa"]
-    return {
-        "externality_cost_per_impression": externality_cost,
-        "num_advertisers": num_items,
-        "num_auctions": len(vcg["welfare"]),
-        "k": record["num_goods"],
-        "tau": record["tau_coeffs"],
-        "tested_functions": record["trajectory"],
-        "advertisers": [list(zip(record["type_sample"]["valuations"].tolist(),
-                                 record["type_sample"]["externalities"].tolist()))],
-        "w_vcg_adv": vcg["valuation_welfare"].tolist(),
-        "w_coll_adv": vcg_pa["valuation_welfare"].tolist(),
-        "w_vcg_ext": vcg["externality_welfare"].tolist(),
-        "w_coll_ext": vcg_pa["externality_welfare"].tolist(),
-        "w_vcg_tot": vcg["welfare"].tolist(),
-        "w_coll_tot": vcg_pa["welfare"].tolist(),
-    }
 
 
 def parse_args():
@@ -90,6 +66,14 @@ def parse_args():
     parser.add_argument("--split-seed", type=int, default=0)
     parser.add_argument("--smoothing", choices=SMOOTHING_CHOICES, default="kernel")
     parser.add_argument("--bandwidth-scale", type=float, default=1.0)
+    parser.add_argument("--evaluation", choices=("atomic", "smoothed"), default="atomic",
+                   help="CSV data: evaluate on the atomic test rows (default) or the smoothed test half")
+    parser.add_argument("--evaluation-truncation-quantile", type=float, default=None,
+                   help="CSV data: truncation of the test rows (default: same as "
+                        "--truncation-quantile; 1.0 keeps every row)")
+    parser.add_argument("--sensitivity-bandwidths", default="",
+                   help='CSV data: extra bandwidth scales for the sensitivity check, e.g. "0.5,2" '
+                        "(reruns the GA per scale; default: none)")
     parser.add_argument("--bootstrap-samples", type=int, default=200)
     parser.add_argument("--grid-refinement", action="store_true",
                         help="synthetic families: also evaluate τ on a twice finer grid")
@@ -103,7 +87,8 @@ def main():
         args.data, externality_scale=args.externality_cost, valuation_scale=args.action_cost,
         truncation_quantile=args.truncation_quantile, train_fraction=args.train_fraction,
         split_seed=args.split_seed, smoothing=args.smoothing,
-        bandwidth_scale=args.bandwidth_scale)
+        bandwidth_scale=args.bandwidth_scale, evaluation=args.evaluation,
+        evaluation_truncation_quantile=args.evaluation_truncation_quantile)
     record = optimize_and_evaluate(
         prepared, args.polynomial_degree, args.num_items, args.k,
         objective_mechanism=args.objective,
@@ -113,13 +98,18 @@ def main():
                     "range_multiplier": args.range_multiplier},
         ga_seed=args.seed, num_restarts=args.num_restarts,
         num_simulated_draws=args.test_auctions, simulation_seed=args.seed,
-        num_bootstrap=args.bootstrap_samples, grid_refinement=args.grid_refinement)
-    record.update(legacy_fields(record, args.externality_cost, args.num_items))
+        num_bootstrap=args.bootstrap_samples, grid_refinement=args.grid_refinement,
+        sensitivity_bandwidth_scales=[float(x) for x in args.sensitivity_bandwidths.split(",")
+                                      if x.strip()])
 
     print(record["evaluation"].summary_table().T.to_string(float_format=lambda x: f"{x:.5g}"))
     if record["bootstrap"] is not None:
         print("\nBootstrap of exact welfare over test rows:")
         print(record["bootstrap"].summary().to_string(float_format=lambda x: f"{x:.5g}"))
+    if record["bandwidth_sensitivity"] is not None:
+        print("\nBandwidth sensitivity (design on smoothed training half, exact test welfare):")
+        print(record["bandwidth_sensitivity"].drop(columns="tau_coeffs")
+              .to_string(float_format=lambda x: f"{x:.5g}"))
     if record["grid_refinement"] is not None:
         print("\nGrid refinement check:")
         print(record["grid_refinement"].to_string(float_format=lambda x: f"{x:.5g}"))

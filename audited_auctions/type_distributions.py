@@ -371,9 +371,9 @@ def gaussian_mixture_distribution(component_means, component_covariances, compon
 _WIDE = [[0.1, 0.0], [0.0, 0.1]]
 _NARROW = [[0.05, 0.0], [0.0, 0.05]]
 
-# The mixtures a–f of alternate_distributions.ipynb, with valuation means shifted
+# The mixtures a–f of legacy/alternate_distributions.ipynb, with valuation means shifted
 # up by 1 so that truncation at v = 0 removes almost no mass and the shapes are
-# kept (the CSV samples in data/samples/ are the unshifted, untruncated versions).
+# kept (legacy/data/samples/ has the unshifted, untruncated CSV versions).
 _MIXTURES = {
     "a": ("A single modal normal", [[0, 1]], _WIDE),
     "b": ("B two modal (side by side)", [[-1, 1], [0, 1]], _NARROW),

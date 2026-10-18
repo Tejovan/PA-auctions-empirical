@@ -166,30 +166,48 @@ MECHANISM_SPECIFICATIONS = {
 
 
 def build_mechanism_model(mechanism, type_distribution, threshold_function, num_bidders,
-                          num_goods):
-    """Exact ScoreAuctionModel of one mechanism."""
+                          num_goods, ivcg_scoring_rule=None):
+    """Exact ScoreAuctionModel of one mechanism.
+
+    ivcg_scoring_rule: for "ivcg_pa" only, a scoring rule designed elsewhere
+    (ivcg_scoring_rule_for on the training distribution); default: iron this
+    distribution.
+    """
     participation, bid_kind, ironed = MECHANISM_SPECIFICATIONS[mechanism]
     if participation == "everyone":
         cell_thresholds = np.full(type_distribution.num_cells, -np.inf)
     else:
         cell_thresholds = threshold_function(type_distribution.externalities)
+    fixed_rule = ivcg_scoring_rule if mechanism == "ivcg_pa" else None
     return build_score_auction_model(mechanism, type_distribution, cell_thresholds, bid_kind,
-                                     ironed, num_bidders, num_goods)
+                                     ironed, num_bidders, num_goods,
+                                     fixed_scoring_rule=fixed_rule)
 
 
-def build_mechanism_models(type_distribution, threshold_function, num_bidders, num_goods):
+def ivcg_scoring_rule_for(design_distribution, threshold_function, num_bidders, num_goods):
+    """The IVCG-PA scoring rule (ironed welfare contribution as a function of the bid)
+    designed on design_distribution for τ; apply it to another distribution with
+    the ivcg_scoring_rule arguments."""
+    model = build_mechanism_model("ivcg_pa", design_distribution,
+                                  as_threshold_function(threshold_function), num_bidders,
+                                  num_goods)
+    return model.scoring_rule
+
+
+def build_mechanism_models(type_distribution, threshold_function, num_bidders, num_goods,
+                           ivcg_scoring_rule=None):
     """Exact ScoreAuctionModel of each mechanism, plus the participating mass per cell."""
     threshold_function = as_threshold_function(threshold_function)
     models = {
         mechanism: build_mechanism_model(mechanism, type_distribution, threshold_function,
-                                         num_bidders, num_goods)
+                                         num_bidders, num_goods, ivcg_scoring_rule)
         for mechanism in MECHANISMS
     }
     return models, models["vcg_pa"].cell_participation_mass
 
 
 def expected_welfare(type_distribution, threshold_function, num_bidders, num_goods,
-                     mechanism="vcg_pa"):
+                     mechanism="vcg_pa", ivcg_scoring_rule=None):
     """Exact expected welfare of one mechanism for τ (the optimization objective).
 
     Returns 0 if nobody participates (no allocation, no welfare).
@@ -197,7 +215,7 @@ def expected_welfare(type_distribution, threshold_function, num_bidders, num_goo
     threshold_function = as_threshold_function(threshold_function)
     try:
         model = build_mechanism_model(mechanism, type_distribution, threshold_function,
-                                      num_bidders, num_goods)
+                                      num_bidders, num_goods, ivcg_scoring_rule)
     except ValueError:
         return 0.0
     return model.expected_welfare()
@@ -235,6 +253,7 @@ def evaluate_threshold(
     random_seed=None,
     simulation_draws=None,
     externality_grid=None,
+    ivcg_scoring_rule=None,
 ):
     """Exact (and optionally simulated) outcomes of the four mechanisms for τ.
 
@@ -247,10 +266,12 @@ def evaluate_threshold(
     simulation_draws    : optional (externalities, valuations) arrays of shape
                           (num_draws, n) to simulate on instead of sampling
     externality_grid    : externalities at which to tabulate penalty curves
+    ivcg_scoring_rule   : IVCG-PA scoring rule designed on another distribution
+                          (ivcg_scoring_rule_for); default: iron type_distribution
     """
     threshold_function = as_threshold_function(threshold_function)
     models, cell_participation_mass = build_mechanism_models(
-        type_distribution, threshold_function, num_bidders, num_goods
+        type_distribution, threshold_function, num_bidders, num_goods, ivcg_scoring_rule
     )
     maximum_valuation = type_distribution.maximum_valuation
     penalty_tables = {
@@ -315,6 +336,7 @@ def evaluate_threshold(
             "distribution_kind": type_distribution.kind,
             "maximum_valuation": maximum_valuation,
             "distribution_metadata": dict(type_distribution.metadata),
+            "ivcg_design": "this distribution" if ivcg_scoring_rule is None else "external",
         },
     )
 

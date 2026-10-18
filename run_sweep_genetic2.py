@@ -8,9 +8,9 @@ audited_auctions.pipeline:
 
   1. Distributions. --data is a synthetic family name (H known; τ optimized and
      evaluated on the same piecewise-uniform distribution) or a CSV with
-     columns e_score, v_score (empirical: scaled, truncated at a valuation
-     quantile v̄, split into training and test halves with a seed common to
-     all cells, each half kernel-smoothed or kept atomic).
+     columns e_score, v_score (empirical: split into training and test halves
+     with a seed common to all cells, truncated at a valuation quantile v̄;
+     training half kernel-smoothed, test half atomic by default).
   2. Genetic search (with restarts and optional warm start across degrees) for
      the polynomial τ maximizing the exact expected welfare of VCG-PA (or
      IVCG-PA, --objective) on the training distribution.
@@ -20,9 +20,11 @@ audited_auctions.pipeline:
      inducing τ.
   4. One simulation (--test-auctions draws, common random numbers across
      mechanisms, k and degree) for per-auction welfare distributions.
-  5. Empirical data: bootstrap of exact welfare over the test rows
-     (--bootstrap-samples resamples, re-smoothed); synthetic families:
-     optional grid-refinement check (--grid-refinement).
+  5. Empirical data: the IVCG-PA scoring rule is designed on the training half
+     and applied to the test rows; bootstrap of exact welfare over the test
+     rows (--bootstrap-samples); optional bandwidth sensitivity check
+     (--sensitivity-bandwidths 0.5,2). Synthetic families: optional
+     grid-refinement check (--grid-refinement).
 
 Output goes to a timestamped subdirectory with a README describing the files.
 
@@ -78,7 +80,8 @@ from audited_auctions.sweep_support import (  # noqa: E402
 
 def run_one(prepared, k, degree, ext_cost, action_cost, num_items, ga_options, ga_seed,
             num_restarts, initial_solution, simulation_seed, num_test_auctions,
-            objective_mechanism, num_bootstrap, bootstrap_seed, grid_refinement):
+            objective_mechanism, num_bootstrap, bootstrap_seed, grid_refinement,
+            sensitivity_bandwidth_scales=()):
     """Optimize τ for one cell and evaluate it; returns the sweep record."""
     print(f"\n{'=' * 60}")
     print(f"  k={k}  degree={degree}  ζ={ext_cost:.6g}  n={num_items}  ga_seed={ga_seed}  "
@@ -91,7 +94,8 @@ def run_one(prepared, k, degree, ext_cost, action_cost, num_items, ga_options, g
         ga_options=ga_options, ga_seed=ga_seed, num_restarts=num_restarts,
         initial_solution=initial_solution, num_simulated_draws=num_test_auctions,
         simulation_seed=simulation_seed, num_bootstrap=num_bootstrap,
-        bootstrap_seed=bootstrap_seed, grid_refinement=grid_refinement)
+        bootstrap_seed=bootstrap_seed, grid_refinement=grid_refinement,
+        sensitivity_bandwidth_scales=sensitivity_bandwidth_scales)
     print(record["evaluation"].summary_table()[
         ["exact_welfare", "exact_welfare_gain_over_vcg", "share_of_first_best_gain"]
     ].to_string(float_format=lambda x: f"{x:.5g}"))
@@ -455,7 +459,9 @@ def write_readme(out_dir, args, ext_values, timestamp):
 | Valuation scale (action cost) | {args.action_cost} |
 | Truncation quantile (v̄) | {args.truncation_quantile} |
 | Train fraction / split seed | {args.train_fraction} / {args.split_seed} |
-| Smoothing | {args.smoothing} (bandwidth scale {args.bandwidth_scale}) |
+| Training smoothing | {args.smoothing} (bandwidth scale {args.bandwidth_scale}) |
+| Evaluation | {args.evaluation} test rows (truncation {args.evaluation_truncation_quantile or args.truncation_quantile}); IVCG-PA scoring rule designed on the training half |
+| Bandwidth sensitivity scales | {args.sensitivity_bandwidths or "none"} |
 | Bootstrap resamples | {args.bootstrap_samples} |"""
         if empirical else
         f"""| Source | synthetic family `{args.data}` (piecewise-uniform grid) |
@@ -533,6 +539,7 @@ Each `results/run_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.pkl` holds one `dict`:
 | `trajectory` | every coefficient vector in every GA generation |
 | `evaluation` | `ThresholdEvaluation` on the evaluation distribution: exact outcomes (`exact`), `summary_table()`, `welfare_gains_over_vcg()`, exact penalty functions (`penalty_tables`, `penalty_curves`), ŵ^τ and ω̄^τ, simulated draws |
 | `bootstrap` | empirical data: `BootstrapResult` (`resamples` DataFrame and `summary()` with percentile intervals) of exact welfare, paired gains over VCG and shares of the first-best gain over test-row resamples; `None` for synthetic families |
+| `bandwidth_sensitivity` | empirical data with `--sensitivity-bandwidths`: DataFrame indexed by bandwidth scale (base included): τ coefficients, training objective, exact test welfare, gains over VCG and shares of the first-best gain of the design made with that bandwidth; else `None` |
 | `grid_refinement` | synthetic families with `--grid-refinement`: DataFrame of exact welfare and gains on the base and twice finer grid; else `None` |
 | `type_sample` | 4000 types drawn from the evaluation distribution (for scatter plots) |
 | `distribution_settings` | how the distributions were built (family/CSV, ζ, truncation, split, smoothing, grid) |
@@ -596,6 +603,14 @@ def parse_args():
                    help="CSV data: kernel smoothing (default) or atomic rows")
     p.add_argument("--bandwidth-scale", type=float, default=1.0,
                    help="CSV data: multiplier on Scott's bandwidth")
+    p.add_argument("--evaluation", choices=("atomic", "smoothed"), default="atomic",
+                   help="CSV data: evaluate on the atomic test rows (default) or the smoothed test half")
+    p.add_argument("--evaluation-truncation-quantile", type=float, default=None,
+                   help="CSV data: truncation of the test rows (default: same as "
+                        "--truncation-quantile; 1.0 keeps every row)")
+    p.add_argument("--sensitivity-bandwidths", default="",
+                   help='CSV data: extra bandwidth scales for the sensitivity check, e.g. "0.5,2" '
+                        "(reruns the GA per scale; default: none)")
     p.add_argument("--bootstrap-samples", type=int, default=200,
                    help="CSV data: bootstrap resamples of the test rows (0 = none)")
     p.add_argument("--grid-refinement", action="store_true",
@@ -669,7 +684,8 @@ def main():
             args.data, externality_scale=ext_cost, valuation_scale=args.action_cost,
             truncation_quantile=args.truncation_quantile, train_fraction=args.train_fraction,
             split_seed=args.split_seed, smoothing=args.smoothing,
-            bandwidth_scale=args.bandwidth_scale)
+            bandwidth_scale=args.bandwidth_scale, evaluation=args.evaluation,
+            evaluation_truncation_quantile=args.evaluation_truncation_quantile)
         for ext_cost in ext_values
     ]
     print(f"Evaluation distribution: {prepared_by_ext[0].evaluation.name} "
@@ -679,6 +695,7 @@ def main():
                   "num_parents_mating": args.num_parents_mating,
                   "mutation_probability": args.mutation_probability,
                   "range_multiplier": args.range_multiplier}
+    sensitivity_scales = [float(x) for x in args.sensitivity_bandwidths.split(",") if x.strip()]
     degrees_ordered = sorted(degrees) if args.warm_start else degrees
     valid_kn = [(k, n) for k in k_values for n in num_items_list if k < n]
     skipped_kn = [(k, n) for k in k_values for n in num_items_list if k >= n]
@@ -709,7 +726,7 @@ def main():
                         prepared_by_ext[ext_idx], k, degree, ext_cost, args.action_cost, num_items,
                         ga_options, ga_seed, args.num_restarts, initial_solution, simulation_seed,
                         args.test_auctions, args.objective, args.bootstrap_samples,
-                        bootstrap_seed, args.grid_refinement)
+                        bootstrap_seed, args.grid_refinement, sensitivity_scales)
                     all_results[(k, degree, num_items)].append(rec)
                     previous_coefficients = rec["tau_coeffs"]
                     fname = f"run_k{k}_deg{degree}_n{num_items}_ext{ext_idx}.pkl"

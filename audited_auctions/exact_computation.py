@@ -604,8 +604,13 @@ def _bid_space_score(segments):
     return PiecewiseLinearScore(knots, starts, ends)
 
 
+# Finite stand-in for a score of −inf (bids below the support of a fixed scoring
+# rule), so that per-segment linear interpolation stays finite.
+NEVER_ALLOCATED_SCORE = -1e300
+
+
 def build_score_auction_model(mechanism, distribution, cell_thresholds, bid_kind, ironed,
-                              num_bidders, num_goods):
+                              num_bidders, num_goods, fixed_scoring_rule=None):
     """Build the exact model of one score-based auction.
 
     mechanism       : label stored in the model
@@ -613,6 +618,9 @@ def build_score_auction_model(mechanism, distribution, cell_thresholds, bid_kind
     cell_thresholds : (num_cells,) τ(e_j) of each cell (−inf: everyone participates)
     bid_kind        : VALUATION_BIDS (bid v) or WELFARE_CONTRIBUTION_BIDS (bid w = v + e)
     ironed          : False -> score = bid; True -> score = ironed welfare contribution
+    fixed_scoring_rule : optional PiecewiseLinearScore used instead of ironing this
+                      distribution (an IVCG-PA designed on another distribution, e.g.
+                      the training data, evaluated on this one)
     """
     participating_lower, mass = participating_cells(distribution, cell_thresholds)
     participates = mass > 0
@@ -623,6 +631,9 @@ def build_score_auction_model(mechanism, distribution, cell_thresholds, bid_kind
     bid_lower = participating_lower[participates] + shift
     bid_upper = distribution.valuation_upper[participates] + shift
     extra_breakpoints = [0.0] if bid_kind == WELFARE_CONTRIBUTION_BIDS else []
+    if fixed_scoring_rule is not None:
+        # Cut at the knots of the scoring rule so the score is linear on each segment.
+        extra_breakpoints = list(extra_breakpoints) + list(fixed_scoring_rule.knots)
     bid_start, bid_end, segment_mass, mean_externality = _bid_segments(
         bid_lower, bid_upper, mass[participates], externalities, distribution.is_atomic,
         extra_breakpoints)
@@ -640,7 +651,17 @@ def build_score_auction_model(mechanism, distribution, cell_thresholds, bid_kind
         "externality": mean_externality,
     }
 
-    if ironed:
+    if fixed_scoring_rule is not None:
+        segments["score_start"] = np.maximum(fixed_scoring_rule.score_of_bid(bid_start),
+                                             NEVER_ALLOCATED_SCORE)
+        segments["score_end"] = np.where(
+            bid_end > bid_start, np.maximum(fixed_scoring_rule.left_limit(bid_end),
+                                            NEVER_ALLOCATED_SCORE),
+            segments["score_start"])
+        segments["score_start"], segments["score_end"] = _enforce_monotone(
+            segments["score_start"], segments["score_end"])
+        scoring_rule = fixed_scoring_rule
+    elif ironed:
         pieces = iron_quantile_function(quantile_start, quantile_end, segments["welfare_start"],
                                         segments["welfare_end"])
         segments = _split_at_zero_score(_refine(segments, *pieces))
