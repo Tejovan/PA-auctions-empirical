@@ -74,6 +74,10 @@ def parse_args():
                         help="CSV data: valuations above this quantile are dropped; v̄ = quantile")
     parser.add_argument("--train-fraction", type=float, default=0.5)
     parser.add_argument("--split-seed", type=int, default=0)
+    parser.add_argument("--num-externality-nodes", type=int, default=None,
+                        help="number of externality nodes of the grid (default: 101 for synthetic families, 241 for smoothed CSV data)")
+    parser.add_argument("--num-valuation-cells", type=int, default=None,
+                        help="number of valuation cells of the grid (default: 600 for synthetic families, 400 for smoothed CSV data)")
     parser.add_argument("--smoothing", choices=SMOOTHING_CHOICES, default="kernel")
     parser.add_argument("--bandwidth-scale", type=float, default=1.0)
     parser.add_argument("--evaluation", choices=("atomic", "smoothed"), default="atomic",
@@ -98,7 +102,9 @@ def main():
         truncation_quantile=args.truncation_quantile, train_fraction=args.train_fraction,
         split_seed=args.split_seed, smoothing=args.smoothing,
         bandwidth_scale=args.bandwidth_scale, evaluation=args.evaluation,
-        evaluation_truncation_quantile=args.evaluation_truncation_quantile)
+        evaluation_truncation_quantile=args.evaluation_truncation_quantile,
+        num_externality_nodes=args.num_externality_nodes,
+        num_valuation_cells=args.num_valuation_cells)
     record = optimize_and_evaluate(
         prepared, args.polynomial_degree, args.num_items, args.k,
         objective_mechanism=args.objective,

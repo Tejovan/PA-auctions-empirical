@@ -55,7 +55,7 @@ from .threshold_evaluation import (
 from .threshold_functions import polynomial_threshold
 from .type_distributions import SYNTHETIC_FAMILIES, TypeDistribution, synthetic_distribution
 
-SYNTHETIC_GRID_DEFAULTS = {"num_externality_nodes": 301, "num_valuation_cells": 600}
+SYNTHETIC_GRID_DEFAULTS = {"num_externality_nodes": 101, "num_valuation_cells": 600}
 EMPIRICAL_GRID_DEFAULTS = {"num_externality_nodes": 241, "num_valuation_cells": 400}
 EVALUATION_CHOICES = ("atomic", "smoothed")
 

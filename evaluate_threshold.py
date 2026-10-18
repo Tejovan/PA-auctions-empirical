@@ -60,6 +60,10 @@ def parse_args():
     parser.add_argument("--smoothing", choices=SMOOTHING_CHOICES, default="kernel",
                         help="CSV: kernel smoothing (default) or atomic rows")
     parser.add_argument("--bandwidth-scale", type=float, default=1.0)
+    parser.add_argument("--num-externality-nodes", type=int, default=None,
+                        help="number of externality nodes of the grid (default: 101 for synthetic families, 241 for smoothed CSV data)")
+    parser.add_argument("--num-valuation-cells", type=int, default=None,
+                        help="number of valuation cells of the grid (default: 600 for synthetic families, 400 for smoothed CSV data)")
     parser.add_argument("--num-bidders", type=int, default=None, help="n")
     parser.add_argument("--num-goods", type=int, default=None, help="k")
     parser.add_argument("--num-draws", type=int, default=20000,
@@ -91,14 +95,19 @@ def main():
 
     externality_scale = args.externality_scale or sweep_record.get("externality_cost", 1.0)
     if args.distribution in SYNTHETIC_FAMILIES:
+        grid = {key: value for key, value in (("num_externality_nodes", args.num_externality_nodes),
+                                              ("num_valuation_cells", args.num_valuation_cells))
+                if value is not None}
         type_distribution = synthetic_distribution(args.distribution,
-                                                   externality_scale=externality_scale)
+                                                   externality_scale=externality_scale, **grid)
     else:
         valuation_scale = args.valuation_scale or sweep_record.get("action_cost", 1.0)
         sample = load_empirical_sample(args.distribution, externality_scale, valuation_scale,
                                        args.truncation_quantile)
         type_distribution = sample_distribution(
             sample, args.smoothing, args.bandwidth_scale,
+            num_externality_nodes=args.num_externality_nodes or 241,
+            num_valuation_cells=args.num_valuation_cells or 400,
             name=f"{os.path.basename(args.distribution)} (ζ = {externality_scale:g})")
 
     evaluation = evaluate_threshold(

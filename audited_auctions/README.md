@@ -59,7 +59,7 @@ Mixed distributions are not supported. `distribution.with_externality_scale(ζ)`
 
 ### Synthetic families
 
-All families have v ∈ [0, v̄]. Grid options: `num_externality_nodes` (default 301) and `num_valuation_cells` (default 600). `synthetic_distribution(name, externality_scale=ζ, **options)` builds one; family parameters are keyword options.
+All families have v ∈ [0, v̄]. Grid options: `num_externality_nodes` (default 101) and `num_valuation_cells` (default 600); scripts: `--num-externality-nodes`, `--num-valuation-cells`. Accuracy at a fixed τ (n = 8, k = 2), against 601 nodes: welfare gains over VCG change by at most 2·10⁻⁴ (relative ≤ 5·10⁻⁴) at 101 nodes and 2·10⁻⁵ at 301, on `harm_rises`, `harmful_middle`, `d`, `independent`; 101 nodes are 3× faster than 301. `synthetic_distribution(name, externality_scale=ζ, **options)` builds one; family parameters are keyword options.
 
 | Name | Description | Why it is useful |
 |------|-------------|------------------|
@@ -92,7 +92,7 @@ The mixtures a–f and h are those of `legacy/alternate_distributions.ipynb` wit
 
 **Why IVCG-PA is designed on the training half.** With distinct valuations, each valuation level of an atomic population is a single row, so ŵ^τ(v) = v + e of that row: IVCG-PA ironed on the rows it is evaluated on would rank bidders by their true welfare contribution and approach the first best in sample. Designing the scoring rule on the smoothed training half and applying it to the test rows avoids this.
 
-**Kernel smoothing** (`smoothing.py`). Coordinates u = asinh(e/s_e) (s_e = median |e|) and y = log v; Gaussian kernel with Scott's bandwidth matrix (× `bandwidth_scale`), computed by linear binning and FFT convolution; reflection at y = log v̄; cells with externality nodes on a uniform u-grid (241) and valuation cells on a uniform y-grid (400), the valuation uniform within a cell. The estimator is variance-preserving: the data are shrunk toward their mean by (1 + h²)^(−1/2), so the smoothed (u, y) keep the sample mean and covariance. Without this, smoothing in log v inflates the upper tail of v (expected VCG welfare +10% on the Community Notes data at bandwidth scale 1); with it, smoothed and atomic VCG welfare differ by under 1%. Check sensitivity with `bandwidth_scale` 0.5 and 2.
+**Kernel smoothing** (`smoothing.py`). Coordinates u = asinh(e/s_e) (s_e = median |e|) and y = log v; Gaussian kernel with Scott's bandwidth matrix (× `bandwidth_scale`), computed by linear binning and FFT convolution; reflection at y = log v̄; cells with externality nodes on a uniform u-grid (default 241, `--num-externality-nodes`) and valuation cells on a uniform y-grid (default 400, `--num-valuation-cells`); on the Community Notes data (ζ = 5, n = 8, k = 1, τ(e) = −0.4e) the VCG-PA gain changes by 0.1% at 241 nodes and 1.1% at 101 nodes, against 481, the valuation uniform within a cell. The estimator is variance-preserving: the data are shrunk toward their mean by (1 + h²)^(−1/2), so the smoothed (u, y) keep the sample mean and covariance. Without this, smoothing in log v inflates the upper tail of v (expected VCG welfare +10% on the Community Notes data at bandwidth scale 1); with it, smoothed and atomic VCG welfare differ by under 1%. Check sensitivity with `bandwidth_scale` 0.5 and 2.
 
 ## What is computed, and how
 

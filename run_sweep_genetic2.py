@@ -460,6 +460,7 @@ def write_readme(out_dir, args, ext_values, timestamp):
 | Valuation scale (action cost) | {args.action_cost} |
 | Truncation quantile (v̄) | {args.truncation_quantile} |
 | Train fraction / split seed | {args.train_fraction} / {args.split_seed} |
+| Grid (externality nodes × valuation cells) | {args.num_externality_nodes or "default"} × {args.num_valuation_cells or "default"} |
 | Training smoothing | {args.smoothing} (bandwidth scale {args.bandwidth_scale}) |
 | Evaluation | {args.evaluation} test rows (truncation {args.evaluation_truncation_quantile or args.truncation_quantile}); IVCG-PA scoring rule designed on the training half |
 | Bandwidth sensitivity scales | {args.sensitivity_bandwidths or "none"} |
@@ -602,6 +603,10 @@ def parse_args():
                    help="CSV data: share of rows used to optimize τ (default: 0.5)")
     p.add_argument("--split-seed", type=int, default=0,
                    help="CSV data: seed of the train/test split, common to all cells")
+    p.add_argument("--num-externality-nodes", type=int, default=None,
+                   help="number of externality nodes of the grid (default: 101 for synthetic families, 241 for smoothed CSV data)")
+    p.add_argument("--num-valuation-cells", type=int, default=None,
+                   help="number of valuation cells of the grid (default: 600 for synthetic families, 400 for smoothed CSV data)")
     p.add_argument("--smoothing", choices=SMOOTHING_CHOICES, default="kernel",
                    help="CSV data: kernel smoothing (default) or atomic rows")
     p.add_argument("--bandwidth-scale", type=float, default=1.0,
@@ -698,7 +703,9 @@ def main():
             truncation_quantile=args.truncation_quantile, train_fraction=args.train_fraction,
             split_seed=args.split_seed, smoothing=args.smoothing,
             bandwidth_scale=args.bandwidth_scale, evaluation=args.evaluation,
-            evaluation_truncation_quantile=args.evaluation_truncation_quantile)
+            evaluation_truncation_quantile=args.evaluation_truncation_quantile,
+            num_externality_nodes=args.num_externality_nodes,
+            num_valuation_cells=args.num_valuation_cells)
         for ext_cost in ext_values
     ]
     print(f"Evaluation distribution: {prepared_by_ext[0].evaluation.name} "
