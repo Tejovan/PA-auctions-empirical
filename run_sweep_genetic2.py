@@ -11,9 +11,10 @@ audited_auctions.pipeline:
      columns e_score, v_score (empirical: split into training and test halves
      with a seed common to all cells, truncated at a valuation quantile v̄;
      training half kernel-smoothed, test half atomic by default).
-  2. Genetic search (with restarts and optional warm start across degrees) for
-     the polynomial τ maximizing the exact expected welfare of VCG-PA (or
-     IVCG-PA, --objective) on the training distribution.
+  2. Search (with restarts and optional warm start across degrees) for the
+     polynomial τ maximizing the exact expected welfare of VCG-PA (or IVCG-PA,
+     --objective) on the training distribution: genetic stage, then
+     Nelder–Mead refinement (default; --local-refinement none to skip).
   3. Exact evaluation on the evaluation distribution of VCG, VCG-PA, IVCG-PA and
      the first best: welfare, gains over VCG and share of the first-best gain,
      revenue, penalty paid, participation, and the exact penalties r(e)
@@ -490,6 +491,7 @@ def write_readme(out_dir, args, ext_values, timestamp):
 | GA generations / population / parents | {args.num_generations} / {args.sol_per_pop} / {args.num_parents_mating} |
 | GA mutation probability / range multiplier | {args.mutation_probability} / {args.range_multiplier} |
 | GA restarts / warm start | {args.num_restarts} / {args.warm_start} |
+| Local refinement / stall generations / starts / max evaluations per start | {args.local_refinement} / {args.stall_generations} / {args.num_local_starts} / {args.local_max_evaluations} |
 
 ---
 
@@ -537,6 +539,7 @@ Each `results/run_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.pkl` holds one `dict`:
 | `tau_coeffs` | optimal τ coefficients [β₀, β₁, …] (τ(e) = Σ β_m e^m) |
 | `training_welfare` (= `ga_welfare`) | exact objective at the optimum on the training distribution |
 | `trajectory` | every coefficient vector in every GA generation |
+| `search_summaries` | per restart: genetic optimum, generations run, distinct objective evaluations, and per Nelder–Mead start the starting and final welfare, evaluations and convergence flag |
 | `evaluation` | `ThresholdEvaluation` on the evaluation distribution: exact outcomes (`exact`), `summary_table()`, `welfare_gains_over_vcg()`, exact penalty functions (`penalty_tables`, `penalty_curves`), ŵ^τ and ω̄^τ, simulated draws |
 | `bootstrap` | empirical data: `BootstrapResult` (`resamples` DataFrame and `summary()` with percentile intervals) of exact welfare, paired gains over VCG and shares of the first-best gain over test-row resamples; `None` for synthetic families |
 | `bandwidth_sensitivity` | empirical data with `--sensitivity-bandwidths`: DataFrame indexed by bandwidth scale (base included): τ coefficients, training objective, exact test welfare, gains over VCG and shares of the first-best gain of the design made with that bandwidth; else `None` |
@@ -633,6 +636,16 @@ def parse_args():
     p.add_argument("--num-parents-mating", type=int, default=15)
     p.add_argument("--mutation-probability", type=float, default=0.25)
     p.add_argument("--range-multiplier", type=float, default=3.0)
+    p.add_argument("--local-refinement", choices=("nelder_mead", "none"),
+                   default="nelder_mead",
+                   help="Nelder–Mead refinement after the genetic stage (default) or none")
+    p.add_argument("--stall-generations", type=int, default=60,
+                   help="with refinement: end the genetic stage after this many generations "
+                        "without improvement (default: 60)")
+    p.add_argument("--num-local-starts", type=int, default=5,
+                   help="Nelder–Mead starts from the best distinct final candidates (default: 5)")
+    p.add_argument("--local-max-evaluations", type=int, default=2000,
+                   help="objective evaluations allowed per Nelder–Mead start (default: 2000)")
     p.add_argument("--num-restarts", type=int, default=1,
                    help="independent GA restarts per cell; the best is kept")
     p.add_argument("--warm-start", action="store_true",
@@ -694,7 +707,11 @@ def main():
     ga_options = {"num_generations": args.num_generations, "sol_per_pop": args.sol_per_pop,
                   "num_parents_mating": args.num_parents_mating,
                   "mutation_probability": args.mutation_probability,
-                  "range_multiplier": args.range_multiplier}
+                  "range_multiplier": args.range_multiplier,
+                  "local_refinement": args.local_refinement,
+                  "stall_generations": args.stall_generations,
+                  "num_local_starts": args.num_local_starts,
+                  "local_max_evaluations": args.local_max_evaluations}
     sensitivity_scales = [float(x) for x in args.sensitivity_bandwidths.split(",") if x.strip()]
     degrees_ordered = sorted(degrees) if args.warm_start else degrees
     valid_kn = [(k, n) for k in k_values for n in num_items_list if k < n]

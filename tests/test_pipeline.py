@@ -86,11 +86,17 @@ def test_atomic_and_smoothed_vcg_welfare_are_close():
 def test_genetic_search_recovers_example_n_optimum():
     """Example N: the optimal threshold for e = −c is t* = 4c/3 (c = 0.6: t* = 0.8)."""
     distribution = synthetic_distribution("example_n", harm=0.6, num_valuation_cells=10)
-    coefficients, welfare, _ = run_genetic_search(distribution, 1, 2, 1, num_generations=60,
-                                                  seed=1, verbose=False)
     optimum = 2 / 3 - 0.3 + 0.3 * 0.8**2 - 0.8**3 / 4
-    assert welfare == pytest.approx(optimum, abs=2e-5)
-    assert coefficients[0] - 0.6 * coefficients[1] == pytest.approx(0.8, abs=0.02)
+    genetic_only = run_genetic_search(distribution, 1, 2, 1, num_generations=60, seed=1,
+                                      local_refinement="none", verbose=False)
+    assert genetic_only.welfare == pytest.approx(optimum, abs=2e-5)
+    assert genetic_only.summary["generations_run"] == 60
+    refined = run_genetic_search(distribution, 1, 2, 1, num_generations=60, seed=1,
+                                 verbose=False)
+    assert refined.welfare >= genetic_only.welfare - 1e-12
+    assert refined.welfare == pytest.approx(optimum, abs=1e-10)
+    tau_at_harm = refined.coefficients[0] - 0.6 * refined.coefficients[1]
+    assert tau_at_harm == pytest.approx(0.8, abs=1e-4)
 
 
 def test_pipeline_synthetic_cell():

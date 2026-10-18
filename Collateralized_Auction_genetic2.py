@@ -57,6 +57,16 @@ def parse_args():
     parser.add_argument("--num-parents-mating", type=int, default=15)
     parser.add_argument("--mutation-probability", type=float, default=0.25)
     parser.add_argument("--range-multiplier", type=float, default=3.0)
+    parser.add_argument("--local-refinement", choices=("nelder_mead", "none"),
+                   default="nelder_mead",
+                   help="Nelder–Mead refinement after the genetic stage (default) or none")
+    parser.add_argument("--stall-generations", type=int, default=60,
+                   help="with refinement: end the genetic stage after this many generations "
+                        "without improvement (default: 60)")
+    parser.add_argument("--num-local-starts", type=int, default=5,
+                   help="Nelder–Mead starts from the best distinct final candidates (default: 5)")
+    parser.add_argument("--local-max-evaluations", type=int, default=2000,
+                   help="objective evaluations allowed per Nelder–Mead start (default: 2000)")
     parser.add_argument("--num-restarts", type=int, default=1)
     parser.add_argument("--test-auctions", type=int, default=2000,
                         help="simulated auctions for welfare distributions")
@@ -95,7 +105,11 @@ def main():
         ga_options={"num_generations": args.num_generations, "sol_per_pop": args.sol_per_pop,
                     "num_parents_mating": args.num_parents_mating,
                     "mutation_probability": args.mutation_probability,
-                    "range_multiplier": args.range_multiplier},
+                    "range_multiplier": args.range_multiplier,
+                    "local_refinement": args.local_refinement,
+                    "stall_generations": args.stall_generations,
+                    "num_local_starts": args.num_local_starts,
+                    "local_max_evaluations": args.local_max_evaluations},
         ga_seed=args.seed, num_restarts=args.num_restarts,
         num_simulated_draws=args.test_auctions, simulation_seed=args.seed,
         num_bootstrap=args.bootstrap_samples, grid_refinement=args.grid_refinement,

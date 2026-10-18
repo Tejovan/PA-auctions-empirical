@@ -43,7 +43,7 @@ Command line: `python evaluate_threshold.py --distribution harm_rises --tau-coef
 | `exact_computation.py` | Quantile representation of a mechanism, exact ironing, interim allocation with ties, exact integration of welfare, revenue and the allocation integral R(b) (the penalty). |
 | `auction_simulation.py` | Vectorized Monte Carlo of a score-based auction on sampled type profiles. |
 | `threshold_evaluation.py` | `evaluate_threshold` (main entry point), `ThresholdEvaluation`, `expected_welfare` (optimization objective), `ivcg_scoring_rule_for` (IVCG-PA design to apply elsewhere), `penalty_from_table`, `grid_refinement_check`. |
-| `genetic_search.py` | Genetic algorithm over polynomial τ with the exact welfare objective. |
+| `genetic_search.py` | Search over polynomial τ with the exact welfare objective: genetic stage, then Nelder–Mead refinement (default). |
 | `pipeline.py` | One optimization-and-evaluation cell: `prepare_distributions`, `optimize_and_evaluate`, `bandwidth_sensitivity`. |
 | `figures.py` | `plot_threshold_and_penalties`, `plot_welfare_distributions`. |
 | `sweep_support.py` | Glue for `run_sweep_genetic2.py` and `post_optimization_analysis.py`. |
@@ -129,7 +129,14 @@ This replaces the old estimator R(e) = A(e)(τ(e) − P(e)) built from realized 
 
 ## Optimizing τ
 
-`genetic_search.run_genetic_search(distribution, degree, n, k, objective_mechanism="vcg_pa")` searches polynomial coefficients τ(e) = Σ β_m e^m with the genetic algorithm of the original code (pygad, tournament selection, single-point crossover, Gaussian mutation scaled to each coefficient's range, warm start, restarts). The fitness is the **exact** expected welfare of the objective mechanism on the distribution (`expected_welfare`; about 3–10 ms for VCG-PA and 10–25 ms for IVCG-PA on 180k cells), not an average over simulated auctions, so it has no Monte Carlo noise and does not fit a particular sample of auctions. Search ranges: β_0 ∈ [v_min − sd(v)/2, v̄ + sd(v)/2], β_m ∈ ±3 sd(v)/E|e|^m.
+`genetic_search.run_genetic_search(distribution, degree, n, k, objective_mechanism="vcg_pa")` searches polynomial coefficients τ(e) = Σ β_m e^m in two stages and returns a `SearchResult` (coefficients, welfare, trajectory, summary).
+
+1. **Genetic stage (global).** The genetic algorithm of the original code: pygad, tournament selection, single-point crossover, Gaussian mutation scaled to each coefficient's range, warm start, restarts in the pipeline. Search ranges: β_0 ∈ [v_min − sd(v)/2, v̄ + sd(v)/2], β_m ∈ ±3 sd(v)/E|e|^m. It stops at `num_generations` (500) or once the best welfare has not improved for `stall_generations` (60) generations.
+2. **Nelder–Mead stage (local, default).** Nelder–Mead (scipy, adaptive) from the `num_local_starts` (5) best distinct candidates of the final population, always including the genetic optimum, in coordinates where each coefficient's range is [0, 1] (initial simplex steps 5% of the range); tolerances 10⁻⁷ in those coordinates and 10⁻¹⁰ relative in welfare; at most `local_max_evaluations` (2000) evaluations per start. The refined τ is kept only if its welfare is higher.
+
+The genetic stage locates a good region but converges slowly inside it; Nelder–Mead converges quickly from a good start but is local. The defaults lean toward reliable convergence (long stall window, five starts, generous evaluation budget). Neither stage guarantees the global optimum of a non-convex objective. `local_refinement="none"` runs the genetic stage alone for all generations (the previous behavior). The summary records the genetic optimum, generations run, distinct objective evaluations, and for each local start the starting and final welfare, evaluations and a convergence flag; sweep records keep it as `search_summaries` (one per restart).
+
+The fitness is the **exact** expected welfare of the objective mechanism on the distribution (`expected_welfare`; about 3–10 ms for VCG-PA and 10–25 ms for IVCG-PA on 180k cells), not an average over simulated auctions, so it has no Monte Carlo noise and does not fit a particular sample of auctions.
 
 `pipeline.optimize_and_evaluate` runs one cell:
 
@@ -161,7 +168,7 @@ Colors are a fixed, color-vision-checked assignment per mechanism (`MECHANISM_CO
 
 `tests/test_audited_auctions.py`: Example T (ironing pools valuations 2 and 3; IVCG-PA welfare 40/16; first best 41/16; VCG-PA ≤ 39/16); the second-price penalty τ² (exact for uniform valuations); Example N welfare and penalty (exact); exact ironing of piecewise-linear ŵ^τ against ironing of a fine atomic discretization; ironing binds and helps in `harmful_middle`; exact expectations equal simulated means for all mechanisms and metrics (atomic and piecewise-uniform); a threshold type is indifferent (its simulated auction-utility equals r(e)); IVCG-PA ≥ VCG-PA; inverses of the piecewise-linear score; negative valuations are rejected.
 
-`tests/test_pipeline.py`: every family has bounded non-negative continuous valuations; variance-preserving smoothing keeps the moments; the split is deterministic; bootstrap gains are paired; smoothed and atomic VCG welfare agree; the genetic search recovers the Example N optimum t* = 4c/3; a synthetic pipeline cell with grid refinement; an IVCG-PA scoring rule designed on a distribution and applied to the same distribution reproduces its ironing exactly (welfare, revenue, penalties; atomic and piecewise uniform); an empirical cell with atomic evaluation, untruncated test rows, bootstrap and bandwidth sensitivity; cached VCG and first-best results equal fresh ones and are reused across τ and in the bootstrap.
+`tests/test_pipeline.py`: every family has bounded non-negative continuous valuations; variance-preserving smoothing keeps the moments; the split is deterministic; bootstrap gains are paired; smoothed and atomic VCG welfare agree; the genetic search recovers the Example N optimum t* = 4c/3 (to 10⁻⁴ in τ and 10⁻¹⁰ in welfare with Nelder–Mead refinement); a synthetic pipeline cell with grid refinement; an IVCG-PA scoring rule designed on a distribution and applied to the same distribution reproduces its ironing exactly (welfare, revenue, penalties; atomic and piecewise uniform); an empirical cell with atomic evaluation, untruncated test rows, bootstrap and bandwidth sensitivity; cached VCG and first-best results equal fresh ones and are reused across τ and in the bootstrap.
 
 ## Conventions and limitations
 

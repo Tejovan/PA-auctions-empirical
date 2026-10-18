@@ -1,23 +1,43 @@
 """
 genetic_search.py
 
-Genetic-algorithm search for a polynomial threshold function
+Search for a polynomial threshold function
       τ(e) = β_0 + β_1 e + ... + β_d e^d
 that maximizes the exact expected welfare of a participant-audit mechanism
 (VCG-PA by default, or IVCG-PA) for a type distribution.
 
-The fitness of a coefficient vector is the exact expected welfare
-(threshold_evaluation.expected_welfare), computed on the distribution itself,
-so it has no Monte Carlo noise and does not fit a particular set of simulated
-auctions. The GA mechanics (pygad, tournament selection, single-point
-crossover, Gaussian mutation scaled to each gene's range, optional warm start
-and restarts) are those of the original Collateralized_Auction_genetic2.py.
+Two stages (default):
+
+1. Genetic algorithm (global exploration). pygad with tournament selection,
+   single-point crossover and Gaussian mutation scaled to each coefficient's
+   search range, as in the original Collateralized_Auction_genetic2.py; warm
+   start optional. It stops after num_generations, or earlier once the best
+   welfare has not improved for stall_generations generations.
+2. Nelder–Mead refinement (local convergence). Started from the
+   num_local_starts best distinct candidates of the final population, in
+   coordinates scaled to the search ranges (each coefficient's range maps to
+   [0, 1], initial simplex steps 5% of the range), with tight tolerances. The
+   result replaces the genetic optimum only if its welfare is higher.
+
+A genetic algorithm finds the right region quickly but converges slowly inside
+it; Nelder–Mead converges quickly from a good start but is local. With 2–4
+coefficients and an exact, deterministic objective, the combination is cheap
+and precise. Neither stage guarantees the global optimum of a non-convex
+objective; restarts (pipeline num_restarts) and several local starts reduce the
+risk. local_refinement="none" runs the genetic algorithm alone, for all
+num_generations.
+
+The objective is exact (threshold_evaluation.expected_welfare), computed on the
+distribution itself, so it has no Monte Carlo noise.
 """
 
 import time
 
+from dataclasses import dataclass, field
+
 import numpy as np
 import pygad
+from scipy.optimize import minimize
 
 from .threshold_evaluation import expected_welfare
 from .threshold_functions import polynomial_threshold
@@ -64,16 +84,98 @@ def make_gaussian_mutation(gene_space, mutation_probability, mutation_sigma_frac
     return mutation
 
 
+LOCAL_REFINEMENTS = ("nelder_mead", "none")
+
+# Defaults lean toward reliable convergence over speed.
+DEFAULT_STALL_GENERATIONS = 60
+DEFAULT_NUM_LOCAL_STARTS = 5
+DEFAULT_LOCAL_MAX_EVALUATIONS = 2000
+LOCAL_COORDINATE_TOLERANCE = 1e-7   # in range-scaled coordinates
+LOCAL_RELATIVE_WELFARE_TOLERANCE = 1e-10
+INITIAL_SIMPLEX_STEP = 0.05         # fraction of each coefficient's range
+
+
+@dataclass
+class SearchResult:
+    """Outcome of run_genetic_search.
+
+    coefficients, welfare : best τ coefficients and their exact welfare
+    trajectory            : every coefficient vector in each generation's population
+    summary               : genetic optimum, generations run, number of distinct
+                            objective evaluations, and per local start the starting
+                            and final welfare, evaluations and convergence flag
+    """
+
+    coefficients: list
+    welfare: float
+    trajectory: list
+    summary: dict = field(default_factory=dict)
+
+
+def refine_with_nelder_mead(welfare_of, starts, lows, highs, max_evaluations):
+    """Nelder–Mead from each start, in coordinates where each coefficient's range is [0, 1].
+
+    Returns a list of dicts (start, coefficients, welfare, start_welfare,
+    evaluations, converged), one per start.
+    """
+    span = highs - lows
+
+    def to_coefficients(scaled):
+        return lows + scaled * span
+
+    results = []
+    for start in starts:
+        start = np.asarray(start, dtype=float)
+        start_welfare = welfare_of(start)
+        scaled_start = (start - lows) / span
+        simplex = np.vstack([scaled_start,
+                             scaled_start + INITIAL_SIMPLEX_STEP * np.eye(len(start))])
+        outcome = minimize(
+            lambda scaled: -welfare_of(to_coefficients(scaled)), scaled_start,
+            method="Nelder-Mead",
+            options={"initial_simplex": simplex, "xatol": LOCAL_COORDINATE_TOLERANCE,
+                     "fatol": LOCAL_RELATIVE_WELFARE_TOLERANCE * max(abs(start_welfare), 1.0),
+                     "maxfev": max_evaluations, "adaptive": True})
+        results.append({"start": start.tolist(),
+                        "coefficients": to_coefficients(outcome.x).tolist(),
+                        "welfare": float(-outcome.fun), "start_welfare": float(start_welfare),
+                        "evaluations": int(outcome.nfev), "converged": bool(outcome.success)})
+    return results
+
+
+def _best_distinct(population, fitness, count):
+    """The `count` fittest rows of the population with distinct coefficients."""
+    chosen, seen = [], set()
+    for index in np.argsort(-np.asarray(fitness)):
+        key = tuple(np.round(population[index], 9))
+        if key not in seen:
+            seen.add(key)
+            chosen.append(np.array(population[index], dtype=float))
+        if len(chosen) == count:
+            break
+    return chosen
+
+
 def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_goods,
                        objective_mechanism="vcg_pa", num_generations=500, sol_per_pop=50,
                        num_parents_mating=15, mutation_probability=0.25,
                        mutation_sigma_fraction=0.15, range_multiplier=3.0, seed=None,
-                       initial_solution=None, verbose=True):
+                       initial_solution=None, local_refinement="nelder_mead",
+                       stall_generations=DEFAULT_STALL_GENERATIONS,
+                       num_local_starts=DEFAULT_NUM_LOCAL_STARTS,
+                       local_max_evaluations=DEFAULT_LOCAL_MAX_EVALUATIONS, verbose=True):
     """Maximize exact expected welfare of objective_mechanism over polynomial τ.
 
-    Returns (best_coefficients, best_welfare, trajectory), where trajectory
-    lists every coefficient vector in each generation's population.
+    local_refinement      : "nelder_mead" (default) or "none" (genetic algorithm only)
+    stall_generations     : with refinement, stop the genetic stage after this many
+                            generations without improvement (None: never early)
+    num_local_starts      : Nelder–Mead starts (best distinct final candidates)
+    local_max_evaluations : objective evaluations allowed per Nelder–Mead start
+
+    Returns a SearchResult.
     """
+    if local_refinement not in LOCAL_REFINEMENTS:
+        raise ValueError(f"local_refinement must be one of {LOCAL_REFINEMENTS}")
     num_genes = polynomial_degree + 1
     rng = np.random.default_rng(seed)
     gene_space = compute_gene_space(type_distribution, polynomial_degree, range_multiplier)
@@ -130,11 +232,40 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
         on_generation=on_generation,
         random_seed=seed,
         suppress_warnings=True,
+        stop_criteria=(f"saturate_{stall_generations}"
+                       if local_refinement != "none" and stall_generations else None),
     )
     start = time.time()
     ga.run()
-    best_solution, best_fitness, _ = ga.best_solution()
+    genetic_solution, genetic_fitness, _ = ga.best_solution()
+    best_coefficients = np.array(genetic_solution, dtype=float)
+    best_welfare = float(genetic_fitness)
+    summary = {"genetic_coefficients": best_coefficients.tolist(), "genetic_welfare": best_welfare,
+               "generations_run": int(ga.generations_completed),
+               "local_refinement": local_refinement, "local_starts": []}
     if verbose:
-        print(f"Genetic search done in {time.time() - start:.1f}s: welfare {best_fitness:.6g}, "
-              f"β = {[f'{c:.6g}' for c in best_solution]}")
-    return [float(c) for c in best_solution], float(best_fitness), trajectory
+        print(f"Genetic stage done in {time.time() - start:.1f}s after "
+              f"{ga.generations_completed} generations: welfare {best_welfare:.8g}")
+
+    if local_refinement == "nelder_mead":
+        fitness = [welfare_of(solution) for solution in ga.population]
+        starts = _best_distinct(ga.population, fitness, num_local_starts)
+        if not any(np.allclose(start, best_coefficients) for start in starts):
+            starts = [best_coefficients] + starts[:-1]
+        local_start = time.time()
+        local_results = refine_with_nelder_mead(welfare_of, starts, lows, highs,
+                                                local_max_evaluations)
+        summary["local_starts"] = local_results
+        best_local = max(local_results, key=lambda result: result["welfare"])
+        if best_local["welfare"] > best_welfare:
+            best_coefficients = np.array(best_local["coefficients"])
+            best_welfare = best_local["welfare"]
+        if verbose:
+            print(f"Nelder–Mead from {len(starts)} starts in {time.time() - local_start:.1f}s: "
+                  f"welfare {best_welfare:.8g} (genetic {summary['genetic_welfare']:.8g}); "
+                  f"converged {sum(r['converged'] for r in local_results)}/{len(local_results)}")
+
+    summary["num_objective_evaluations"] = len(cache)
+    if verbose:
+        print(f"Best τ: β = {[f'{c:.6g}' for c in best_coefficients]}, welfare {best_welfare:.8g}")
+    return SearchResult([float(c) for c in best_coefficients], best_welfare, trajectory, summary)

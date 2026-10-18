@@ -158,14 +158,17 @@ def optimize_and_evaluate(prepared, polynomial_degree, num_bidders, num_goods,
     ga_options = dict(ga_options or {})
     best = (None, -np.inf)
     trajectory = []
+    search_summaries = []
     for restart in range(num_restarts):
-        coefficients, welfare, restart_trajectory = run_genetic_search(
+        search = run_genetic_search(
             prepared.training, polynomial_degree, num_bidders, num_goods,
             objective_mechanism=objective_mechanism,
             seed=None if ga_seed is None else ga_seed + restart,
             initial_solution=initial_solution if restart == 0 else None,
             verbose=verbose, **ga_options)
-        trajectory.extend(restart_trajectory)
+        coefficients, welfare = search.coefficients, search.welfare
+        trajectory.extend(search.trajectory)
+        search_summaries.append(search.summary)
         if welfare > best[1]:
             best = (coefficients, welfare)
     tau_coefficients, training_welfare = best
@@ -215,6 +218,7 @@ def optimize_and_evaluate(prepared, polynomial_degree, num_bidders, num_goods,
         "tau_coeffs": tau_coefficients,
         "training_welfare": training_welfare,
         "trajectory": trajectory,
+        "search_summaries": search_summaries,
         "evaluation": evaluation,
         "bootstrap": bootstrap,
         "grid_refinement": refinement,
@@ -257,13 +261,13 @@ def bandwidth_sensitivity(prepared, bandwidth_scales, polynomial_degree, num_bid
                                        num_valuation_cells=settings["num_valuation_cells"])
         best = (None, -np.inf)
         for restart in range(num_restarts):
-            coefficients, welfare, _ = run_genetic_search(
+            search = run_genetic_search(
                 training, polynomial_degree, num_bidders, num_goods,
                 objective_mechanism=objective_mechanism,
                 seed=None if ga_seed is None else ga_seed + restart, verbose=verbose,
                 **(ga_options or {}))
-            if welfare > best[1]:
-                best = (coefficients, welfare)
+            if search.welfare > best[1]:
+                best = (search.coefficients, search.welfare)
         threshold = polynomial_threshold(best[0])
         ivcg_rule = ivcg_scoring_rule_for(training, threshold, num_bidders, num_goods)
         welfare = exact_welfare_by_mechanism(prepared.evaluation, threshold, num_bidders,
