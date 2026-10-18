@@ -3,24 +3,29 @@
 run_sweep_genetic2.py
 
 Sweep runner for the τ optimization. Sweeps over the externality scale ζ,
-polynomial degrees, k (goods) and n (bidders). Each (k, degree, n, ζ) cell runs
-audited_auctions.pipeline:
+threshold forms (polynomials, knots, bins, nodes), k (goods) and n (bidders).
+Each (k, form, n, ζ) cell runs audited_auctions.pipeline:
 
   1. Distributions. --data is a synthetic family name (H known; τ optimized and
      evaluated on the same piecewise-uniform distribution) or a CSV with
      columns e_score, v_score (empirical: split into training and test halves
      with a seed common to all cells, truncated at a valuation quantile v̄;
      training half kernel-smoothed, test half atomic by default).
-  2. Search (with restarts and optional warm start across degrees) for the
-     polynomial τ maximizing the exact expected welfare of VCG-PA (or IVCG-PA,
-     --objective) on the training distribution: genetic stage, then
-     Nelder–Mead refinement (default; --local-refinement none to skip).
+  2. Search for the τ in the form (--tau-forms) maximizing the exact expected
+     welfare of VCG-PA (or IVCG-PA, --objective) on the training distribution.
+     --optimizer auto (default): polynomials by genetic search (genetic stage,
+     then Nelder–Mead refinement; --local-refinement none to skip), knots, bins
+     and nodes by best-response ascent; genetic+best_response runs a genetic
+     search (in --genetic-form) and starts the ascent from its result.
+     --warm-start: genetic search of poly<d> starts from the poly<d−1> optimum;
+     best-response ascent also starts from the optimum at the previous ζ
+     (rescaled: τ(e) = τ_prev(e ζ_prev / ζ)).
   3. Exact evaluation on the evaluation distribution of VCG, VCG-PA, IVCG-PA and
      the first best: welfare, gains over VCG and share of the first-best gain,
      revenue, penalty paid, participation, and the exact penalties r(e)
      inducing τ.
   4. One simulation (--test-auctions draws, common random numbers across
-     mechanisms, k and degree) for per-auction welfare distributions.
+     mechanisms, k and form) for per-auction welfare distributions.
   5. Empirical data: the IVCG-PA scoring rule is designed on the training half
      and applied to the test rows; bootstrap of exact welfare over the test
      rows (--bootstrap-samples); optional bandwidth sensitivity check
@@ -30,10 +35,11 @@ audited_auctions.pipeline:
 Output goes to a timestamped subdirectory with a README describing the files.
 
 Usage:
-    python run_sweep_genetic2.py --data harm_rises --degrees 1,2 --k-values 1,2 \
-        --num-items 8 --ext-min 0.5 --ext-max 2 --num-ext 4 --tag harm
+    python run_sweep_genetic2.py --data harm_rises --tau-forms poly1,knots6,nodes \
+        --k-values 1,2 --num-items 8 --ext-min 0.5 --ext-max 2 --num-ext 4 --warm-start \
+        --tag harm
     python run_sweep_genetic2.py --data data/samples/g_full_tweets.csv \
-        --degrees 1,2,3 --k-values 1,2 --num-items 8,16 \
+        --tau-forms poly1,poly2,poly3 --k-values 1,2 --num-items 8,16 \
         --ext-min 1 --ext-max 100 --num-ext 8 --log-scale --num-restarts 3 \
         --warm-start --tag tweets
 
@@ -63,14 +69,18 @@ from audited_auctions.figures import (  # noqa: E402
     plot_welfare_distributions as plot_welfare_distribution_densities,
 )
 from audited_auctions.pipeline import (  # noqa: E402
+    OPTIMIZERS,
     is_synthetic_source,
     optimize_and_evaluate,
     prepare_distributions,
 )
+from audited_auctions.threshold_forms import parse_form_label, threshold_from_spec  # noqa: E402
 from audited_auctions.sweep_support import (  # noqa: E402
     SWEEP_SERIES,
+    record_candidate_thresholds,
     record_exact_welfare,
     record_penalty_curves,
+    record_threshold_values,
     record_type_sample,
     sweep_record_fields,
 )
@@ -79,24 +89,27 @@ from audited_auctions.sweep_support import (  # noqa: E402
 # ─── One sweep cell ───────────────────────────────────────────────────────────
 
 
-def run_one(prepared, k, degree, ext_cost, action_cost, num_items, ga_options, ga_seed,
+def run_one(prepared, k, form_label, ext_cost, action_cost, num_items, ga_options, ga_seed,
             num_restarts, initial_solution, simulation_seed, num_test_auctions,
             objective_mechanism, num_bootstrap, bootstrap_seed, grid_refinement,
-            sensitivity_bandwidth_scales=()):
+            sensitivity_bandwidth_scales=(), optimizer="auto", genetic_form=None,
+            best_response_options=None, warm_starts=()):
     """Optimize τ for one cell and evaluate it; returns the sweep record."""
     print(f"\n{'=' * 60}")
-    print(f"  k={k}  degree={degree}  ζ={ext_cost:.6g}  n={num_items}  ga_seed={ga_seed}  "
-          f"simulation_seed={simulation_seed}  restarts={num_restarts}")
+    print(f"  k={k}  τ form={form_label}  optimizer={optimizer}  ζ={ext_cost:.6g}  n={num_items}  "
+          f"seed={ga_seed}  simulation_seed={simulation_seed}  restarts={num_restarts}")
     if initial_solution is not None:
         print(f"  warm start (restart 0): {[f'{c:.4g}' for c in initial_solution]}")
     print(f"{'=' * 60}")
     record = optimize_and_evaluate(
-        prepared, degree, num_items, k, objective_mechanism=objective_mechanism,
+        prepared, form_label, num_items, k, objective_mechanism=objective_mechanism,
         ga_options=ga_options, ga_seed=ga_seed, num_restarts=num_restarts,
         initial_solution=initial_solution, num_simulated_draws=num_test_auctions,
         simulation_seed=simulation_seed, num_bootstrap=num_bootstrap,
         bootstrap_seed=bootstrap_seed, grid_refinement=grid_refinement,
-        sensitivity_bandwidth_scales=sensitivity_bandwidth_scales)
+        sensitivity_bandwidth_scales=sensitivity_bandwidth_scales, optimizer=optimizer,
+        genetic_form=genetic_form, best_response_options=best_response_options,
+        warm_starts=warm_starts)
     print(record["evaluation"].summary_table()[
         ["exact_welfare", "exact_welfare_gain_over_vcg", "share_of_first_best_gain"]
     ].to_string(float_format=lambda x: f"{x:.5g}"))
@@ -114,11 +127,16 @@ def run_one(prepared, k, degree, ext_cost, action_cost, num_items, ga_options, g
     }
 
 
+def rescaled_threshold(threshold, externality_ratio):
+    """τ(e) = threshold(e · externality_ratio): the previous ζ's τ on the current ζ's scale."""
+    def warm(externalities):
+        return threshold(np.asarray(externalities, dtype=float) * externality_ratio)
+
+    warm.start_name = "previous ζ"
+    return warm
+
+
 # ─── Plot helpers ─────────────────────────────────────────────────────────────
-
-
-def _eval_poly(coeffs, x):
-    return sum(c * x**i for i, c in enumerate(coeffs))
 
 
 def _scatter_sample(all_e, all_v, ax, rng, n=1000):
@@ -166,21 +184,18 @@ def plot_tau_grid(records, out_dir, tag, max_fns=200, zoomed=False, percentile=9
         _scatter_sample(all_e, all_v, ax, rng)
 
         e_line = np.linspace(e_lo, e_hi, 300)
-        fns = rec["trajectory"]
-        if len(fns) > max_fns:
-            chosen = rng.choice(len(fns), size=max_fns, replace=False)
-            fns = [fns[i] for i in chosen]
-        for coeffs in fns:
+        for candidate in record_candidate_thresholds(rec, max_fns, rng):
+            values = np.asarray(candidate(e_line), dtype=float)
             ax.plot(
                 e_line,
-                [_eval_poly(coeffs, e) for e in e_line],
+                np.where(np.isfinite(values), values, np.nan),
                 color="gray",
                 alpha=0.12,
                 linewidth=0.5,
                 zorder=2,
             )
 
-        y_opt = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
+        y_opt = record_threshold_values(rec, e_line)
         ax.plot(e_line, y_opt, color="tab:red", linewidth=2.0, zorder=3)
 
         ax.set_xlim(e_lo, e_hi)
@@ -194,7 +209,7 @@ def plot_tau_grid(records, out_dir, tag, max_fns=200, zoomed=False, percentile=9
     suffix = " (zoomed)" if zoomed else ""
     fig.suptitle(
         f"Tested & Optimal τ{suffix}  "
-        f"[k={records[0]['k']}, degree={records[0]['polynomial_degree']}, n={records[0]['num_items']}]",
+        f"[k={records[0]['k']}, τ form={records[0]['threshold_form']}, n={records[0]['num_items']}]",
         fontsize=12,
     )
     fig.tight_layout()
@@ -224,7 +239,7 @@ def plot_penalty_grid(records, out_dir, tag, percentile=99):
 
         e_line = np.linspace(e_lo, e_hi, 300)
 
-        y_tau = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
+        y_tau = record_threshold_values(rec, e_line)
         penalties = record_penalty_curves(rec, e_line)  # exact r(e) inducing tau
         neg_e = -e_line
 
@@ -238,7 +253,7 @@ def plot_penalty_grid(records, out_dir, tag, percentile=99):
         )
 
         # Y limits: include all curves and the scatter body
-        y_all = np.concatenate([y_tau, penalties["vcg_pa"], neg_e, all_v])
+        y_all = np.concatenate([y_tau[np.isfinite(y_tau)], penalties["vcg_pa"], neg_e, all_v])
         y_lo_plot = min(float(np.percentile(y_all, 1)), 0.0)
         y_hi_plot = max(float(np.percentile(y_all, 99)), v_hi) * 1.05
         ax.set_xlim(e_lo, e_hi)
@@ -266,7 +281,7 @@ def plot_penalty_grid(records, out_dir, tag, percentile=99):
     _hide_unused(axs, n, nrows, ncols)
     fig.suptitle(
         f"Threshold & Penalty Curves  "
-        f"[k={records[0]['k']}, degree={records[0]['polynomial_degree']}, n={records[0]['num_items']}]",
+        f"[k={records[0]['k']}, τ form={records[0]['threshold_form']}, n={records[0]['num_items']}]",
         fontsize=12,
     )
     fig.tight_layout()
@@ -295,7 +310,7 @@ def plot_welfare_comparison(records, out_dir, tag):
     ax.set_ylabel("Expected welfare (exact)", fontsize=11)
     ax.set_title(
         f"Expected Welfare vs Externality Scale\n"
-        f"k={records[0]['k']}, degree={records[0]['polynomial_degree']}, n={records[0]['num_items']}",
+        f"k={records[0]['k']}, τ form={records[0]['threshold_form']}, n={records[0]['num_items']}",
         fontsize=12,
     )
     ax.legend(fontsize=10)
@@ -326,10 +341,10 @@ def plot_cell_evaluation_figures(records, prepared_by_ext, out_dir, tag):
         print(f"Saved: {path}")
 
 
-def plot_tau_degree_comparison(
-    all_results, degrees_ordered, fig_dir, k_values, num_items_list, percentile=99
+def plot_tau_form_comparison(
+    all_results, forms_ordered, fig_dir, k_values, num_items_list, percentile=99
 ):
-    """For each (k, n): one subplot per ext_cost, overlaying optimal tau per degree."""
+    """For each (k, n): one subplot per ext_cost, overlaying optimal τ per form."""
     _palette = [
         "tab:blue",
         "tab:orange",
@@ -341,18 +356,18 @@ def plot_tau_degree_comparison(
         "tab:gray",
         "tab:cyan",
     ]
-    degree_colors = [_palette[i % len(_palette)] for i in range(len(degrees_ordered))]
+    form_colors = [_palette[i % len(_palette)] for i in range(len(forms_ordered))]
 
     for k in k_values:
         for num_items in num_items_list:
-            avail_degrees = [
-                d for d in degrees_ordered if (k, d, num_items) in all_results
+            available_forms = [
+                f for f in forms_ordered if (k, f, num_items) in all_results
             ]
-            if not avail_degrees:
+            if not available_forms:
                 continue
 
-            first_deg = avail_degrees[0]
-            ext_recs = all_results[(k, first_deg, num_items)]
+            first_form = available_forms[0]
+            ext_recs = all_results[(k, first_form, num_items)]
             num_ext = len(ext_recs)
             ncols, nrows = _grid_axes(num_ext)
             fig, axs = plt.subplots(
@@ -362,7 +377,7 @@ def plot_tau_degree_comparison(
 
             for ext_idx in range(num_ext):
                 ax = axs[ext_idx // ncols][ext_idx % ncols]
-                ref_rec = all_results[(k, first_deg, num_items)][ext_idx]
+                ref_rec = all_results[(k, first_form, num_items)][ext_idx]
                 all_e, all_v = record_type_sample(ref_rec)
                 e_lo, e_hi = _e_range(all_e, percentile)
                 v_hi = float(np.percentile(all_v, percentile))
@@ -370,15 +385,15 @@ def plot_tau_degree_comparison(
                 _scatter_sample(all_e, all_v, ax, rng)
                 e_line = np.linspace(e_lo, e_hi, 300)
 
-                for d_idx, degree in enumerate(avail_degrees):
-                    rec = all_results[(k, degree, num_items)][ext_idx]
-                    y = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
+                for d_idx, form_label in enumerate(available_forms):
+                    rec = all_results[(k, form_label, num_items)][ext_idx]
+                    y = record_threshold_values(rec, e_line)
                     ax.plot(
                         e_line,
                         y,
-                        color=degree_colors[d_idx],
+                        color=form_colors[d_idx],
                         linewidth=2.0,
-                        label=f"deg {degree}",
+                        label=form_label,
                         zorder=3,
                     )
 
@@ -392,23 +407,23 @@ def plot_tau_degree_comparison(
                     ax.legend(fontsize=7, loc="best")
 
             _hide_unused(axs, num_ext, nrows, ncols)
-            fig.suptitle(f"Optimal τ by Degree  [k={k}, n={num_items}]", fontsize=12)
+            fig.suptitle(f"Optimal τ by Form  [k={k}, n={num_items}]", fontsize=12)
             fig.tight_layout()
-            path = os.path.join(fig_dir, f"tau_degree_comparison_k{k}_n{num_items}.png")
+            path = os.path.join(fig_dir, f"tau_form_comparison_k{k}_n{num_items}.png")
             fig.savefig(path, dpi=150)
             plt.close(fig)
             print(f"Saved: {path}")
 
 
 def plot_welfare_distributions(all_results, fig_dir):
-    """For each (k, degree, n): grid of rows=ext_costs × cols=[total, adv, ext] histograms."""
+    """For each (k, τ form, n): grid of rows=ext_costs × cols=[total, adv, ext] histograms."""
     col_specs = [
         ("welfare", "Total Welfare"),
         ("adv_welfare", "Advertiser Welfare (v)"),
         ("ext_welfare", "Externality Welfare (e)"),
     ]
 
-    for (k, degree, num_items), records in all_results.items():
+    for (k, form_label, num_items), records in all_results.items():
         records_sorted = sorted(records, key=lambda r: r["externality_cost"])
         num_ext = len(records_sorted)
 
@@ -438,11 +453,11 @@ def plot_welfare_distributions(all_results, fig_dir):
                     ax.legend(fontsize=7)
 
         fig.suptitle(
-            f"Welfare Distributions  [k={k}, degree={degree}, n={num_items}]",
+            f"Welfare Distributions  [k={k}, τ form={form_label}, n={num_items}]",
             fontsize=13,
         )
         fig.tight_layout()
-        path = os.path.join(fig_dir, f"welfare_dist_k{k}_deg{degree}_n{num_items}.png")
+        path = os.path.join(fig_dir, f"welfare_dist_k{k}_{form_label}_n{num_items}.png")
         fig.savefig(path, dpi=150)
         plt.close(fig)
         print(f"Saved: {path}")
@@ -484,7 +499,9 @@ def write_readme(out_dir, args, ext_values, timestamp):
 {data_rows}
 | Objective (exact expected welfare of) | `{args.objective}` |
 | k values | `{args.k_values}` |
-| Polynomial degrees | `{args.degrees}` |
+| τ forms | `{",".join(args.tau_form_labels)}` |
+| Optimizer | `{args.optimizer}` (genetic form for genetic+best_response: `{args.genetic_form or "same / knots6"}`) |
+| Best-response starts / max iterations / tolerance / short genetic generations | `{args.br_starts}` / {args.br_max_iterations} / {args.br_tolerance} / {args.short_genetic_generations} |
 | Bidders n | `{args.num_items}` |
 | Externality scale ζ | [{args.ext_min}, {args.ext_max}] ({args.num_ext} values, {"log" if args.log_scale else "linear"} spacing): `{ext_list}` |
 | Simulated auctions per cell | {args.test_auctions} |
@@ -501,15 +518,15 @@ def write_readme(out_dir, args, ext_values, timestamp):
 ```
 {dir_name}/
 ├── results/
-│   └── run_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.pkl        # one record per (k, degree, n, ζ index)
+│   └── run_k{{k}}_{{form}}_n{{n}}_ext{{i}}.pkl        # one record per (k, τ form, n, ζ index)
 ├── figures/
-│   ├── tau_grid_k{{k}}_deg{{d}}_n{{n}}.png             # GA candidates and optimal τ over a type sample
-│   ├── tau_grid_zoomed_k{{k}}_deg{{d}}_n{{n}}.png      # same, central 98% of types
-│   ├── penalty_grid_k{{k}}_deg{{d}}_n{{n}}.png         # τ, exact r(e) for VCG-PA and IVCG-PA, −e
-│   ├── welfare_k{{k}}_deg{{d}}_n{{n}}.png              # exact expected welfare by mechanism vs ζ
-│   ├── threshold_penalties_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.png  # types + τ, penalties, exact welfare
-│   └── welfare_densities_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.png    # per-auction welfare, paired gains over VCG
-├── sweep_data.pkl                                # all records, keyed by (k, degree, n)
+│   ├── tau_grid_k{{k}}_{{form}}_n{{n}}.png             # search candidates and optimal τ over a type sample
+│   ├── tau_grid_zoomed_k{{k}}_{{form}}_n{{n}}.png      # same, central 98% of types
+│   ├── penalty_grid_k{{k}}_{{form}}_n{{n}}.png         # τ, exact r(e) for VCG-PA and IVCG-PA, −e
+│   ├── welfare_k{{k}}_{{form}}_n{{n}}.png              # exact expected welfare by mechanism vs ζ
+│   ├── threshold_penalties_k{{k}}_{{form}}_n{{n}}_ext{{i}}.png  # types + τ, penalties, exact welfare
+│   └── welfare_densities_k{{k}}_{{form}}_n{{n}}_ext{{i}}.png    # per-auction welfare, paired gains over VCG
+├── sweep_data.pkl                                # all records, keyed by (k, τ form, n)
 └── README.md                                     # this file
 ```
 
@@ -531,19 +548,21 @@ and charge critical-value payments.
 
 ## Per-Run Result Files
 
-Each `results/run_k{{k}}_deg{{d}}_n{{n}}_ext{{i}}.pkl` holds one `dict`:
+Each `results/run_k{{k}}_{{form}}_n{{n}}_ext{{i}}.pkl` holds one `dict`:
 
 | Field | Description |
 |-------|-------------|
-| `k`, `num_items`, `polynomial_degree`, `externality_cost`, `action_cost` | cell coordinates (k goods, n bidders, degree, ζ, valuation scale) |
-| `objective_mechanism` | mechanism whose exact welfare the GA maximized |
-| `tau_coeffs` | optimal τ coefficients [β₀, β₁, …] (τ(e) = Σ β_m e^m) |
+| `k`, `num_items`, `threshold_form`, `externality_cost`, `action_cost` | cell coordinates (k goods, n bidders, τ form, ζ, valuation scale) |
+| `objective_mechanism`, `optimizer` | mechanism whose exact welfare was maximized; optimizer used |
+| `threshold_spec` | the optimal τ: form, knots / bin edges / nodes, parameters; `audited_auctions.threshold_forms.threshold_from_spec(spec)` rebuilds τ |
+| `tau_parameters` | parameters of the optimal τ in its form; `tau_coeffs` (polynomials only) = [β₀, β₁, …], `polynomial_degree` |
 | `training_welfare` (= `ga_welfare`) | exact objective at the optimum on the training distribution |
-| `trajectory` | every coefficient vector in every GA generation |
-| `search_summaries` | per restart: genetic optimum, generations run, distinct objective evaluations, and per Nelder–Mead start the starting and final welfare, evaluations and convergence flag |
+| `trajectory`, `trajectory_forms` | candidates evaluated by the search, as (form index, parameters); `trajectory_forms` holds the form specs |
+| `search_summaries` | genetic search: per restart the genetic optimum, generations, objective evaluations and Nelder–Mead starts; best-response ascent: per start the initial and final welfare, iterations, final best-response gap |
+| `first_order_check` | DataFrame per externality node of the training distribution: τ, status (interior / zero / excluded), X^τ(τ), penalty r(e), own-allocation charge −e X^τ, displaced term, marginal welfare M^τ(e, τ(e)) (zero at interior thresholds of an optimum in the nodes form: Pigouvian penalty) and best-response gap |
 | `evaluation` | `ThresholdEvaluation` on the evaluation distribution: exact outcomes (`exact`), `summary_table()`, `welfare_gains_over_vcg()`, exact penalty functions (`penalty_tables`, `penalty_curves`), ŵ^τ and ω̄^τ, simulated draws |
 | `bootstrap` | empirical data: `BootstrapResult` (`resamples` DataFrame and `summary()` with percentile intervals) of exact welfare, paired gains over VCG and shares of the first-best gain over test-row resamples; `None` for synthetic families |
-| `bandwidth_sensitivity` | empirical data with `--sensitivity-bandwidths`: DataFrame indexed by bandwidth scale (base included): τ coefficients, training objective, exact test welfare, gains over VCG and shares of the first-best gain of the design made with that bandwidth; else `None` |
+| `bandwidth_sensitivity` | empirical data with `--sensitivity-bandwidths`: DataFrame indexed by bandwidth scale (base included): τ parameters and spec, training objective, exact test welfare, gains over VCG and shares of the first-best gain of the design made with that bandwidth; else `None` |
 | `grid_refinement` | synthetic families with `--grid-refinement`: DataFrame of exact welfare and gains on the base and twice finer grid; else `None` |
 | `type_sample` | 4000 types drawn from the evaluation distribution (for scatter plots) |
 | `distribution_settings` | how the distributions were built (family/CSV, ζ, truncation, split, smoothing, grid) |
@@ -558,13 +577,13 @@ from the evaluation distribution.
 
 ## Consolidated Data File (`sweep_data.pkl`)
 
-A `dict` keyed by `(k, degree, num_items)`; each value is the list of records sorted by ζ.
+A `dict` keyed by `(k, threshold_form, num_items)`; each value is the list of records sorted by ζ.
 
 ```python
 import pickle
 with open('sweep_data.pkl', 'rb') as f:
     data = pickle.load(f)
-record = data[(1, 2, 8)][0]
+record = data[(1, "poly2", 8)][0]
 print(record["evaluation"].summary_table())        # exact outcomes per mechanism
 if record["bootstrap"] is not None:
     print(record["bootstrap"].summary())           # bootstrap intervals (empirical data)
@@ -625,7 +644,14 @@ def parse_args():
                    help="synthetic families: evaluate τ also on a twice finer grid")
 
     # Sweep dimensions
-    p.add_argument("--degrees", default="1", help='polynomial degrees, e.g. "1,2,3"')
+    p.add_argument("--tau-forms", default=None,
+                   help='threshold forms, e.g. "poly1,poly2,knots6,bins10,nodes" (poly<d>: '
+                        "polynomial of degree d; knots<K>: continuous piecewise linear with K "
+                        "knots at externality quantiles plus an exclusion cutoff; bins<K>: "
+                        "constant on K quantile bins; nodes: one value per externality node). "
+                        "Default: poly<d> for each of --degrees")
+    p.add_argument("--degrees", default="1",
+                   help='polynomial degrees when --tau-forms is not given, e.g. "1,2,3"')
     p.add_argument("--k-values", default="1", help='numbers of goods k, e.g. "1,2"')
     p.add_argument("--num-items", default="20", help='numbers of bidders n, e.g. "8,16"')
     p.add_argument("--ext-min", type=float, default=1.0, help="smallest ζ (default: 1)")
@@ -635,7 +661,23 @@ def parse_args():
 
     # Optimization
     p.add_argument("--objective", choices=("vcg_pa", "ivcg_pa"), default="vcg_pa",
-                   help="mechanism whose exact expected welfare the GA maximizes")
+                   help="mechanism whose exact expected welfare is maximized")
+    p.add_argument("--optimizer", choices=OPTIMIZERS, default="auto",
+                   help="auto (default): genetic search for polynomials, best-response ascent "
+                        "for knots/bins/nodes; or genetic, best_response, genetic+best_response")
+    p.add_argument("--genetic-form", default=None,
+                   help="genetic+best_response: form of the genetic search (default: the τ form, "
+                        "or knots6 for nodes)")
+    p.add_argument("--br-starts", default="zero,no_competition",
+                   help='best-response starts among zero, no_competition, short_genetic '
+                        '(default: "zero,no_competition")')
+    p.add_argument("--br-max-iterations", type=int, default=100,
+                   help="best-response iterations per start (default: 100)")
+    p.add_argument("--br-tolerance", type=float, default=1e-10,
+                   help="best-response ascent stops after two iterations with relative welfare "
+                        "gain below this (default: 1e-10)")
+    p.add_argument("--short-genetic-generations", type=int, default=40,
+                   help="generations of the short_genetic start (default: 40)")
     p.add_argument("--num-generations", type=int, default=500)
     p.add_argument("--sol-per-pop", type=int, default=50)
     p.add_argument("--num-parents-mating", type=int, default=15)
@@ -654,7 +696,8 @@ def parse_args():
     p.add_argument("--num-restarts", type=int, default=1,
                    help="independent GA restarts per cell; the best is kept")
     p.add_argument("--warm-start", action="store_true",
-                   help="seed the degree-d search with the degree-(d−1) optimum")
+                   help="genetic search of poly<d> starts from the poly<d−1> optimum; "
+                        "best-response ascent also starts from the previous ζ's optimum")
 
     # Evaluation
     p.add_argument("--test-auctions", type=int, default=2000,
@@ -675,7 +718,13 @@ def main():
     args = parse_args()
     t_start = time.time()
 
-    degrees = [int(d.strip()) for d in args.degrees.split(",")]
+    if args.tau_forms:
+        forms = [label.strip() for label in args.tau_forms.split(",") if label.strip()]
+    else:
+        forms = [f"poly{int(d.strip())}" for d in args.degrees.split(",")]
+    for label in forms:
+        parse_form_label(label)  # validate early
+    args.tau_form_labels = forms
     k_values = [int(k.strip()) for k in args.k_values.split(",")]
     num_items_list = [int(n.strip()) for n in args.num_items.split(",")]
     if args.log_scale:
@@ -691,7 +740,7 @@ def main():
     os.makedirs(fig_dir, exist_ok=True)
     print(f"Output directory : {out_dir}")
     print(f"k values         : {k_values}")
-    print(f"Degrees          : {degrees}")
+    print(f"τ forms          : {forms}  (optimizer {args.optimizer})")
     print(f"Bidders n        : {num_items_list}")
     print(f"ζ values         : {[f'{v:.4g}' for v in ext_values]}")
     write_readme(out_dir, args, ext_values, timestamp)
@@ -720,12 +769,18 @@ def main():
                   "num_local_starts": args.num_local_starts,
                   "local_max_evaluations": args.local_max_evaluations}
     sensitivity_scales = [float(x) for x in args.sensitivity_bandwidths.split(",") if x.strip()]
-    degrees_ordered = sorted(degrees) if args.warm_start else degrees
+    best_response_options = {
+        "starts": [x.strip() for x in args.br_starts.split(",") if x.strip()],
+        "max_iterations": args.br_max_iterations, "relative_tolerance": args.br_tolerance,
+        "short_genetic_generations": args.short_genetic_generations}
+    forms_ordered = (sorted(forms, key=lambda label: (parse_form_label(label)[0] != "polynomial",
+                                                      parse_form_label(label)[1] or 0))
+                     if args.warm_start else forms)
     valid_kn = [(k, n) for k in k_values for n in num_items_list if k < n]
     skipped_kn = [(k, n) for k in k_values for n in num_items_list if k >= n]
     if skipped_kn:
         print(f"Skipping (k, n) pairs with k >= n: {skipped_kn}")
-    total_cells = len(valid_kn) * len(degrees_ordered) * len(ext_values)
+    total_cells = len(valid_kn) * len(forms_ordered) * len(ext_values)
     all_results = {}
     cell = 0
 
@@ -733,27 +788,43 @@ def main():
         for n_idx, num_items in enumerate(num_items_list):
             if k >= num_items:
                 continue
-            for degree in degrees_ordered:
-                all_results[(k, degree, num_items)] = []
+            for form_label in forms_ordered:
+                all_results[(k, form_label, num_items)] = []
+            previous_by_form = {}  # (threshold, ζ) of the previous ζ, for best-response warm starts
             for ext_idx, ext_cost in enumerate(ext_values):
-                previous_coefficients = None  # warm start carries across degrees within one ζ
-                for degree in degrees_ordered:
+                previous_polynomial = None  # warm start carries across degrees within one ζ
+                for form_idx, form_label in enumerate(forms_ordered):
                     cell += 1
-                    ga_seed = args.seed + ext_idx + degree * 1000 + k * 100000 + n_idx * 10000000
-                    # Same simulated auctions for all k and degrees at a given (n, ζ).
+                    kind, size = parse_form_label(form_label)
+                    ga_seed = (args.seed + ext_idx + form_idx * 1000 + k * 100000
+                               + n_idx * 10000000)
+                    # Same simulated auctions for all k and forms at a given (n, ζ).
                     simulation_seed = args.seed + 1_000_000 + ext_idx + n_idx * 10000000
                     bootstrap_seed = args.seed + 2_000_000 + ext_idx
-                    initial_solution = (previous_coefficients + [0.0]
-                                        if args.warm_start and previous_coefficients else None)
+                    initial_solution = None
+                    if (args.warm_start and kind == "polynomial" and previous_polynomial
+                            and len(previous_polynomial) == size):
+                        initial_solution = previous_polynomial + [0.0]
+                    warm_starts = []
+                    if args.warm_start and form_label in previous_by_form:
+                        previous_threshold, previous_ext = previous_by_form[form_label]
+                        warm_starts.append(rescaled_threshold(previous_threshold,
+                                                              previous_ext / ext_cost))
                     print(f"\n[{cell}/{total_cells}]")
                     rec = run_one(
-                        prepared_by_ext[ext_idx], k, degree, ext_cost, args.action_cost, num_items,
-                        ga_options, ga_seed, args.num_restarts, initial_solution, simulation_seed,
-                        args.test_auctions, args.objective, args.bootstrap_samples,
-                        bootstrap_seed, args.grid_refinement, sensitivity_scales)
-                    all_results[(k, degree, num_items)].append(rec)
-                    previous_coefficients = rec["tau_coeffs"]
-                    fname = f"run_k{k}_deg{degree}_n{num_items}_ext{ext_idx}.pkl"
+                        prepared_by_ext[ext_idx], k, form_label, ext_cost, args.action_cost,
+                        num_items, ga_options, ga_seed, args.num_restarts, initial_solution,
+                        simulation_seed, args.test_auctions, args.objective,
+                        args.bootstrap_samples, bootstrap_seed, args.grid_refinement,
+                        sensitivity_scales, optimizer=args.optimizer,
+                        genetic_form=args.genetic_form,
+                        best_response_options=best_response_options, warm_starts=warm_starts)
+                    all_results[(k, form_label, num_items)].append(rec)
+                    if kind == "polynomial":
+                        previous_polynomial = rec["tau_coeffs"]
+                    previous_by_form[form_label] = (threshold_from_spec(rec["threshold_spec"]),
+                                                    ext_cost)
+                    fname = f"run_k{k}_{form_label}_n{num_items}_ext{ext_idx}.pkl"
                     with open(os.path.join(res_dir, fname), "wb") as f:
                         pickle.dump(rec, f)
                     print(f"  -> saved {fname}")
@@ -765,15 +836,15 @@ def main():
 
     if not args.no_plot:
         print("\nGenerating figures...")
-        for (k, degree, num_items), records in all_results.items():
+        for (k, form_label, num_items), records in all_results.items():
             records_sorted = sorted(records, key=lambda r: r["externality_cost"])
-            tag_kdn = f"k{k}_deg{degree}_n{num_items}"
+            tag_kdn = f"k{k}_{form_label}_n{num_items}"
             plot_tau_grid(records_sorted, fig_dir, tag_kdn, zoomed=False)
             plot_tau_grid(records_sorted, fig_dir, tag_kdn, zoomed=True)
             plot_penalty_grid(records_sorted, fig_dir, tag_kdn)
             plot_welfare_comparison(records_sorted, fig_dir, tag_kdn)
             plot_cell_evaluation_figures(records_sorted, prepared_by_ext, fig_dir, tag_kdn)
-        plot_tau_degree_comparison(all_results, degrees_ordered, fig_dir, k_values,
+        plot_tau_form_comparison(all_results, forms_ordered, fig_dir, k_values,
                                    num_items_list)
         plot_welfare_distributions(all_results, fig_dir)
 

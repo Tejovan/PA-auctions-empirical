@@ -429,8 +429,8 @@ def grid_refinement_check(family, threshold_function, num_bidders, num_goods,
     """
     from .type_distributions import synthetic_distribution
 
-    base_nodes = options.pop("num_externality_nodes", 101)
-    base_cells = options.pop("num_valuation_cells", 600)
+    base_nodes = options.pop("num_externality_nodes", 151)
+    base_cells = options.pop("num_valuation_cells", 150)
     results = {}
     for label, factor in (("base", 1), ("refined", refinement_factor)):
         grid = {"num_externality_nodes": (base_nodes - 1) * factor + 1,

@@ -344,7 +344,7 @@ def gaussian_mixture_density(component_means, component_covariances, component_w
 
 
 def gaussian_mixture_distribution(component_means, component_covariances, component_weights=None,
-                                  num_externality_nodes=101, num_valuation_cells=600,
+                                  num_externality_nodes=151, num_valuation_cells=150,
                                   num_standard_deviations=5.0, name="gaussian mixture",
                                   metadata=None):
     """Gaussian mixture over (e, v), truncated to v >= 0 and discretized.
@@ -393,7 +393,7 @@ _MIXTURES = {
 def _mixture_family(letter):
     title, means, covariance = _MIXTURES[letter]
 
-    def build(num_externality_nodes=101, num_valuation_cells=600):
+    def build(num_externality_nodes=151, num_valuation_cells=150):
         return gaussian_mixture_distribution(
             means, [covariance] * len(means),
             num_externality_nodes=num_externality_nodes,
@@ -405,7 +405,7 @@ def _mixture_family(letter):
     return build
 
 
-def example_n_distribution(harm=0.6, num_externality_nodes=None, num_valuation_cells=600):
+def example_n_distribution(harm=0.6, num_externality_nodes=None, num_valuation_cells=150):
     """Example N of the core draft: v ~ U[0,1], e ∈ {0, −harm} w.p. ½ each, independent.
 
     With n = 2, k = 1 and τ(0) <= 0, τ(−harm) = t, VCG-PA welfare is
@@ -422,7 +422,7 @@ def example_n_distribution(harm=0.6, num_externality_nodes=None, num_valuation_c
 
 
 def independent_distribution(externality_mean=-0.3, externality_sd=0.5,
-                             num_externality_nodes=101, num_valuation_cells=600):
+                             num_externality_nodes=151, num_valuation_cells=150):
     """v ~ U[0, 1] independent of e ~ N(externality_mean, externality_sd²)."""
     return gridded_density_distribution(
         lambda e, v: _normal_pdf(e, externality_mean, externality_sd) * np.ones_like(v),
@@ -436,7 +436,7 @@ def independent_distribution(externality_mean=-0.3, externality_sd=0.5,
 
 
 def harm_rises_distribution(correlation=-0.6, means=(-0.3, 1.0), standard_deviations=(0.5, 0.4),
-                            num_externality_nodes=101, num_valuation_cells=600):
+                            num_externality_nodes=151, num_valuation_cells=150):
     """Bivariate normal (e, v) with negative correlation, truncated to v ∈ [0, v̄].
 
     Harm grows with valuation: the bidders who would win under VCG tend to have
@@ -458,7 +458,7 @@ def harm_rises_distribution(correlation=-0.6, means=(-0.3, 1.0), standard_deviat
 
 def harmful_middle_distribution(band=(0.5, 0.75), harmful_share_in_band=0.8,
                                 harmful_share_outside=0.1, harmful_mean=-1.5, harmful_sd=0.2,
-                                benign_sd=0.1, num_externality_nodes=101, num_valuation_cells=600):
+                                benign_sd=0.1, num_externality_nodes=151, num_valuation_cells=150):
     """v ~ U[0, 1]; harmful types concentrate in a middle valuation band.
 
     Given v, the externality is N(harmful_mean, harmful_sd²) with probability
@@ -488,8 +488,8 @@ def harmful_middle_distribution(band=(0.5, 0.75), harmful_share_in_band=0.8,
 
 
 def heavy_tail_distribution(log_valuation_sd=1.0, truncation_quantile=0.995, harm_slope=0.5,
-                            externality_sd=0.4, num_externality_nodes=101,
-                            num_valuation_cells=600):
+                            externality_sd=0.4, num_externality_nodes=151,
+                            num_valuation_cells=150):
     """Lognormal valuations (log v ~ N(0, s²)) truncated at a high quantile v̄,
     with e | v ~ N(−harm_slope √v, externality_sd²).
 

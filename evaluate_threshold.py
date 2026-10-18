@@ -11,7 +11,7 @@ pickled evaluation, and two figures.
 The threshold comes from one of
   --tau-coefficients "c0,c1,..."   τ(e) = c0 + c1 e + c2 e² + ...
   --sweep-result PATH              a per-run pickle written by run_sweep_genetic2.py
-                                   (uses its tau_coeffs, k, num_items, ζ unless overridden)
+                                   (uses its τ, k, num_items, ζ unless overridden)
 
 The distribution comes from --distribution:
   a family name                    synthetic piecewise-uniform family (a–f, h, example_n,
@@ -27,7 +27,7 @@ Examples
     python evaluate_threshold.py --distribution harm_rises --tau-coefficients 0.5,-1 --num-bidders 8 --num-goods 1
     python evaluate_threshold.py --distribution data/samples/g_full_tweets.csv \\
         --externality-scale 5 --tau-coefficients 1e5,-50 --num-bidders 8 --num-goods 1
-    python evaluate_threshold.py --sweep-result output/sweep_x/results/run_k1_deg1_n8_ext0.pkl \\
+    python evaluate_threshold.py --sweep-result output/sweep_x/results/run_k1_poly1_n8_ext0.pkl \\
         --distribution data/samples/h_single_modal_shifted_normal_distribution.csv
 """
 
@@ -36,6 +36,7 @@ import os
 import pickle
 
 from audited_auctions import SYNTHETIC_FAMILIES, evaluate_threshold, polynomial_threshold
+from audited_auctions.sweep_support import record_threshold
 from audited_auctions.empirical import SMOOTHING_CHOICES, load_empirical_sample, sample_distribution
 from audited_auctions.figures import plot_threshold_and_penalties, plot_welfare_distributions
 from audited_auctions.type_distributions import synthetic_distribution
@@ -81,12 +82,11 @@ def main():
     if args.sweep_result:
         with open(args.sweep_result, "rb") as file:
             sweep_record = pickle.load(file)
-    coefficients = (
-        [float(c) for c in args.tau_coefficients.split(",")]
-        if args.tau_coefficients
-        else sweep_record.get("tau_coeffs")
-    )
-    if coefficients is None:
+    if args.tau_coefficients:
+        threshold = polynomial_threshold([float(c) for c in args.tau_coefficients.split(",")])
+    elif sweep_record:
+        threshold = record_threshold(sweep_record)
+    else:
         raise SystemExit("give --tau-coefficients or --sweep-result")
     num_bidders = args.num_bidders or sweep_record.get("num_items")
     num_goods = args.num_goods or sweep_record.get("k")
@@ -111,7 +111,7 @@ def main():
             name=f"{os.path.basename(args.distribution)} (ζ = {externality_scale:g})")
 
     evaluation = evaluate_threshold(
-        type_distribution, polynomial_threshold(coefficients), num_bidders, num_goods,
+        type_distribution, threshold, num_bidders, num_goods,
         num_simulated_draws=args.num_draws, random_seed=args.seed,
     )
 

@@ -50,8 +50,10 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from audited_auctions.sweep_support import (  # noqa: E402
     SWEEP_SERIES,
+    record_candidate_thresholds,
     record_exact_welfare,
     record_penalty_curves,
+    record_threshold_values,
     record_type_sample,
 )
 
@@ -103,16 +105,12 @@ def load_sweep(sweep_dir):
 
 def get_dimensions(all_results):
     k_values = sorted({k for k, d, n in all_results})
-    degrees = sorted({d for k, d, n in all_results})
+    degrees = sorted({d for k, d, n in all_results}, key=str)
     num_items_list = sorted({n for k, d, n in all_results})
     return k_values, degrees, num_items_list
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
-
-
-def _eval_poly(coeffs, x):
-    return sum(c * x**i for i, c in enumerate(coeffs))
 
 
 def _e_range(all_e, percentile=95):
@@ -311,7 +309,7 @@ def plot_tau_degree_comparison(
 
                 for d_idx, degree in enumerate(avail_degrees):
                     rec = all_results[(k, degree, num_items)][ext_idx]
-                    y = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
+                    y = record_threshold_values(rec, e_line)
                     gains = rec["evaluation"].welfare_gains_over_vcg()
                     delta_w = gains["vcg_pa"]["gain"]
                     delta_w_ironed = gains["ivcg_pa"]["gain"]
@@ -321,7 +319,7 @@ def plot_tau_degree_comparison(
                         color=degree_colors[d_idx],
                         linewidth=2.0,
                         zorder=3,
-                        label=f"deg {degree}  ΔW: VCG-PA {delta_w:+.4g}, IVCG-PA {delta_w_ironed:+.4g}",
+                        label=f"{degree}  ΔW: VCG-PA {delta_w:+.4g}, IVCG-PA {delta_w_ironed:+.4g}",
                     )
 
                 ax.set_xlim(e_lo, e_hi)
@@ -352,7 +350,7 @@ def plot_tau_by_k(all_results, fig_dir, degree=1, empirical=False, percentile=95
     """
     k_values = sorted({k for k, d, n in all_results})
     num_items_list = sorted({n for k, d, n in all_results})
-    deg_name = _DEGREE_NAMES.get(degree, f"Degree {degree}")
+    deg_name = _DEGREE_NAMES.get(degree, f"τ form {degree}")
     eff_pct = percentile if empirical else 100
     single_zeta = _single_zeta(all_results)
 
@@ -396,7 +394,7 @@ def plot_tau_by_k(all_results, fig_dir, degree=1, empirical=False, percentile=95
                 all_e, all_v = record_type_sample(rec)
 
                 _scatter_sample(all_e, all_v, ax, rng)
-                y = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
+                y = record_threshold_values(rec, e_line)
                 ax.plot(e_line, y, color="tab:red", linewidth=2.0, zorder=3)
 
                 ax.set_xlim(e_lo, e_hi)
@@ -426,7 +424,7 @@ def plot_tau_by_n(all_results, fig_dir, degree=1, empirical=False, percentile=95
     """
     k_values = sorted({k for k, d, n in all_results})
     num_items_list = sorted({n for k, d, n in all_results})
-    deg_name = _DEGREE_NAMES.get(degree, f"Degree {degree}")
+    deg_name = _DEGREE_NAMES.get(degree, f"τ form {degree}")
     eff_pct = percentile if empirical else 100
     single_zeta = _single_zeta(all_results)
 
@@ -473,7 +471,7 @@ def plot_tau_by_n(all_results, fig_dir, degree=1, empirical=False, percentile=95
                 all_e, all_v = record_type_sample(rec)
 
                 _scatter_sample(all_e, all_v, ax, rng)
-                y = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
+                y = record_threshold_values(rec, e_line)
                 ax.plot(e_line, y, color="tab:red", linewidth=2.0, zorder=3)
 
                 ax.set_xlim(e_lo, e_hi)
@@ -522,21 +520,18 @@ def plot_tau_grid(all_results, fig_dir, max_fns=200, zoomed=False, percentile=99
             _scatter_sample(all_e, all_v, ax, rng)
             e_line = np.linspace(e_lo, e_hi, 300)
 
-            fns = rec["trajectory"]
-            if len(fns) > max_fns:
-                chosen = rng.choice(len(fns), size=max_fns, replace=False)
-                fns = [fns[i] for i in chosen]
-            for coeffs in fns:
+            for candidate in record_candidate_thresholds(rec, max_fns, rng):
+                values = np.asarray(candidate(e_line), dtype=float)
                 ax.plot(
                     e_line,
-                    [_eval_poly(coeffs, e) for e in e_line],
+                    np.where(np.isfinite(values), values, np.nan),
                     color="#555555",
                     alpha=0.35,
                     linewidth=0.7,
                     zorder=2,
                 )
 
-            y_opt = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
+            y_opt = record_threshold_values(rec, e_line)
             ax.plot(e_line, y_opt, color="tab:red", linewidth=2.0, zorder=3)
 
             ax.set_xlim(e_lo, e_hi)
@@ -610,21 +605,18 @@ def plot_tau_grid_by_degree(
                     _scatter_sample(all_e, all_v, ax, rng)
                     e_line = np.linspace(e_lo, e_hi, 300)
 
-                    fns = rec.get("trajectory", [])
-                    if len(fns) > max_fns:
-                        chosen = rng.choice(len(fns), size=max_fns, replace=False)
-                        fns = [fns[i] for i in chosen]
-                    for coeffs in fns:
+                    for candidate in record_candidate_thresholds(rec, max_fns, rng):
+                        values = np.asarray(candidate(e_line), dtype=float)
                         ax.plot(
                             e_line,
-                            [_eval_poly(coeffs, e) for e in e_line],
+                            np.where(np.isfinite(values), values, np.nan),
                             color="#555555",
                             alpha=0.35,
                             linewidth=0.7,
                             zorder=2,
                         )
 
-                    y_opt = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
+                    y_opt = record_threshold_values(rec, e_line)
                     ax.plot(e_line, y_opt, color="tab:red", linewidth=2.0, zorder=3)
 
                     ax.set_xlim(e_lo, e_hi)
@@ -680,7 +672,7 @@ def plot_penalty_grid(all_results, fig_dir, percentile=95, empirical=False):
             _scatter_sample(all_e, all_v, ax, rng)
             e_line = np.linspace(e_lo, e_hi, 300)
 
-            y_tau = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
+            y_tau = record_threshold_values(rec, e_line)
             penalties = record_penalty_curves(rec, e_line)  # exact r(e) inducing tau
             neg_e = -e_line
 
@@ -699,7 +691,7 @@ def plot_penalty_grid(all_results, fig_dir, percentile=95, empirical=False):
                 zorder=3,
             )
 
-            y_all = np.concatenate([y_tau, penalties["vcg_pa"], neg_e, all_v])
+            y_all = np.concatenate([y_tau[np.isfinite(y_tau)], penalties["vcg_pa"], neg_e, all_v])
             y_lo_plot = min(float(np.percentile(y_all, 100 - eff_pct)), 0.0)
             y_hi_plot = max(float(np.percentile(y_all, eff_pct)), v_hi) * 1.05
             ax.set_xlim(e_lo, e_hi)
@@ -765,10 +757,10 @@ def plot_penalty_by_degree(all_results, fig_dir, percentile=95, empirical=False)
                 ref_v_hi = float(np.percentile(ref_v, eff_pct))
                 e_line_ref = np.linspace(e_lo, e_hi, 300)
                 y_tau_ref = np.array(
-                    [_eval_poly(ref_rec["tau_coeffs"], e) for e in e_line_ref]
+                    record_threshold_values(ref_rec, e_line_ref)
                 )
                 R_ref = record_penalty_curves(ref_rec, e_line_ref)["vcg_pa"]
-                y_all_ref = np.concatenate([y_tau_ref, R_ref, -e_line_ref, ref_v])
+                y_all_ref = np.concatenate([y_tau_ref[np.isfinite(y_tau_ref)], R_ref, -e_line_ref, ref_v])
                 shared_y_lo = min(float(np.percentile(y_all_ref, 100 - eff_pct)), 0.0)
                 shared_y_hi = max(float(np.percentile(y_all_ref, eff_pct)), ref_v_hi)
 
@@ -789,7 +781,7 @@ def plot_penalty_by_degree(all_results, fig_dir, percentile=95, empirical=False)
                     _scatter_sample(all_e, all_v, ax, rng)
                     e_line = np.linspace(e_lo, e_hi, 300)
 
-                    y_tau = np.array([_eval_poly(rec["tau_coeffs"], e) for e in e_line])
+                    y_tau = record_threshold_values(rec, e_line)
                     penalties = record_penalty_curves(rec, e_line)
                     neg_e = -e_line
 
@@ -913,7 +905,7 @@ def plot_welfare_comparison(all_results, fig_dir, empirical=False, show_ci=True)
 def plot_welfare_kn_comparison(all_results, fig_dir):
     """Expected welfare as k and n vary; one figure per (degree, ext_cost)."""
     k_values = sorted({k for k, d, n in all_results})
-    degrees = sorted({d for k, d, n in all_results})
+    degrees = sorted({d for k, d, n in all_results}, key=str)
     num_items_list = sorted({n for k, d, n in all_results})
 
     for degree in degrees:
@@ -1112,11 +1104,11 @@ def run_one_dir(
 
     if _run("tau_by_k"):
         print("\n--- Linear tau by k (n fixed, scatter + tau) ---")
-        plot_tau_by_k(all_results, fig_dir, degree=1, empirical=empirical)
+        plot_tau_by_k(all_results, fig_dir, degree=degrees[0], empirical=empirical)
 
     if _run("tau_by_n"):
         print("\n--- Linear tau by n (k fixed, scatter + tau) ---")
-        plot_tau_by_n(all_results, fig_dir, degree=1, empirical=empirical)
+        plot_tau_by_n(all_results, fig_dir, degree=degrees[0], empirical=empirical)
 
     if _run("penalty_grid"):
         print("\n--- Penalty grid (tau, R(e), -e) ---")

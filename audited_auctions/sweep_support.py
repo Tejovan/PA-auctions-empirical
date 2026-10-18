@@ -22,6 +22,7 @@ sample of types for scatter plots); see audited_auctions/pipeline.py.
 import numpy as np
 
 from .threshold_evaluation import penalty_from_table
+from .threshold_forms import threshold_from_spec
 from .threshold_functions import polynomial_threshold
 
 MECHANISM_KEY_PREFIX = {"vcg": "vcg", "vcg_pa": "vcga", "ivcg_pa": "ivcga", "first_best": "ra"}
@@ -68,11 +69,36 @@ def record_penalty_curves(record, externality_values):
             "record has no exact penalty tables; rerun the sweep, or pass --data to "
             "post_optimization_analysis.py to recompute them"
         )
-    threshold_values = polynomial_threshold(record["tau_coeffs"])(np.asarray(externality_values))
+    threshold_values = record_threshold(record)(np.asarray(externality_values))
     return {
         mechanism: penalty_from_table(table, threshold_values)
         for mechanism, table in record["evaluation"].penalty_tables.items()
     }
+
+
+def record_threshold(record):
+    """The optimal threshold function τ of a record (any form; older records: polynomial)."""
+    if record.get("threshold_spec") is not None:
+        return threshold_from_spec(record["threshold_spec"])
+    return polynomial_threshold(record["tau_coeffs"])
+
+
+def record_threshold_values(record, externality_values):
+    """τ(e) of the record at the given externalities, with exclusion (+inf) shown as NaN."""
+    values = np.asarray(record_threshold(record)(np.asarray(externality_values, dtype=float)),
+                        dtype=float)
+    return np.where(np.isfinite(values), values, np.nan)
+
+
+def record_candidate_thresholds(record, max_count, rng):
+    """Up to max_count candidate threshold functions evaluated by the search."""
+    trajectory = record.get("trajectory") or []
+    if len(trajectory) > max_count:
+        trajectory = [trajectory[i] for i in rng.choice(len(trajectory), max_count, replace=False)]
+    forms = record.get("trajectory_forms")
+    if forms is None:  # older records: polynomial coefficient lists
+        return [polynomial_threshold(candidate) for candidate in trajectory]
+    return [threshold_from_spec(forms[index], parameters) for index, parameters in trajectory]
 
 
 def record_type_sample(record):

@@ -13,27 +13,29 @@ The `web27` branch updates the code to the WEB27 core draft (single-parameter mo
 - **[audited_auctions/](audited_auctions/)** — package. Given a type distribution and τ(e), it computes **exactly** (and simulates) VCG (no audit), **VCG-PA**, **IVCG-PA** (ironed VCG with participant audits) and the **first best** (optimal recipient audit), and the penalty functions r(e) inducing τ. Reported per mechanism: expected welfare (valuation and externality parts), gain over VCG and share of the first-best gain, revenue, expected penalty paid, participation, number allocated; per-auction distributions from simulation.
 - **Model-consistent distributions.** Valuations are non-negative and bounded (enforced). Continuous distributions are piecewise uniform (valuations uniform within grid cells, externalities on grid nodes), so valuation ties have probability zero and all quantities are exact for that distribution. Synthetic families: the mixtures a–f, h (valuation means shifted by +1, truncated at 0) and new families `example_n` (analytic benchmark), `independent`, `harm_rises`, `harmful_middle` (ironing binds), `heavy_tail`.
 - **Empirical pipeline.** CSV rows are split into training and test halves and truncated at a valuation quantile (v̄; default 0.995, set separately for the test rows). τ and the IVCG-PA scoring rule are designed on the kernel-smoothed training half (variance-preserving, in asinh e and log v) and evaluated exactly on the atomic test rows, with a bootstrap of exact welfare over test rows and an optional bandwidth sensitivity check.
-- **Exact objective.** The τ search (`audited_auctions/genetic_search.py`) maximizes the exact expected welfare of VCG-PA (or IVCG-PA) on the distribution, not an average over simulated auction draws: a genetic stage (stops after 60 generations without improvement) followed by Nelder–Mead refinement from the 5 best candidates (default; `--local-refinement none` for the genetic stage alone).
+- **Exact objective.** The τ search maximizes the exact expected welfare of VCG-PA (or IVCG-PA) on the distribution, not an average over simulated auction draws.
+- **τ forms and optimizers.** τ is a polynomial (`poly<d>`), continuous piecewise linear with knots at externality quantiles plus an exclusion cutoff (`knots<K>`), constant on quantile bins (`bins<K>`), or free at every externality node (`nodes`, the unrestricted problem for the discretized distribution). Optimizers: genetic search (`audited_auctions/genetic_search.py`: genetic stage, then Nelder–Mead; polynomials, knots, bins) and **best-response ascent** (`audited_auctions/best_response_ascent.py`: exact marginal welfare M^τ(e, v) of the core draft's App. E, per-bidder best response within the form, line search on exact welfare, exact-gradient L-BFGS-B polish; knots, bins, nodes). `--optimizer auto` uses the genetic search for polynomials and the ascent otherwise; `genetic+best_response` starts the ascent from a genetic result. Per-node optima take about 0.1–1 s per cell. Each record has a first-order (Pigouvian) check: marginal welfare of the threshold types, penalty vs own-allocation charge and displaced externality.
 - **Welfare comparisons** are gains over unaudited VCG (VCG-PA − VCG, IVCG-PA − VCG, first best − VCG).
 - **Corrected participant penalty.** The old estimator `R(e) = A(e)(τ(e) − P(e))` from realized (k+1)-th prices was biased upward; the exact r(e) = ∫_0^{τ(e)} X^τ(b) db replaces it everywhere.
-- **Scripts.** [evaluate_threshold.py](evaluate_threshold.py) (one distribution and one τ → table, pickle, two figures); [Collateralized_Auction_genetic2.py](Collateralized_Auction_genetic2.py) (optimize and evaluate one cell); [run_sweep_genetic2.py](run_sweep_genetic2.py) (sweeps over ζ, degree, k, n; writes a README describing its output); [post_optimization_analysis.py](post_optimization_analysis.py) (figures from a sweep).
-- **Tests:** [tests/](tests/), run with `python -m pytest tests -q` (48 tests).
+- **Scripts.** [evaluate_threshold.py](evaluate_threshold.py) (one distribution and one τ → table, pickle, two figures); [Collateralized_Auction_genetic2.py](Collateralized_Auction_genetic2.py) (optimize and evaluate one cell); [run_sweep_genetic2.py](run_sweep_genetic2.py) (sweeps over ζ, τ form, k, n; writes a README describing its output); [post_optimization_analysis.py](post_optimization_analysis.py) (figures from a sweep).
+- **Grid.** Synthetic families default to 151 externality nodes × 150 valuation cells (error in welfare gains ≤ 1.1·10⁻⁴); `--num-externality-nodes`, `--num-valuation-cells` in every script.
+- **Tests:** [tests/](tests/), run with `python -m pytest tests -q` (62 tests).
 
 Typical runs:
 
 ```bash
 # synthetic family, with a check of the discretization error
-python run_sweep_genetic2.py --data harm_rises --degrees 1,2 --k-values 1,2 --num-items 8 \
-    --ext-min 0.5 --ext-max 2 --num-ext 4 --grid-refinement --warm-start --tag harm
+python run_sweep_genetic2.py --data harm_rises --tau-forms poly1,knots6,nodes --k-values 1,2 \
+    --num-items 8 --ext-min 0.5 --ext-max 2 --num-ext 4 --grid-refinement --warm-start --tag harm
 # empirical data: design on smoothed training half, exact evaluation on atomic test rows,
 # bootstrap, bandwidth sensitivity
-python run_sweep_genetic2.py --data data/samples/g_full_tweets.csv --degrees 1,2 --k-values 1 \
+python run_sweep_genetic2.py --data data/samples/g_full_tweets.csv --tau-forms poly1,nodes --k-values 1 \
     --num-items 8 --ext-min 1 --ext-max 100 --num-ext 6 --log-scale \
     --sensitivity-bandwidths 0.5,2 --tag tweets
 python post_optimization_analysis.py output/sweep_genetic2_tweets_
 ```
 
-Not yet done (planned): a grid representation of τ and the best-response ascent based on the first-order condition of the core draft's Appendix E; running large sweeps on the BU SCC cluster.
+Not yet done (planned): re-optimizing τ inside the bootstrap (feasible with best-response ascent); running large sweeps on the BU SCC cluster.
 
 The sections below describe the analysis workflow (data pipeline, optimization, figures, descriptive statistics). Material from the original EC 2025 / EAAMO 2026 workflow that the WEB27 code no longer uses is in [legacy/](legacy/).
 
@@ -66,10 +68,10 @@ Processed tweet dataset. Each row is a tweet with `v_score` (advertiser value, p
 ### 2. Optimization Sweep
 
 **[Collateralized_Auction_genetic2.py](Collateralized_Auction_genetic2.py)**
-Single-cell run: genetic search (`audited_auctions/genetic_search.py`) for the polynomial τ maximizing exact expected welfare, then exact evaluation, simulation and (empirical data) bootstrap via `audited_auctions/pipeline.py`. `--data` is a CSV or a synthetic family name.
+Single-cell run: search for the τ (form `--tau-form`, or `--polynomial-degree`) maximizing exact expected welfare by genetic search and/or best-response ascent (`--optimizer`), then exact evaluation, simulation and (empirical data) bootstrap via `audited_auctions/pipeline.py`. `--data` is a CSV or a synthetic family name.
 
 **[run_sweep_genetic2.py](run_sweep_genetic2.py)**
-Sweep runner. Iterates over all combinations of `k` (goods), polynomial degree, number of bidders `n`, and externality scale ζ, running one pipeline cell each. Results are saved to `output/sweep_genetic2_<tag>_<timestamp>/sweep_data.pkl` along with a per-run `README.md`.
+Sweep runner. Iterates over all combinations of `k` (goods), τ form (`--tau-forms`, or polynomial `--degrees`), number of bidders `n`, and externality scale ζ, running one pipeline cell each. Results are saved to `output/sweep_genetic2_<tag>_<timestamp>/sweep_data.pkl` along with a per-run `README.md`.
 
 ```bash
 python run_sweep_genetic2.py --tag myrun --data data/samples/g_full_tweets.csv

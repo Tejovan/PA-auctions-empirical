@@ -6,7 +6,10 @@ Collateralized_Auction_genetic2.py:
 
   prepare_distributions   build the distribution τ is designed on (training)
                           and the one it is evaluated on (evaluation)
-  optimize_and_evaluate   genetic search for τ with the exact objective, then
+  optimize_threshold      search for τ in a threshold form (threshold_forms.py)
+                          with the exact objective: genetic search,
+                          best-response ascent, or both
+  optimize_and_evaluate   optimize_threshold, then
                           exact evaluation of the four mechanisms, one
                           simulation for per-auction welfare distributions,
                           and (empirical data) a bootstrap of exact welfare and
@@ -44,6 +47,7 @@ from .empirical import (
     truncate_sample,
     valuation_bound,
 )
+from .best_response_ascent import first_order_check, run_best_response_ascent
 from .genetic_search import run_genetic_search
 from .threshold_evaluation import (
     AUDITED_MECHANISMS,
@@ -52,12 +56,13 @@ from .threshold_evaluation import (
     grid_refinement_check,
     ivcg_scoring_rule_for,
 )
-from .threshold_functions import polynomial_threshold
+from .threshold_forms import BEST_RESPONSE_FORMS, GENETIC_FORMS, build_threshold_form
 from .type_distributions import SYNTHETIC_FAMILIES, TypeDistribution, synthetic_distribution
 
-SYNTHETIC_GRID_DEFAULTS = {"num_externality_nodes": 101, "num_valuation_cells": 600}
+SYNTHETIC_GRID_DEFAULTS = {"num_externality_nodes": 151, "num_valuation_cells": 150}
 EMPIRICAL_GRID_DEFAULTS = {"num_externality_nodes": 241, "num_valuation_cells": 400}
 EVALUATION_CHOICES = ("atomic", "smoothed")
+OPTIMIZERS = ("auto", "genetic", "best_response", "genetic+best_response")
 
 
 def is_synthetic_source(source) -> bool:
@@ -140,41 +145,117 @@ def _designed_ivcg_rule(prepared, design_distribution, threshold, num_bidders, n
     return ivcg_scoring_rule_for(design_distribution, threshold, num_bidders, num_goods)
 
 
-def optimize_and_evaluate(prepared, polynomial_degree, num_bidders, num_goods,
+def resolve_optimizer(optimizer, form_kind):
+    """'auto': genetic search for polynomials, best-response ascent for the other forms."""
+    if optimizer not in OPTIMIZERS:
+        raise ValueError(f"optimizer must be one of {OPTIMIZERS}")
+    if optimizer == "auto":
+        return "genetic" if form_kind == "polynomial" else "best_response"
+    if optimizer == "genetic" and form_kind not in GENETIC_FORMS:
+        raise ValueError(f"the genetic search needs a form in {GENETIC_FORMS}")
+    if optimizer != "genetic" and form_kind not in BEST_RESPONSE_FORMS:
+        raise ValueError(f"best-response ascent needs a form in {BEST_RESPONSE_FORMS}")
+    return optimizer
+
+
+def optimize_threshold(training, threshold_form, num_bidders, num_goods,
+                       objective_mechanism="vcg_pa", optimizer="auto", ga_options=None,
+                       ga_seed=None, num_restarts=1, initial_solution=None, genetic_form=None,
+                       best_response_options=None, warm_starts=(), verbose=True):
+    """Search for τ in threshold_form on the training distribution.
+
+    threshold_form : label ("poly2", "knots6", "bins10", "nodes") or polynomial degree
+    optimizer      : "auto", "genetic", "best_response" or "genetic+best_response"
+                     (genetic search in genetic_form, default the same form or knots6
+                     for nodes, then best-response ascent started from its result
+                     as well as from the default starts)
+    initial_solution : genetic search warm start (parameters of the genetic form)
+    warm_starts    : threshold functions used as extra best-response starts
+    best_response_options : keyword options of run_best_response_ascent (starts,
+                     max_iterations, relative_tolerance, short_genetic_generations)
+    Returns a dict: form, parameters, welfare, optimizer, search_summaries, and the
+    trajectory: candidate parameter vectors as (form index, parameters) pairs, with
+    trajectory_forms the specs of the forms (genetic and best-response forms differ
+    for genetic+best_response).
+    """
+    form = build_threshold_form(threshold_form, training)
+    optimizer = resolve_optimizer(optimizer, form.kind)
+    ga_options = dict(ga_options or {})
+    best_response_options = dict(best_response_options or {})
+    trajectory, summaries, trajectory_forms = [], [], []
+    warm_starts = list(warm_starts)
+
+    def record_trajectory(search_form, candidates):
+        trajectory_forms.append(search_form.spec([]))
+        index = len(trajectory_forms) - 1
+        trajectory.extend((index, list(candidate)) for candidate in candidates)
+
+    if optimizer in ("genetic", "genetic+best_response"):
+        if optimizer == "genetic":
+            search_form = form
+        else:
+            search_form = build_threshold_form(
+                genetic_form or (form.label if form.kind in GENETIC_FORMS else "knots6"), training)
+        best = (None, -np.inf)
+        for restart in range(num_restarts):
+            search = run_genetic_search(
+                training, None, num_bidders, num_goods, objective_mechanism=objective_mechanism,
+                threshold_form=search_form,
+                seed=None if ga_seed is None else ga_seed + restart,
+                initial_solution=initial_solution if restart == 0 else None,
+                verbose=verbose, **ga_options)
+            record_trajectory(search_form, search.trajectory)
+            summaries.append(search.summary)
+            if search.welfare > best[1]:
+                best = (search.coefficients, search.welfare)
+        if optimizer == "genetic":
+            return {"form": form, "parameters": list(best[0]), "welfare": best[1],
+                    "optimizer": optimizer, "trajectory": trajectory,
+                    "trajectory_forms": trajectory_forms, "search_summaries": summaries}
+        genetic_threshold = search_form.threshold(best[0])
+        genetic_threshold.start_name = f"genetic ({search_form.label})"
+        warm_starts.insert(0, genetic_threshold)
+
+    search = run_best_response_ascent(
+        training, form, num_bidders, num_goods, objective_mechanism=objective_mechanism,
+        warm_starts=warm_starts, seed=ga_seed, verbose=verbose, **best_response_options)
+    record_trajectory(form, search.trajectory)
+    summaries.append(search.summary)
+    return {"form": form, "parameters": list(search.coefficients), "welfare": search.welfare,
+            "optimizer": optimizer, "trajectory": trajectory,
+            "trajectory_forms": trajectory_forms, "search_summaries": summaries}
+
+
+def optimize_and_evaluate(prepared, threshold_form, num_bidders, num_goods,
                           objective_mechanism="vcg_pa", ga_options=None, ga_seed=None,
                           num_restarts=1, initial_solution=None, num_simulated_draws=2000,
                           simulation_seed=None, num_bootstrap=200, bootstrap_seed=0,
                           grid_refinement=False, sensitivity_bandwidth_scales=(),
-                          num_type_sample=4000, verbose=True):
-    """Optimize a polynomial τ on prepared.training and evaluate it on prepared.evaluation.
+                          num_type_sample=4000, optimizer="auto", genetic_form=None,
+                          best_response_options=None, warm_starts=(), verbose=True):
+    """Optimize τ on prepared.training (optimize_threshold) and evaluate it on prepared.evaluation.
 
+    threshold_form: label ("poly2", "knots6", "bins10", "nodes") or a polynomial degree.
     sensitivity_bandwidth_scales: empirical data with kernel smoothing only;
-    for each scale, rerun the genetic search on the training half smoothed with
+    for each scale, rerun the optimization on the training half smoothed with
     that bandwidth multiplier and evaluate the resulting design exactly on the
     same evaluation distribution (record["bandwidth_sensitivity"]).
 
     Returns a record dict (see run_sweep_genetic2.py README for the fields).
     """
-    ga_options = dict(ga_options or {})
-    best = (None, -np.inf)
-    trajectory = []
-    search_summaries = []
-    for restart in range(num_restarts):
-        search = run_genetic_search(
-            prepared.training, polynomial_degree, num_bidders, num_goods,
-            objective_mechanism=objective_mechanism,
-            seed=None if ga_seed is None else ga_seed + restart,
-            initial_solution=initial_solution if restart == 0 else None,
-            verbose=verbose, **ga_options)
-        coefficients, welfare = search.coefficients, search.welfare
-        trajectory.extend(search.trajectory)
-        search_summaries.append(search.summary)
-        if welfare > best[1]:
-            best = (coefficients, welfare)
-    tau_coefficients, training_welfare = best
-    threshold = polynomial_threshold(tau_coefficients)
+    search_options = dict(objective_mechanism=objective_mechanism, optimizer=optimizer,
+                          ga_options=ga_options, ga_seed=ga_seed, num_restarts=num_restarts,
+                          genetic_form=genetic_form,
+                          best_response_options=best_response_options, verbose=verbose)
+    result = optimize_threshold(prepared.training, threshold_form, num_bidders, num_goods,
+                                initial_solution=initial_solution, warm_starts=warm_starts,
+                                **search_options)
+    form, parameters, training_welfare = result["form"], result["parameters"], result["welfare"]
+    threshold = form.threshold(parameters)
     ivcg_rule = _designed_ivcg_rule(prepared, prepared.training, threshold, num_bidders,
                                     num_goods)
+    first_order = first_order_check(prepared.training, threshold, num_bidders, num_goods,
+                                    objective_mechanism)
 
     evaluation = evaluate_threshold(prepared.evaluation, threshold, num_bidders, num_goods,
                                     num_simulated_draws=num_simulated_draws,
@@ -194,9 +275,8 @@ def optimize_and_evaluate(prepared, polynomial_degree, num_bidders, num_goods,
     if (prepared.is_empirical and sensitivity_bandwidth_scales
             and prepared.settings["smoothing"] == "kernel"):
         sensitivity = bandwidth_sensitivity(
-            prepared, sensitivity_bandwidth_scales, polynomial_degree, num_bidders, num_goods,
-            objective_mechanism, ga_options, ga_seed, num_restarts,
-            base_result=(tau_coefficients, training_welfare, evaluation), verbose=verbose)
+            prepared, sensitivity_bandwidth_scales, threshold_form, num_bidders, num_goods,
+            search_options, base_result=(form.spec(parameters), training_welfare, evaluation))
 
     refinement = None
     if grid_refinement and not prepared.is_empirical:
@@ -212,13 +292,19 @@ def optimize_and_evaluate(prepared, polynomial_degree, num_bidders, num_goods,
         "source": prepared.source,
         "distribution_settings": prepared.settings,
         "objective_mechanism": objective_mechanism,
-        "polynomial_degree": polynomial_degree,
+        "optimizer": result["optimizer"],
+        "threshold_form": form.label,
+        "threshold_spec": form.spec(parameters),
+        "tau_parameters": list(parameters),
+        "polynomial_degree": form.size if form.kind == "polynomial" else None,
+        "tau_coeffs": list(parameters) if form.kind == "polynomial" else None,
         "num_bidders": num_bidders,
         "num_goods": num_goods,
-        "tau_coeffs": tau_coefficients,
         "training_welfare": training_welfare,
-        "trajectory": trajectory,
-        "search_summaries": search_summaries,
+        "trajectory": result["trajectory"],
+        "trajectory_forms": result["trajectory_forms"],
+        "search_summaries": result["search_summaries"],
+        "first_order_check": first_order,
         "evaluation": evaluation,
         "bootstrap": bootstrap,
         "grid_refinement": refinement,
@@ -231,9 +317,9 @@ def optimize_and_evaluate(prepared, polynomial_degree, num_bidders, num_goods,
     }
 
 
-def _sensitivity_row(scale, coefficients, training_welfare, welfare):
-    row = {"bandwidth_scale": scale, "tau_coeffs": list(coefficients),
-           "training_welfare": training_welfare}
+def _sensitivity_row(scale, spec, training_welfare, welfare):
+    row = {"bandwidth_scale": scale, "tau_parameters": list(spec["parameters"]),
+           "threshold_spec": spec, "training_welfare": training_welfare}
     row.update({f"welfare_{m}": welfare[m] for m in MECHANISMS})
     first_best_gain = welfare["first_best"] - welfare["vcg"]
     for mechanism in AUDITED_MECHANISMS:
@@ -243,15 +329,14 @@ def _sensitivity_row(scale, coefficients, training_welfare, welfare):
     return row
 
 
-def bandwidth_sensitivity(prepared, bandwidth_scales, polynomial_degree, num_bidders, num_goods,
-                          objective_mechanism, ga_options, ga_seed, num_restarts, base_result,
-                          verbose=True):
+def bandwidth_sensitivity(prepared, bandwidth_scales, threshold_form, num_bidders, num_goods,
+                          search_options, base_result):
     """Redesign τ (and the IVCG-PA scores) on the training half smoothed with each
     bandwidth multiplier, and evaluate each design exactly on the same evaluation
     distribution. One row per bandwidth scale, including the base design."""
     settings = prepared.settings
-    base_coefficients, base_training_welfare, base_evaluation = base_result
-    rows = [_sensitivity_row(settings["bandwidth_scale"], base_coefficients, base_training_welfare,
+    base_spec, base_training_welfare, base_evaluation = base_result
+    rows = [_sensitivity_row(settings["bandwidth_scale"], base_spec, base_training_welfare,
                              {m: base_evaluation.exact[m]["welfare"] for m in MECHANISMS})]
     for scale in bandwidth_scales:
         if scale == settings["bandwidth_scale"]:
@@ -259,18 +344,12 @@ def bandwidth_sensitivity(prepared, bandwidth_scales, polynomial_degree, num_bid
         training = sample_distribution(prepared.training_sample, "kernel", scale,
                                        num_externality_nodes=settings["num_externality_nodes"],
                                        num_valuation_cells=settings["num_valuation_cells"])
-        best = (None, -np.inf)
-        for restart in range(num_restarts):
-            search = run_genetic_search(
-                training, polynomial_degree, num_bidders, num_goods,
-                objective_mechanism=objective_mechanism,
-                seed=None if ga_seed is None else ga_seed + restart, verbose=verbose,
-                **(ga_options or {}))
-            if search.welfare > best[1]:
-                best = (search.coefficients, search.welfare)
-        threshold = polynomial_threshold(best[0])
+        result = optimize_threshold(training, threshold_form, num_bidders, num_goods,
+                                    **search_options)
+        threshold = result["form"].threshold(result["parameters"])
         ivcg_rule = ivcg_scoring_rule_for(training, threshold, num_bidders, num_goods)
         welfare = exact_welfare_by_mechanism(prepared.evaluation, threshold, num_bidders,
                                              num_goods, ivcg_rule)
-        rows.append(_sensitivity_row(scale, best[0], best[1], welfare))
+        rows.append(_sensitivity_row(scale, result["form"].spec(result["parameters"]),
+                                     result["welfare"], welfare))
     return pd.DataFrame(rows).sort_values("bandwidth_scale").set_index("bandwidth_scale")

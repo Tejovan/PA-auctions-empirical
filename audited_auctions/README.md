@@ -11,7 +11,7 @@ Given a joint distribution H of bidder types (e, v) and a common participation t
 
 All four are score-based auctions: the k participants with the highest positive scores win, ties are broken uniformly at random, and payments are critical-value (Myerson) payments, so each auction is DSIC. The notation follows the WEB27 core draft (`WEB27/drafting/web27_aa_1p_core/`).
 
-The penalties are outputs, not inputs: since τ is given, the package computes the penalty function that induces τ in each participant-audit auction. It also searches for the polynomial τ that maximizes exact expected welfare (genetic algorithm), and runs the full synthetic and empirical pipelines (`pipeline.py`).
+The penalties are outputs, not inputs: since τ is given, the package computes the penalty function that induces τ in each participant-audit auction. It also searches for the τ that maximizes exact expected welfare, in a polynomial, knot, bin or per-node form, by genetic search or best-response ascent, and runs the full synthetic and empirical pipelines (`pipeline.py`).
 
 ## Quick start
 
@@ -43,8 +43,11 @@ Command line: `python evaluate_threshold.py --distribution harm_rises --tau-coef
 | `exact_computation.py` | Quantile representation of a mechanism, exact ironing, interim allocation with ties, exact integration of welfare, revenue and the allocation integral R(b) (the penalty). |
 | `auction_simulation.py` | Vectorized Monte Carlo of a score-based auction on sampled type profiles. |
 | `threshold_evaluation.py` | `evaluate_threshold` (main entry point), `ThresholdEvaluation`, `expected_welfare` (optimization objective), `ivcg_scoring_rule_for` (IVCG-PA design to apply elsewhere), `penalty_from_table`, `grid_refinement_check`. |
-| `genetic_search.py` | Search over polynomial τ with the exact welfare objective: genetic stage, then Nelder–Mead refinement (default). |
-| `pipeline.py` | One optimization-and-evaluation cell: `prepare_distributions`, `optimize_and_evaluate`, `bandwidth_sensitivity`. |
+| `threshold_forms.py` | Forms of τ searched by the optimizers: `poly<d>`, `knots<K>` (+ exclusion cutoff), `bins<K>`, `nodes`; `build_threshold_form`, `threshold_from_spec`. |
+| `genetic_search.py` | Genetic search over a form's parameters with the exact welfare objective: genetic stage, then Nelder–Mead refinement (default). |
+| `marginal_welfare.py` | Exact marginal welfare M^τ(e, v) = (v + e) X^τ(v) − L^τ(v) of a participating type for a fixed auction (rival welfare loss L^τ), as Chebyshev series between breakpoints. |
+| `best_response_ascent.py` | Best-response ascent over knots, bins or nodes, with an exact-gradient polish; `first_order_check` (Pigouvian check). |
+| `pipeline.py` | One optimization-and-evaluation cell: `prepare_distributions`, `optimize_threshold`, `optimize_and_evaluate`, `bandwidth_sensitivity`. |
 | `figures.py` | `plot_threshold_and_penalties`, `plot_welfare_distributions`. |
 | `sweep_support.py` | Glue for `run_sweep_genetic2.py` and `post_optimization_analysis.py`. |
 
@@ -59,7 +62,7 @@ Mixed distributions are not supported. `distribution.with_externality_scale(ζ)`
 
 ### Synthetic families
 
-All families have v ∈ [0, v̄]. Grid options: `num_externality_nodes` (default 101) and `num_valuation_cells` (default 600); scripts: `--num-externality-nodes`, `--num-valuation-cells`. Accuracy at a fixed τ (n = 8, k = 2), against 601 nodes: welfare gains over VCG change by at most 2·10⁻⁴ (relative ≤ 5·10⁻⁴) at 101 nodes and 2·10⁻⁵ at 301, on `harm_rises`, `harmful_middle`, `d`, `independent`; 101 nodes are 3× faster than 301. `synthetic_distribution(name, externality_scale=ζ, **options)` builds one; family parameters are keyword options.
+All families have v ∈ [0, v̄]. Grid options: `num_externality_nodes` (default 151) and `num_valuation_cells` (default 150); scripts: `--num-externality-nodes`, `--num-valuation-cells`. The two grids have different errors: coarser externality nodes pool nearby externalities (error about proportional to the spacing) and fix how finely a per-node τ can vary; coarser valuation cells make the conditional density of v a coarser step function (error about proportional to the squared spacing; zero when v given e is already piecewise uniform, as in `independent` and `harmful_middle`), and τ stays continuous in v. Accuracy at a fixed τ (n = 8, k = 2), maximum change of the welfare gains over VCG against 601 × 1200 on `harm_rises`, `harmful_middle`, `d`, `independent`: 1.1·10⁻⁴ at 151 × 150 (10–16 ms per evaluation of the four mechanisms), 2.2·10⁻⁴ at 101 × 200 and 101 × 100, 1.7·10⁻⁴ at 201 × 100, 7.4·10⁻⁵ at 201 × 150; the gains are 0.06–0.5. Density jumps (the band of `harmful_middle`) are cell edges. `synthetic_distribution(name, externality_scale=ζ, **options)` builds one; family parameters are keyword options.
 
 | Name | Description | Why it is useful |
 |------|-------------|------------------|
@@ -129,16 +132,48 @@ This replaces the old estimator R(e) = A(e)(τ(e) − P(e)) built from realized 
 
 ## Optimizing τ
 
-`genetic_search.run_genetic_search(distribution, degree, n, k, objective_mechanism="vcg_pa")` searches polynomial coefficients τ(e) = Σ β_m e^m in two stages and returns a `SearchResult` (coefficients, welfare, trajectory, summary).
+### Threshold forms (`threshold_forms.py`)
 
-1. **Genetic stage (global).** The genetic algorithm of the original code: pygad, tournament selection, single-point crossover, Gaussian mutation scaled to each coefficient's range, warm start, restarts in the pipeline. Search ranges: β_0 ∈ [v_min − sd(v)/2, v̄ + sd(v)/2], β_m ∈ ±3 sd(v)/E|e|^m. It stops at `num_generations` (500) or once the best welfare has not improved for `stall_generations` (60) generations.
-2. **Nelder–Mead stage (local, default).** Nelder–Mead (scipy, adaptive) from the `num_local_starts` (5) best distinct candidates of the final population, always including the genetic optimum, in coordinates where each coefficient's range is [0, 1] (initial simplex steps 5% of the range); tolerances 10⁻⁷ in those coordinates and 10⁻¹⁰ relative in welfare; at most `local_max_evaluations` (2000) evaluations per start. The refined τ is kept only if its welfare is higher.
+| Label | τ(e) | Parameters | Optimizers |
+|-------|------|------------|------------|
+| `poly<d>` | Σ_m β_m e^m | d + 1 | genetic |
+| `knots<K>` | continuous, piecewise linear between K knots at evenly spaced quantiles of the marginal externality distribution (levels (k − 1)/(K − 1)), constant beyond the end knots; exclusion cutoff ê: τ = v̄⁺ for e < ê | K + 1 | genetic, best response |
+| `bins<K>` | constant on K bins with edges at the quantiles of levels j/K | K | genetic, best response |
+| `nodes` | one value per externality node of the distribution (linear interpolation in between, for evaluation on other distributions) | number of nodes | best response |
 
-The genetic stage locates a good region but converges slowly inside it; Nelder–Mead converges quickly from a good start but is local. The defaults lean toward reliable convergence (long stall window, five starts, generous evaluation budget). Neither stage guarantees the global optimum of a non-convex objective. `local_refinement="none"` runs the genetic stage alone for all generations (the previous behavior). The summary records the genetic optimum, generations run, distinct objective evaluations, and for each local start the starting and final welfare, evaluations and a convergence flag; sweep records keep it as `search_summaries` (one per restart).
+The externality of every distribution takes finitely many values (grid nodes, or the distinct values of a population), so only τ at the nodes matters: `nodes` is the unrestricted problem, and the other forms restrict it. Values at or above v̄(1 + 10⁻⁹) exclude the externality; the threshold function returns +inf there, so excluded externalities stay excluded on a distribution with a larger v̄ (test rows). Knot values may lie outside [0, v̄]: they change the interpolated thresholds between knots. A record stores `threshold_spec` (form, knots / bin edges / nodes, parameters); `threshold_from_spec` rebuilds τ.
 
-The fitness is the **exact** expected welfare of the objective mechanism on the distribution (`expected_welfare`; about 3–10 ms for VCG-PA and 10–25 ms for IVCG-PA on 180k cells), not an average over simulated auctions, so it has no Monte Carlo noise and does not fit a particular sample of auctions.
+### Genetic search (`genetic_search.py`)
 
-`pipeline.optimize_and_evaluate` runs one cell:
+`run_genetic_search(distribution, degree, n, k, objective_mechanism="vcg_pa", threshold_form=None)` searches the parameters of a form (default the polynomial of degree `degree`) in two stages and returns a `SearchResult` (coefficients = parameters, welfare, trajectory, summary).
+
+1. **Genetic stage (global).** The genetic algorithm of the original code: pygad, tournament selection, single-point crossover, Gaussian mutation scaled to each parameter's range, warm start, restarts in the pipeline. Search ranges: polynomials β_0 ∈ [v_min − sd(v)/2, v̄ + sd(v)/2], β_m ∈ ±3 sd(v)/E|e|^m; knot and bin values in the β_0 range; the cutoff ê between e_min − (e_max − e_min)/4 (no exclusion) and e_max. It stops at `num_generations` (500) or once the best welfare has not improved for `stall_generations` (60) generations.
+2. **Nelder–Mead stage (local, default).** Nelder–Mead (scipy, adaptive) from the `num_local_starts` (5) best distinct candidates of the final population, always including the genetic optimum, in coordinates where each parameter's range is [0, 1] (initial simplex steps 5% of the range); tolerances 10⁻⁷ in those coordinates and 10⁻¹⁰ relative in welfare; at most `local_max_evaluations` (2000) evaluations per start. The refined τ is kept only if its welfare is higher.
+
+The genetic stage locates a good region but converges slowly inside it; Nelder–Mead converges quickly from a good start but is local. Neither stage guarantees the global optimum of a non-convex objective. `local_refinement="none"` runs the genetic stage alone for all generations. The genetic search is practical only for few parameters (polynomials, knots, bins), not for `nodes`.
+
+### Best-response ascent (`best_response_ascent.py`)
+
+Theory (core draft, App. E). Hold the auction and the rivals' thresholds fixed: welfare is linear in one bidder's participation set, W = W(bidder out) + Σ_e g_e(τ(e)) with g_e(t) = E[1{v ≥ t, e_i = e} M^τ(e, v)] (Prop. E.1), and the marginal welfare M^τ(e, v) = A^τ(v) + e X^τ(v) is affine in e (Rem. E.6). `marginal_welfare.py` computes X^τ and the rival welfare loss L^τ exactly for a score-based auction with k identical goods: the bidder displaces the rival with the k-th highest score S_(k) when it wins and S_(k) > 0, so L(s) = ∫_{0<S_(k)<s} ĉ dPr[S_(k)] + ĉ(s)(X(s) − Pr[S_(k) < s]), with ĉ = E[v + e | score] (pooled on ironing intervals). For VCG-PA, L^τ is the Clarke payment plus the displaced externality. Checks: Example N's M^τ(−c, t) = (3/4)t² − ct exactly; L^τ equals the Clarke payment without externalities; −n f M^τ equals finite differences of W to 7 digits for VCG-PA and IVCG-PA.
+
+Each iteration:
+1. builds the objective auction for the current τ and computes A^τ, X^τ on [0, v̄] as Chebyshev series between breakpoints (cell edges, segment ends, scoring-rule knots); for IVCG-PA the ironed scores of the current τ are held fixed (envelope argument);
+2. computes the best response of one bidder within the form: `nodes` and `bins` exactly (candidates: breakpoints and the zeros of M^τ where it changes sign from − to +, since g′ = −f M^τ; exclusion included), `knots` by dynamic programming over the knot values (the payoff is a sum of terms in adjacent knot pairs; the cutoff is a state of the recursion) on a grid of valuation quantiles plus values outside [0, v̄], refined twice around the optimum;
+3. moves all bidders: τ ← τ + α(τ′ − τ) in parameter space, with α the first of 1, ½, …, 1/64 that raises the exact W.
+
+It stops when no step raises W, when two consecutive relative gains are below `relative_tolerance` (10⁻¹⁰), or after `max_iterations` (100). A best response moves one bidder while the common τ moves all n, so the ascent can stop short of the best common τ (Prop. E.5: the best common τ satisfies the first-order condition but need not be a profile of best responses). **Gradient polish:** L-BFGS-B on W with the exact gradient ∂W/∂τ(e_j) = −n f_j(τ_j) M^τ(e_j, τ_j), chained to the form's parameters (knots: interpolation weights, cutoff fixed; bins: summed), then more ascent if the polish gained; at most `polish_rounds` (3) rounds; piecewise-uniform distributions only.
+
+**Starts:** `zero` (τ ≡ 0), `no_competition` (τ(e) = max(0, −e), excluded if −e > v̄; first best without competition, Prop. 5.1), optional `short_genetic` (a 40-generation genetic search in the same form, `knots6` for `nodes`), plus warm starts: the genetic search's result (optimizer `genetic+best_response`) and, in sweeps with `--warm-start`, the optimum at the previous ζ rescaled to the new externality scale (τ(e) = τ_prev(e ζ_prev/ζ)). Each start runs to convergence; the best is kept. The genetic search and the ascent are independent: `best_response` needs no genetic run.
+
+**Speed and accuracy** (151 × 150 grid, n = 8, k = 2): `nodes` converges in 0.1–1.1 s (VCG-PA and IVCG-PA, two starts), with interior marginal welfare below 3·10⁻⁵ and best-response gap below 10⁻¹¹; `knots6` in 1–3 s, reaching the Nelder–Mead optimum of the same form to 10⁻¹¹; Example N's optimum t* = 4c/3 exactly in every form. On the Community Notes data (241 nodes, ζ = 5, n = 8, k = 1) `nodes` takes 0.2 s.
+
+**First-order (Pigouvian) check.** `first_order_check(distribution, τ, n, k, mechanism)` reports per externality node: τ and its status (interior, zero, excluded), X^τ(τ), the penalty r(e) = R(τ(e)), the own-allocation charge −e X^τ(τ), the displaced term L^τ(τ) − p(τ) (the displaced externality Δ^τ in VCG-PA), the marginal welfare M^τ(e, τ(e)) = r − (−e X^τ + displaced) and the best-response gap. At the optimum of the `nodes` form, interior thresholds have M^τ ≈ 0: the penalty equals the Pigouvian charge (Cor. E.4, Prop. E.5). For a restricted form the residuals measure how far the form is from the per-node optimum. Pipeline records store it for the objective mechanism on the training distribution (`first_order_check`).
+
+### Pipeline
+
+`pipeline.optimize_threshold(training, form, n, k, objective_mechanism, optimizer)` runs the search; `optimizer` is `auto` (genetic for polynomials, best response otherwise), `genetic`, `best_response`, or `genetic+best_response` (genetic search in `genetic_form`, default the same form or `knots6` for `nodes`, then the ascent with the genetic result as an extra start). `optimize_and_evaluate(prepared, form, n, k, ...)` adds the evaluation:
+
+The objective is the **exact** expected welfare of the objective mechanism on the distribution (`expected_welfare`; one exact evaluation of all four mechanisms takes 10–16 ms on the default 151 × 150 grid), not an average over simulated auctions, so it has no Monte Carlo noise and does not fit a particular sample of auctions.
 
 | Source | τ optimized on | τ evaluated on | Uncertainty reported |
 |--------|----------------|----------------|----------------------|
@@ -170,10 +205,13 @@ Colors are a fixed, color-vision-checked assignment per mechanism (`MECHANISM_CO
 
 `tests/test_pipeline.py`: every family has bounded non-negative continuous valuations; variance-preserving smoothing keeps the moments; the split is deterministic; bootstrap gains are paired; smoothed and atomic VCG welfare agree; the genetic search recovers the Example N optimum t* = 4c/3 (to 10⁻⁴ in τ and 10⁻¹⁰ in welfare with Nelder–Mead refinement); a synthetic pipeline cell with grid refinement; an IVCG-PA scoring rule designed on a distribution and applied to the same distribution reproduces its ironing exactly (welfare, revenue, penalties; atomic and piecewise uniform); an empirical cell with atomic evaluation, untruncated test rows, bootstrap and bandwidth sensitivity; cached VCG and first-best results equal fresh ones and are reused across τ and in the bootstrap.
 
+`tests/test_best_response.py`: form labels, spec round trip and exclusion cutoff; projection keeps the excluded prefix; marginal welfare equals Example N's formula; the rival welfare loss equals the Clarke payment without externalities (n, k ∈ {(3,1), (8,2), (5,3)}); the gradient equals finite differences (VCG-PA, IVCG-PA); best-response ascent recovers Example N's optimum in the nodes, knots and bins forms; interior thresholds at the nodes optimum have zero marginal welfare and zero best-response gap; genetic+best_response ≥ genetic, nodes ≥ knots; optimizer–form combinations are validated.
+
 ## Conventions and limitations
 
 - Only positive scores are allocated (VCG maximizes reported welfare, so a nonpositive bid never wins).
-- Externalities of piecewise-uniform distributions are discrete (grid nodes); only valuations are continuous given the externality.
+- Externalities of piecewise-uniform distributions are discrete (grid nodes); only valuations are continuous given the externality. τ is continuous in v (a threshold inside a cell admits the part of the cell above it exactly).
 - The truncation bound v̄ of empirical data matters for the exclusion penalty R(v̄).
-- τ is a polynomial; it cannot represent exclusion (τ = v̄⁺) or jumps. A grid representation of τ and the best-response ascent based on the first-order condition of Appendix E are planned next.
-- The genetic search maximizes VCG-PA welfare by default; IVCG-PA is then evaluated at that τ (`objective_mechanism="ivcg_pa"` optimizes for IVCG-PA instead).
+- A polynomial τ cannot represent exclusion (τ = v̄⁺) or jumps; knots represent exclusion of low externalities through the cutoff, bins and nodes represent both.
+- The optimizers maximize VCG-PA welfare by default; IVCG-PA is then evaluated at that τ (`objective_mechanism="ivcg_pa"` optimizes for IVCG-PA instead; the ascent then holds the ironed scores of the current τ fixed in each step, an envelope argument that is not proved in general; the line search on exact W* protects each step).
+- Best-response ascent and the polish find a local optimum; several starts reduce the risk.

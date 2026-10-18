@@ -1,8 +1,8 @@
 """
 genetic_search.py
 
-Search for a polynomial threshold function
-      τ(e) = β_0 + β_1 e + ... + β_d e^d
+Search for a threshold function τ(e) in a parametric form (threshold_forms.py:
+a polynomial τ(e) = β_0 + β_1 e + ... + β_d e^d by default, or knots / bins)
 that maximizes the exact expected welfare of a participant-audit mechanism
 (VCG-PA by default, or IVCG-PA) for a type distribution.
 
@@ -40,7 +40,6 @@ import pygad
 from scipy.optimize import minimize
 
 from .threshold_evaluation import expected_welfare
-from .threshold_functions import polynomial_threshold
 
 
 def compute_gene_space(type_distribution, polynomial_degree, range_multiplier=3.0):
@@ -163,8 +162,12 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
                        initial_solution=None, local_refinement="nelder_mead",
                        stall_generations=DEFAULT_STALL_GENERATIONS,
                        num_local_starts=DEFAULT_NUM_LOCAL_STARTS,
-                       local_max_evaluations=DEFAULT_LOCAL_MAX_EVALUATIONS, verbose=True):
-    """Maximize exact expected welfare of objective_mechanism over polynomial τ.
+                       local_max_evaluations=DEFAULT_LOCAL_MAX_EVALUATIONS, verbose=True,
+                       threshold_form=None):
+    """Maximize exact expected welfare of objective_mechanism over τ in a form.
+
+    threshold_form        : a ThresholdForm or label ("poly2", "knots6", "bins10");
+                            default: the polynomial of degree polynomial_degree
 
     local_refinement      : "nelder_mead" (default) or "none" (genetic algorithm only)
     stall_generations     : with refinement, stop the genetic stage after this many
@@ -176,11 +179,18 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
     """
     if local_refinement not in LOCAL_REFINEMENTS:
         raise ValueError(f"local_refinement must be one of {LOCAL_REFINEMENTS}")
-    num_genes = polynomial_degree + 1
+    from .threshold_forms import GENETIC_FORMS, build_threshold_form
+
+    if threshold_form is None:
+        threshold_form = f"poly{polynomial_degree}"
+    form = (build_threshold_form(threshold_form, type_distribution)
+            if isinstance(threshold_form, (str, int)) else threshold_form)
+    if form.kind not in GENETIC_FORMS:
+        raise ValueError(f"the genetic search needs a form in {GENETIC_FORMS}")
+    num_genes = form.num_parameters
     rng = np.random.default_rng(seed)
-    gene_space = compute_gene_space(type_distribution, polynomial_degree, range_multiplier)
-    lows = np.array([gene["low"] for gene in gene_space])
-    highs = np.array([gene["high"] for gene in gene_space])
+    lows, highs = form.parameter_bounds(type_distribution, range_multiplier)
+    gene_space = [{"low": float(low), "high": float(high)} for low, high in zip(lows, highs)]
 
     initial_population = rng.uniform(lows, highs, size=(sol_per_pop, num_genes))
     if initial_solution is not None:
@@ -194,7 +204,7 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
     def welfare_of(coefficients):
         key = tuple(np.round(coefficients, 12))
         if key not in cache:
-            cache[key] = expected_welfare(type_distribution, polynomial_threshold(coefficients),
+            cache[key] = expected_welfare(type_distribution, form.threshold(coefficients),
                                           num_bidders, num_goods, objective_mechanism)
         return cache[key]
 
@@ -215,7 +225,7 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
     if verbose:
         ranges = "  ".join(f"β{i} ∈ [{g['low']:.4g}, {g['high']:.4g}]"
                            for i, g in enumerate(gene_space))
-        print(f"Genetic search ({objective_mechanism}, exact objective): {ranges}")
+        print(f"Genetic search ({objective_mechanism}, {form.label}, exact objective): {ranges}")
 
     ga = pygad.GA(
         num_generations=num_generations,
@@ -240,7 +250,8 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
     genetic_solution, genetic_fitness, _ = ga.best_solution()
     best_coefficients = np.array(genetic_solution, dtype=float)
     best_welfare = float(genetic_fitness)
-    summary = {"genetic_coefficients": best_coefficients.tolist(), "genetic_welfare": best_welfare,
+    summary = {"optimizer": "genetic", "genetic_coefficients": best_coefficients.tolist(),
+               "genetic_welfare": best_welfare,
                "generations_run": int(ga.generations_completed),
                "local_refinement": local_refinement, "local_starts": []}
     if verbose:
@@ -266,6 +277,7 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
                   f"converged {sum(r['converged'] for r in local_results)}/{len(local_results)}")
 
     summary["num_objective_evaluations"] = len(cache)
+    summary["form"] = form.spec(best_coefficients)
     if verbose:
         print(f"Best τ: β = {[f'{c:.6g}' for c in best_coefficients]}, welfare {best_welfare:.8g}")
     return SearchResult([float(c) for c in best_coefficients], best_welfare, trajectory, summary)

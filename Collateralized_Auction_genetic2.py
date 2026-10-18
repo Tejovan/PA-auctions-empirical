@@ -2,13 +2,15 @@
 """
 Collateralized_Auction_genetic2.py
 
-Single-cell command-line run of the τ optimization: genetic search for a
-polynomial threshold τ(e) that maximizes the exact expected welfare of VCG-PA
-(or IVCG-PA), then exact evaluation of VCG, VCG-PA, IVCG-PA and the first best,
+Single-cell command-line run of the τ optimization: search for a threshold
+τ(e) in a form (--tau-form: poly<d>, knots<K>, bins<K>, nodes) that maximizes
+the exact expected welfare of VCG-PA (or IVCG-PA), by genetic search and/or
+best-response ascent (--optimizer), then exact evaluation of VCG, VCG-PA, IVCG-PA and the first best,
 one simulation for per-auction welfare distributions and, for empirical data,
 a bootstrap of exact welfare over the test rows.
 
-The optimizer itself is audited_auctions/genetic_search.py and the cell logic
+The optimizers are audited_auctions/genetic_search.py and
+audited_auctions/best_response_ascent.py, and the cell logic
 is audited_auctions/pipeline.py (shared with run_sweep_genetic2.py, which runs
 many cells). The objective is exact: it is computed on the type distribution,
 not on simulated auction draws.
@@ -18,6 +20,8 @@ Usage:
         --k 1 --externality-cost 5 --polynomial-degree 1 --num-items 8 --seed 1234
     python Collateralized_Auction_genetic2.py --data harm_rises \\
         --k 2 --externality-cost 1 --polynomial-degree 2 --num-items 8
+    python Collateralized_Auction_genetic2.py --data harm_rises \\
+        --k 2 --externality-cost 1 --tau-form nodes --num-items 8
 
 --data is a CSV with columns e_score, v_score (empirical) or a synthetic family
 name (see audited_auctions/README.md, "Type distributions").
@@ -35,7 +39,7 @@ import pickle
 import numpy as np
 
 from audited_auctions.empirical import SMOOTHING_CHOICES
-from audited_auctions.pipeline import optimize_and_evaluate, prepare_distributions
+from audited_auctions.pipeline import OPTIMIZERS, optimize_and_evaluate, prepare_distributions
 
 
 def parse_args():
@@ -45,12 +49,24 @@ def parse_args():
     parser.add_argument("--k", type=int, required=True, help="number of goods k")
     parser.add_argument("--externality-cost", type=float, required=True,
                         help="ζ: externalities are multiplied by ζ")
-    parser.add_argument("--polynomial-degree", type=int, required=True)
+    parser.add_argument("--polynomial-degree", type=int, default=None,
+                        help="polynomial τ of this degree (same as --tau-form poly<d>)")
+    parser.add_argument("--tau-form", default=None,
+                        help="poly<d>, knots<K>, bins<K> or nodes (default: poly<degree>)")
+    parser.add_argument("--optimizer", choices=OPTIMIZERS, default="auto",
+                        help="auto: genetic search for polynomials, best-response ascent otherwise")
+    parser.add_argument("--genetic-form", default=None,
+                        help="genetic+best_response: form of the genetic search")
+    parser.add_argument("--br-starts", default="zero,no_competition",
+                        help="best-response starts among zero, no_competition, short_genetic")
+    parser.add_argument("--br-max-iterations", type=int, default=100)
+    parser.add_argument("--br-tolerance", type=float, default=1e-10)
+    parser.add_argument("--short-genetic-generations", type=int, default=40)
     parser.add_argument("--action-cost", type=float, default=1.0,
                         help="valuation scale for CSV data (v = action_cost × v_score)")
     parser.add_argument("--num-items", type=int, default=20, help="number of bidders n")
     parser.add_argument("--objective", choices=("vcg_pa", "ivcg_pa"), default="vcg_pa",
-                        help="mechanism whose exact welfare the GA maximizes")
+                        help="mechanism whose exact welfare is maximized")
     parser.add_argument("--seed", type=int, default=None, help="GA seed")
     parser.add_argument("--num-generations", type=int, default=500)
     parser.add_argument("--sol-per-pop", type=int, default=50)
@@ -97,6 +113,9 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.tau_form is None and args.polynomial_degree is None:
+        raise SystemExit("give --tau-form or --polynomial-degree")
+    tau_form = args.tau_form or f"poly{args.polynomial_degree}"
     prepared = prepare_distributions(
         args.data, externality_scale=args.externality_cost, valuation_scale=args.action_cost,
         truncation_quantile=args.truncation_quantile, train_fraction=args.train_fraction,
@@ -106,7 +125,7 @@ def main():
         num_externality_nodes=args.num_externality_nodes,
         num_valuation_cells=args.num_valuation_cells)
     record = optimize_and_evaluate(
-        prepared, args.polynomial_degree, args.num_items, args.k,
+        prepared, tau_form, args.num_items, args.k,
         objective_mechanism=args.objective,
         ga_options={"num_generations": args.num_generations, "sol_per_pop": args.sol_per_pop,
                     "num_parents_mating": args.num_parents_mating,
@@ -120,7 +139,12 @@ def main():
         num_simulated_draws=args.test_auctions, simulation_seed=args.seed,
         num_bootstrap=args.bootstrap_samples, grid_refinement=args.grid_refinement,
         sensitivity_bandwidth_scales=[float(x) for x in args.sensitivity_bandwidths.split(",")
-                                      if x.strip()])
+                                      if x.strip()],
+        optimizer=args.optimizer, genetic_form=args.genetic_form,
+        best_response_options={
+            "starts": [x.strip() for x in args.br_starts.split(",") if x.strip()],
+            "max_iterations": args.br_max_iterations, "relative_tolerance": args.br_tolerance,
+            "short_genetic_generations": args.short_genetic_generations})
 
     print(record["evaluation"].summary_table().T.to_string(float_format=lambda x: f"{x:.5g}"))
     if record["bootstrap"] is not None:
@@ -128,8 +152,13 @@ def main():
         print(record["bootstrap"].summary().to_string(float_format=lambda x: f"{x:.5g}"))
     if record["bandwidth_sensitivity"] is not None:
         print("\nBandwidth sensitivity (design on smoothed training half, exact test welfare):")
-        print(record["bandwidth_sensitivity"].drop(columns="tau_coeffs")
+        print(record["bandwidth_sensitivity"].drop(columns=["tau_parameters", "threshold_spec"])
               .to_string(float_format=lambda x: f"{x:.5g}"))
+    interior = record["first_order_check"].query("status == 'interior'")
+    if len(interior):
+        print(f"\nFirst-order check (training distribution): {len(interior)} interior thresholds, "
+              f"max |marginal welfare| {interior['marginal_welfare'].abs().max():.3g}, "
+              f"total best-response gap {record['first_order_check']['best_response_gap'].sum():.3g}")
     if record["grid_refinement"] is not None:
         print("\nGrid refinement check:")
         print(record["grid_refinement"].to_string(float_format=lambda x: f"{x:.5g}"))
