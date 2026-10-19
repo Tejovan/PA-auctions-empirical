@@ -28,7 +28,7 @@ SMALL_GRID = {"num_externality_nodes": 31, "num_valuation_cells": 60}
 
 
 def example_n_welfare(c, t):
-    """Core draft, Example N: W(t) = 2/3 − c/2 + (c/2) t² − t³/4."""
+    """Paper, Example N (Ex. 7.11 [ex:N]): W(t) = 2/3 − c/2 + (c/2) t² − t³/4."""
     return 2 / 3 - c / 2 + c / 2 * t ** 2 - t ** 3 / 4
 
 

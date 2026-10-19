@@ -4,10 +4,10 @@ Tests for the audited_auctions package. Run from WEB27/code with
     .venv/bin/python -m pytest tests -q
 
 Ground truths:
-  * Example T of the core draft (ironing, IVCG-PA welfare 40/16, first best 41/16).
+  * Example T of the paper, Ex. 6.4 [ex:T-pool] (ironing, IVCG-PA welfare 40/16, first best 41/16).
   * Second-price auction, two bidders, uniform valuations: a constant threshold
-    τ is induced by the penalty τ² (core draft, example after Thm 3.3).
-  * Example N of the core draft: VCG-PA welfare 2/3 − c/2 + (c/2)t² − t³/4 and
+    τ is induced by the penalty τ² (paper Ex. 5.4 [ex:first-price]).
+  * Example N of the paper, Ex. 7.11 [ex:N]: VCG-PA welfare 2/3 − c/2 + (c/2)t² − t³/4 and
     penalty (3/4)t² (piecewise-uniform distribution, exact).
   * Ironing of piecewise-linear welfare contributions agrees with ironing of a
     fine atomic discretization.

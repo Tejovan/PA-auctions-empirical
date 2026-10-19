@@ -406,7 +406,7 @@ def _mixture_family(letter):
 
 
 def example_n_distribution(harm=0.6, num_externality_nodes=None, num_valuation_cells=150):
-    """Example N of the core draft: v ~ U[0,1], e ∈ {0, −harm} w.p. ½ each, independent.
+    """Example N of the paper (Ex. 7.11 [ex:N]): v ~ U[0,1], e ∈ {0, −harm} w.p. ½ each, independent.
 
     With n = 2, k = 1 and τ(0) <= 0, τ(−harm) = t, VCG-PA welfare is
     2/3 − c/2 + (c/2) t² − t³/4 (c = harm), maximized at t* = 4c/3 for c <= 3/4,
@@ -465,7 +465,7 @@ def harmful_middle_distribution(band=(0.5, 0.75), harmful_share_in_band=0.8,
     π(v) (harmful_share_in_band for v in the band, harmful_share_outside
     otherwise) and N(0, benign_sd²) otherwise. The expected welfare
     contribution v + E[e | v] drops at the band, so IVCG-PA irons (a continuous
-    analogue of Example T).
+    analogue of Example T, Ex. 6.4 [ex:T-pool]).
     """
     def density(e, v):
         harmful_share = np.where((v >= band[0]) & (v < band[1]),

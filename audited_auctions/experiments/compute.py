@@ -53,10 +53,17 @@ from ..threshold_evaluation import (
     PARTICIPANT_AUDIT_MECHANISMS,
     build_mechanism_model,
     evaluate_threshold,
+    exact_outcomes,
     grid_refinement_check,
     penalty_from_table,
 )
-from ..threshold_forms import ThresholdForm, externality_nodes, threshold_from_spec
+from ..threshold_forms import (
+    ThresholdForm,
+    ex_ante_cutoff,
+    ex_ante_guarantee,
+    externality_nodes,
+    threshold_from_spec,
+)
 from ..threshold_functions import tabulated_threshold
 from .config import CODE_ROOT
 
@@ -181,11 +188,21 @@ def threshold_from_record(record):
     raise ValueError(f"unknown threshold kind {record['kind']!r}")
 
 
-def given_threshold(entry, training):
-    """(threshold function, tau.json payload) of a [[thresholds]] entry (evaluate runs)."""
+def given_threshold(entry, training, num_bidders, num_goods):
+    """(threshold function, tau.json payload, kind) of a [[thresholds]] entry (evaluate runs).
+
+    cutoff: τ(e) = max(0, w − e) (excluded if w − e > v̄); "ex_ante" computes the welfare
+    cutoff w* of the ex ante relaxation on the training distribution for this n, k.
+    """
     source, value = entry["source"], entry["value"]
     nodes, _, _ = externality_nodes(training)
     externality_range = (float(nodes[0]), float(nodes[-1]))
+    if source == "cutoff":
+        cutoff = (ex_ante_cutoff(training, num_bidders, num_goods) if value == "ex_ante"
+                  else float(value))
+        form = ThresholdForm("cutoff", 1, np.empty(0), float(training.maximum_valuation),
+                             externality_range)
+        return form.threshold([cutoff]), {"spec": form.spec([cutoff])}, "form"
     if source in ("polynomial", "constant"):
         coefficients = [float(value)] if source == "constant" else [float(c) for c in value]
         form = ThresholdForm("polynomial", len(coefficients) - 1, np.empty(0),
@@ -431,6 +448,22 @@ def _checks(combination, config, prepared, threshold, evaluation, first_order, s
                                  "relative welfare spread of the final points of the starts; "
                                  "large = local optima (the best start is kept)"))
 
+    # Ex ante relaxation: IVCG-PA for τ* attains max{β_{n,k}, 1 − 1/e} of the first best
+    # (paper Thm 8.9 [thm:k-goods]); checked on the training distribution, where τ* is set.
+    entry = combination.threshold
+    if entry is not None and entry["source"] == "cutoff" and entry["value"] == "ex_ante":
+        training_outcomes = exact_outcomes(prepared.training, threshold, combination.num_bidders,
+                                           combination.num_goods)
+        ratio = (training_outcomes["ivcg_pa"]["welfare"]
+                 / training_outcomes["first_best"]["welfare"])
+        bound = ex_ante_guarantee(combination.num_bidders, combination.num_goods)
+        atomic = prepared.training.is_atomic
+        checks.append(_check(path, "ex_ante_guarantee", ratio, bound,
+                             "info" if atomic else "pass" if ratio >= bound - 1e-9 else "fail",
+                             "W*(τ*)/FB on the training distribution against max{β_{n,k}, "
+                             "1 − 1/e} (paper Thm 8.9)" + ("; atomic: no boundary mixing"
+                                                          if atomic else "")))
+
     if refinement is not None:
         gain_base = refinement.gain_over_vcg_base.drop(index=refinement.index[0])
         change = refinement.gain_change.drop(index=refinement.index[0])
@@ -481,7 +514,8 @@ def compute_combination(combination, config, run_folder, warm_start=None):
             search_result, arrays["search_e"], config["output"]["search_history_curves"])
         timing["search"] = search_result["seconds"]
     else:
-        threshold, payload, kind = given_threshold(combination.threshold, prepared.training)
+        threshold, payload, kind = given_threshold(combination.threshold, prepared.training,
+                                                   n, k)
         tau = threshold_record(combination.threshold["label"], kind, payload, combination.keys())
 
     # Exact outcomes and simulation ----------------------------------------------

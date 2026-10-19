@@ -1,10 +1,10 @@
 # Evaluate given thresholds:  python run.py configs/evaluate_example.toml
-# Two hand-written thresholds on two synthetic families; uncomment from_run to evaluate
+# The paper's benchmark thresholds and a linear one on two synthetic families; uncomment from_run to evaluate
 # every optimum of an earlier run (same distribution label, ζ, n, k) again.
 
 kind = "evaluate"
 name = "given-thresholds"
-description = "Fixed thresholds τ(e) = max(0, −e) and τ(e) = 0.3 − e on two synthetic families."
+description = "Benchmarks of the paper (zero-welfare threshold, ex ante cutoff) and τ(e) = 0.3 − e."
 
 [[distributions]]
 source = "harm_rises"
@@ -17,8 +17,12 @@ num_bidders = [8]
 num_goods = [1, 2]
 
 [[thresholds]]
-label = "no-competition"         # first best without competition (core draft Prop 5.6)
-tabulated = {externalities = [-3.0, 0.0, 3.0], values = [3.0, 0.0, 0.0]}
+label = "zero-welfare"           # zero-welfare threshold τ⁰ (paper §7.2): welfare cutoff 0
+cutoff = 0.0
+
+[[thresholds]]
+label = "ex-ante"                # τ* of the ex ante relaxation (paper Thm 8.9), checked
+cutoff = "ex_ante"               # against the guarantee max{β_{n,k}, 1 − 1/e}
 
 [[thresholds]]
 label = "linear"

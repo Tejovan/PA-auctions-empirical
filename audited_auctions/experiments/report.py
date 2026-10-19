@@ -250,6 +250,42 @@ def _run_job(job):
     return [function(*arguments)]
 
 
+# ─── Decomposition of the welfare gap ───────────────────────────────────────────
+
+
+def gap_decomposition(summary, kind):
+    """The paper's decomposition of the welfare gap (§10 [sec:empirical]), per distribution,
+    ζ, market and class T of threshold functions (form, or given threshold):
+
+        FB − OPT,   OPT − OPT^VCG,   OPT^VCG − OPT^VCG_T,
+
+    with OPT = sup_τ W*(τ) (IVCG-PA), OPT^VCG = sup_τ W^VCG(τ) (VCG-PA), and OPT^VCG_T the
+    supremum over T. The suprema are replaced by the best values found among the run's
+    combinations (IVCG-PA and VCG-PA welfare of every τ of the market), so OPT and OPT^VCG
+    are lower bounds. Columns *_share divide each gap by the first-best gain FB − W_VCG.
+    """
+    class_column = "threshold_form" if kind == "optimize" else "tau_label"
+    market = ["distribution", "zeta", "num_bidders", "num_goods"]
+    rows = []
+    for keys, group in summary.groupby(market):
+        first_best = float(group.welfare_first_best.iloc[0])
+        vcg = float(group.welfare_vcg.iloc[0])
+        opt = float(group.welfare_ivcg_pa.max())
+        opt_vcg = float(group.welfare_vcg_pa.max())
+        gain = first_best - vcg
+        for label, members in group.groupby(class_column):
+            opt_class = float(members.welfare_vcg_pa.max())
+            gaps = {"fb_minus_opt": first_best - opt, "opt_minus_opt_vcg": opt - opt_vcg,
+                    "opt_vcg_minus_class": opt_vcg - opt_class}
+            row = dict(zip(market, keys), threshold_class=label, first_best=first_best,
+                       vcg=vcg, opt_found=opt, opt_vcg_found=opt_vcg, opt_vcg_class=opt_class,
+                       **gaps)
+            row.update({f"{name}_share": (value / gain if abs(gain) > 1e-15 else np.nan)
+                        for name, value in gaps.items()})
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
 # ─── README ─────────────────────────────────────────────────────────────────────
 
 
@@ -319,6 +355,23 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
         lines.append(f"| [{row['path']}]({row['path']}) | {_share_label(row, 'vcg_pa')} | "
                      f"{_share_label(row, 'ivcg_pa')} | "
                      f"{figures.compact(row['revenue_change_vcg_pa'])} | {links} |")
+    gaps_file = folder / "gap-decomposition.csv"
+    if gaps_file.exists():
+        gaps = pd.read_csv(gaps_file)
+        lines += ["", "## Decomposition of the welfare gap", "",
+                  "Gaps as shares of the first-best gain FB − W_VCG (paper §10): FB − OPT (not "
+                  "observing externalities), OPT − OPT^VCG (ranking by bid instead of ironed "
+                  "welfare contribution), OPT^VCG − OPT^VCG_T (restricting τ to the class T). "
+                  "OPT and OPT^VCG are the best values found in this run. All values: "
+                  "gap-decomposition.csv.", "",
+                  "| distribution | ζ | n, k | class T | FB − OPT | OPT − OPT^VCG | "
+                  "OPT^VCG − OPT^VCG_T |", "|---|---|---|---|---|---|---|"]
+        for row in gaps.to_dict("records"):
+            lines.append(f"| {row['distribution']} | {row['zeta']:g} | {row['num_bidders']}, "
+                         f"{row['num_goods']} | {row['threshold_class']} | "
+                         f"{figures._percent(row['fb_minus_opt_share'])} | "
+                         f"{figures._percent(row['opt_minus_opt_vcg_share'])} | "
+                         f"{figures._percent(row['opt_vcg_minus_class_share'])} |")
     lines += ["", "Figure numbers: 1 types, τ, penalties · 2 expected outcomes · 3 per-auction "
               "distributions · 4 per-auction gain scatter · 5 IVCG-PA ironing · 6 marginal "
               "contribution and Pigouvian check · tried-taus, convergence: the search.", ""]
@@ -327,6 +380,8 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
     lines += ["", "## Files", "",
               "- `run.toml`: resolved configuration, code version, software, host, seeds, timing",
               "- `summary.csv`: one row per combination; `checks.csv`: every check with verdict",
+              "- `gap-decomposition.csv`: the paper's decomposition of the welfare gap per market "
+              "and threshold class",
               "- `<distribution>/z<ζ>/types.npz`: type-distribution background of the figures",
               "- per combination: `tau.json` (τ; reusable in evaluate runs), `tau.csv` (τ and "
               "penalties at the externality nodes), `results.json` (all statistics), "
@@ -344,6 +399,7 @@ def make_report(folder, workers=None, log=print):
     checks_file = folder / "checks.csv"
     checks = pd.read_csv(checks_file) if checks_file.exists() else pd.DataFrame()
     kind = record["run"]["kind"]
+    gap_decomposition(summary, kind).to_csv(folder / "gap-decomposition.csv", index=False)
     jobs = [("leaf", (str(folder), path)) for path in summary.path]
     jobs += comparison_jobs(folder, summary, kind)
     workers = workers or record["host"].get("workers", 1)

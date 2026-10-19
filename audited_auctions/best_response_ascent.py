@@ -5,22 +5,23 @@ Best-response ascent: search for a common threshold function τ (in a
 threshold_forms.ThresholdForm of kind knots, bins or nodes) that maximizes the
 exact expected welfare of VCG-PA or IVCG-PA.
 
-Theory (core draft v7, §5.1 and App. E). Hold the auction and the rivals' thresholds
-fixed. Then expected welfare is linear in one bidder's participation set
-(Prop. 5.4):
+Theory (paper arxiv_WEB v1, §7.1 [sec:choosing], §7.3 and App. E; LaTeX labels in brackets).
+Hold the auction and the rivals' thresholds fixed. Then expected welfare is linear in one
+bidder's participation set (Prop. 7.4 [prop:decomposition]):
 
     W(τ_i, τ_{-i}) = W(bidder i out) + Σ_nodes g_e(τ_i(e)),
     g_e(t) = E[1{v >= t, e_i = e} M^τ(e, v)],
 
 with the marginal contribution M^τ(e, v) = A^τ(v) + e X^τ(v) (marginal_contribution.py).
 The best response of one bidder maximizes Σ_e g_e(τ(e)) over the form
-(Cor. 5.5). For a common τ (all bidders move together), the derivative of W in
-τ(e) is −n Pr[e] f(τ(e) | e) M^τ(e, τ(e)) (§5.1, derivatives of welfare), so the best response
+(Cor. 7.5 [cor:best-response]). For a common τ (all bidders move together), the derivative
+of W in τ(e) is −n Pr[e] f(τ(e) | e) M^τ(e, τ(e)) (Prop. 7.9 [prop:zero-marginal-equal]),
+so the best response
 is an ascent direction but not an improvement guarantee: each iteration
 
   1. computes A^τ, X^τ exactly for the current τ (one model of the objective
      auction; for IVCG-PA the ironed scores of the current τ are held fixed,
-     justified at a joint optimum, core draft §5.4),
+     justified at a joint optimum, §7.6 [sec:joint]),
   2. computes the best response τ' within the form:
        nodes, bins : for each node (bin), the exact maximizer of g (of the sum
                      of g over the bin's nodes) over t ∈ [0, v̄] ∪ {v̄⁺}:
@@ -41,7 +42,7 @@ thresholds (a best response moves one bidder; the common τ moves all n), so the
 ascent can stop short of the optimum. After it stops, L-BFGS-B maximizes W
 over the form's parameters with the exact gradient
 
-    ∂W/∂τ(e_j) = −n f_j(τ(e_j)) M^τ(e_j, τ(e_j))        (§5.1, derivatives of welfare),
+    ∂W/∂τ(e_j) = −n f_j(τ(e_j)) M^τ(e_j, τ(e_j))        (Prop. 7.9 [prop:zero-marginal-equal]),
 
 f_j the density of v at node j (zero below 0 and above v̄), chained to the
 form's parameters (knots: interpolation weights, cutoff held fixed; bins: sum
@@ -51,14 +52,15 @@ a step function of τ for atomic distributions).
 
 Each start is run to convergence and the best result is kept. Starts:
   "zero"            τ ≡ 0 (VCG-PA without exclusions; welfare of VCG)
-  "no_competition"  τ(e) = max(0, −e), excluded if −e > v̄ (the first best without
-                    competition, Prop. 5.6 of the core draft)
+  "zero_welfare"    the zero-welfare threshold τ⁰(e) = max(0, −e), excluded if −e > v̄
+                    (§7.2 [sec:restrictions]; the first best without competition,
+                    Prop. 7.10 [prop:no-competition]); alias "no_competition"
   "short_genetic"   a short genetic search in the same form (knots6 for nodes)
 plus any warm starts passed as threshold functions (for example the genetic
 search's result, or the optimum at the previous externality scale of a run).
 
 Diagnostics: first_order_check reports, at each externality node, the marginal
-welfare of the threshold type, the penalty, the own-allocation charge −e X^τ,
+contribution of the threshold type, the penalty, the own-allocation charge −e X^τ,
 the displaced welfare term, and the best-response gap.
 """
 
@@ -73,7 +75,7 @@ from .marginal_contribution import valuation_functions
 from .threshold_evaluation import build_mechanism_model, expected_welfare
 from .threshold_forms import BEST_RESPONSE_FORMS, build_threshold_form, externality_nodes
 
-DEFAULT_STARTS = ("zero", "no_competition")
+DEFAULT_STARTS = ("zero", "zero_welfare")
 DEFAULT_POLISH_ROUNDS = 3
 STEP_SIZES = tuple(0.5 ** m for m in range(7))
 KNOT_GRID_SIZE = 48
@@ -342,8 +344,8 @@ def _start_thresholds(starts, type_distribution, form, num_bidders, num_goods, m
             thresholds.append((getattr(start, "start_name", "warm start"), start))
         elif start == "zero":
             thresholds.append(("zero", lambda e: np.zeros(np.shape(e))))
-        elif start == "no_competition":
-            thresholds.append(("no_competition", lambda e: np.where(
+        elif start in ("zero_welfare", "no_competition"):  # τ⁰; old name accepted
+            thresholds.append(("zero_welfare", lambda e: np.where(
                 -np.asarray(e) > maximum, np.inf, np.maximum(-np.asarray(e), 0.0))))
         elif start == "short_genetic":
             genetic_form = form if form.kind != "nodes" else build_threshold_form(
@@ -406,7 +408,7 @@ def welfare_and_gradient(type_distribution, form, parameters, num_bidders, num_g
                          mechanism):
     """Exact W(τ) and its gradient in the form's parameters (piecewise-uniform cells).
 
-    Node gradient −n f_j M^τ(e_j, τ_j) (core draft §5.1; one-sided at cell edges: the
+    Node gradient −n f_j M^τ(e_j, τ_j) (Prop. 7.9; one-sided at cell edges: the
     density of the cell above τ_j); knots: chained through the interpolation
     weights of included nodes, zero for the cutoff; bins: summed over the bin.
     """
@@ -484,7 +486,7 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
     """Maximize the exact welfare of objective_mechanism over τ in threshold_form.
 
     threshold_form : a ThresholdForm or a label ("knots6", "bins10", "nodes")
-    starts         : names among "zero", "no_competition", "short_genetic"
+    starts         : names among "zero", "zero_welfare", "short_genetic"
     warm_starts    : threshold functions (callables) used as additional starts;
                      an attribute start_name labels them in the summary
     polish_rounds  : gradient polishes (each followed by more ascent); 0 = none;
@@ -562,8 +564,9 @@ def first_order_check(type_distribution, threshold_function, num_bidders, num_go
     displaced), and the best-response gap max_t g_e(t) − g_e(τ(e)).
 
     At an optimal common τ, interior thresholds where the density of v given e
-    is positive have zero marginal contribution (core draft Thm 5.2): the penalty
-    equals the Pigouvian charge −e X^τ + L^τ − P^τ (Rem. 5.3, Cor. E.2), which is
+    is positive have zero marginal contribution (paper Prop. 7.9 [prop:zero-marginal-equal];
+    Thm 7.2 [thm:zero-marginal] for optimal profiles): the penalty equals the Pigouvian
+    charge −e X^τ + L^τ − P^τ (Rem. 7.3 [rem:pigouvian], Cor. E.2 [cor:pigouvian]), which is
     −e X^τ + Δ^τ in VCG-PA.
     """
     model = build_mechanism_model(mechanism, type_distribution, threshold_function, num_bidders,

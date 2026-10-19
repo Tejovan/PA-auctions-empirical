@@ -1,7 +1,7 @@
 # Standard test run: exercises every part of the code on small grids in about a minute.
 #   python run.py configs/standard_test.toml --yes
 # Two distributions (a synthetic one where ironing binds, and the tweet data at two ζ),
-# two bidder counts, two good counts, two threshold forms, both objectives, both methods.
+# two bidder counts, two good counts, three threshold forms, both objectives, both methods.
 # Short searches and coarse grids: thresholds are good, not fully optimal.
 
 kind = "optimize"
@@ -24,7 +24,7 @@ num_bidders = [4, 8]
 num_goods = [1, 2]
 
 [design]
-threshold_forms = ["poly1", "knots4"]
+threshold_forms = ["poly1", "knots4", "cutoff"]   # cutoff: common welfare cutoff (genetic only)
 objectives = ["vcg_pa", "ivcg_pa"]
 
 [[optimizers]]

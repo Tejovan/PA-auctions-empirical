@@ -69,17 +69,44 @@ METRIC_LABELS = {"welfare": "welfare W", "valuation_welfare": "valuation part Σ
 CATEGORY_COLORS = ("#d98e04", "#5e3c99", "#cc79a7", "#3b3b3b")
 CATEGORY_LINESTYLES = ("-", "--", "-.", ":", (0, (6, 2)), (0, (3, 1, 1, 1)), (0, (1, 1)))
 THRESHOLD_COLOR = "#0b0b0b"
+# Regions (figstyle.tex): abstention or exclusion light gray, pooled bids (a region that
+# is a property of the auction, not a mechanism series) seriesB at 18%.
+REGION_OUT = {"color": "#0b0b0b", "alpha": 0.10}
+REGION_QTY = {"color": "#5e3c99", "alpha": 0.18}
+# Reference lines (zero lines, 45° line): thin, dashed, secondary ink.
+REFERENCE = {"color": "#52514e", "linewidth": 0.7, "linestyle": (0, (4, 2))}
 INK = "#0b0b0b"
 INK_SECONDARY = "#52514e"
 
 STYLE = {
-    "font.family": "sans-serif", "font.size": 9, "axes.titlesize": 10, "axes.labelsize": 9,
+    "font.family": ["Latin Modern Roman", "Latin Modern Math", "DejaVu Sans"], "mathtext.fontset": "cm",
+    "axes.formatter.use_mathtext": True, "font.size": 9, "axes.titlesize": 10, "axes.labelsize": 9,
     "xtick.labelsize": 8, "ytick.labelsize": 8, "legend.fontsize": 8, "legend.frameon": False,
     "axes.spines.top": False, "axes.spines.right": False, "axes.grid": True,
     "grid.alpha": 0.25, "grid.linewidth": 0.6, "axes.edgecolor": INK_SECONDARY,
     "axes.labelcolor": INK, "xtick.color": INK_SECONDARY, "ytick.color": INK_SECONDARY,
     "lines.linewidth": 1.8, "savefig.dpi": 300, "pdf.fonttype": 42,
 }
+def _register_latin_modern():
+    """Latin Modern (text, and math for Greek letters) from the TeX installation, if present;
+    glyphs missing from both fall back to DejaVu Sans."""
+    import glob
+    import logging
+
+    from matplotlib import font_manager
+
+    # The Latin Modern OpenType files have zero 'created' dates, which fontTools reports
+    # on every PDF export.
+    logging.getLogger("fontTools.ttLib.tables._h_e_a_d").setLevel(logging.ERROR)
+
+    patterns = ("lm/lmroman10-*.otf", "lm-math/latinmodern-math.otf")  # math: Greek letters
+    roots = ("/usr/local/texlive/*/texmf-dist/fonts/opentype/public/",
+             "/usr/share/texlive/texmf-dist/fonts/opentype/public/")
+    for path in [p for root in roots for pattern in patterns for p in glob.glob(root + pattern)]:
+        font_manager.fontManager.addfont(path)
+
+
+_register_latin_modern()
 HALO = [path_effects.Stroke(linewidth=4.0, foreground="white", alpha=0.85), path_effects.Normal()]
 
 
@@ -272,14 +299,14 @@ def types_tau_penalties(results, data, types, path):
         draw_types(ax, types)
         e_grid, tau = data["e_grid"], data["tau_grid"]
         shown = np.where(np.isfinite(tau), np.clip(tau, *types["v_limits"]), types["v_limits"][1])
-        ax.fill_between(e_grid, types["v_limits"][0], shown, color=MECHANISM_COLORS["vcg_pa"],
-                        alpha=0.08, linewidth=0, zorder=-1)
+        ax.fill_between(e_grid, types["v_limits"][0], shown, linewidth=0, zorder=-1,
+                        **REGION_OUT)
         draw_threshold(ax, e_grid, tau, types)
         ax.plot(e_grid, -e_grid, color=MECHANISM_COLORS["first_best"], linestyle="-.",
                 linewidth=1.4, zorder=3)
         pooled = _visible_pooled_intervals(data, types["v_limits"])
         for low, high in pooled:
-            ax.axhspan(low, high, color=MECHANISM_COLORS["ivcg_pa"], alpha=0.10, linewidth=0,
+            ax.axhspan(low, high, linewidth=0, **REGION_QTY,
                        zorder=1)
         ax.set_title("(a) Types and threshold τ(e)", loc="left")
 
@@ -289,7 +316,7 @@ def types_tau_penalties(results, data, types, path):
                     linestyle=MECHANISM_LINESTYLES[mechanism], zorder=3)
         ax.plot(e_grid, -e_grid, color=MECHANISM_COLORS["first_best"],
                 linestyle=MECHANISM_LINESTYLES["first_best"], linewidth=1.4, zorder=2)
-        ax.axhline(0, color=INK_SECONDARY, linewidth=0.7, zorder=1)
+        ax.axhline(0, **REFERENCE, zorder=1)
         ax.set_xlim(types["e_limits"])
         penalties = np.concatenate([data["penalty_vcg_pa"], data["penalty_ivcg_pa"]])
         top = max(float(np.nanmax(penalties)), 1e-12)
@@ -300,8 +327,7 @@ def types_tau_penalties(results, data, types, path):
         ax.set_title("(b) Penalties r(e) that induce τ", loc="left")
 
         handles = [Line2D([], [], color=THRESHOLD_COLOR, linewidth=2, label="threshold τ(e)"),
-                   Patch(color=MECHANISM_COLORS["vcg_pa"], alpha=0.25,
-                         label="abstain: v < τ(e)"),
+                   Patch(**REGION_OUT, label="abstain: v < τ(e)"),
                    Line2D([], [], color=THRESHOLD_COLOR, linewidth=5,
                           label=r"excluded e ($\tau = \bar{v}^{+}$)"),
                    Line2D([], [], color=MECHANISM_COLORS["first_best"], linestyle="-.",
@@ -309,8 +335,7 @@ def types_tau_penalties(results, data, types, path):
                    mechanism_line("vcg_pa", label="r(e) in VCG-PA"),
                    mechanism_line("ivcg_pa", label="r(e) in IVCG-PA")]
         if pooled:
-            handles.append(Patch(color=MECHANISM_COLORS["ivcg_pa"], alpha=0.25,
-                                 label="bids pooled by IVCG-PA"))
+            handles.append(Patch(**REGION_QTY, label="bids pooled by IVCG-PA"))
         _shared_legend(fig, handles, columns=4)
         note = f"{str(types['description'])}; penalties on the evaluation distribution."
         return _finish(fig, path, context_line(combination), note)
@@ -355,7 +380,7 @@ def expected_outcomes(results, path):
             label_at = max(stack_top, interval[1] if interval else welfare)
             ax.annotate(text, (position, label_at), xytext=(0, 4), textcoords="offset points",
                         ha="center", va="bottom", fontsize=7, color=INK, zorder=5)
-        ax.axhline(0, color=INK_SECONDARY, linewidth=0.8, zorder=1)
+        ax.axhline(0, **REFERENCE, zorder=1)
         top = max(sum(max(exact[m][c], 0.0) for c in COMPONENTS) for m in MECHANISMS)
         ax.set_ylim(top=1.3 * top)
         ax.set_xticks(positions, [SHORT[m] for m in MECHANISMS])
@@ -387,7 +412,7 @@ def expected_outcomes(results, path):
                         ax.errorbar(position, value, yerr=[[max(value - interval[0], 0)],
                                                            [max(interval[1] - value, 0)]],
                                     color=INK, capsize=2, linewidth=0.9, zorder=3)
-        ax.axhline(0, color=INK_SECONDARY, linewidth=0.8, zorder=1)
+        ax.axhline(0, **REFERENCE, zorder=1)
         ax.set_xticks(np.arange(len(metrics)),
                       ["W", "Σvx", "Σex", "revenue\nΣp", "penalties\nΣr", "net utility\nΣu"])
         ax.grid(axis="x", visible=False)
@@ -497,7 +522,7 @@ def outcome_distributions(results, data, path):
                 interval = bootstrap.get("change_intervals", {}).get(metric, {}).get(mechanism)
                 lines.append(f"{SHORT[mechanism]} − VCG: {compact(change)}"
                              f"{_interval_text(interval)}; 0 in {100 * share_zero:.0f}%")
-            ax.axvline(0, color=INK_SECONDARY, linewidth=0.7, zorder=1)
+            ax.axvline(0, **REFERENCE, zorder=1)
             ax.set_xlim(grid[0], grid[-1])
             ax.set_ylim(bottom=0, top=max(ax.get_ylim()[1], 1e-300) * 1.45)
             changes = {m: results["change_over_vcg"][metric][m] for m in AUDITED}
@@ -536,13 +561,12 @@ def gain_scatter(results, data, path):
                 zero = (np.abs(x) <= tolerance) & (np.abs(y) <= tolerance)
                 ax.scatter(x[~zero], y[~zero], s=6, color=MECHANISM_COLORS[mechanism],
                            alpha=0.25, linewidths=0, rasterized=True, zorder=3)
-                ax.axhline(0, color=INK_SECONDARY, linewidth=0.7, zorder=1)
-                ax.axvline(0, color=INK_SECONDARY, linewidth=0.7, zorder=1)
+                ax.axhline(0, **REFERENCE, zorder=1)
+                ax.axvline(0, **REFERENCE, zorder=1)
                 if column == 0:
                     low = min(np.min(x), np.min(y))
                     high = max(np.max(x), np.max(y))
-                    ax.plot([low, high], [low, high], color=MECHANISM_COLORS["first_best"],
-                            linestyle="-.", linewidth=1.2, zorder=2)
+                    ax.plot([low, high], [low, high], zorder=2, **REFERENCE)
                 ax.plot(np.mean(x), np.mean(y), marker="X", color=INK, markersize=9,
                         markeredgecolor="white", zorder=5)
                 ax.text(0.02, 0.98, f"{100 * zero.mean():.0f}% of auctions at (0, 0)",
@@ -555,8 +579,7 @@ def gain_scatter(results, data, path):
         handles = [mechanism_line("vcg_pa", marker="o", linestyle="none", label="VCG-PA auction"),
                    mechanism_line("ivcg_pa", marker="o", linestyle="none",
                                   label="IVCG-PA auction"),
-                   Line2D([], [], color=MECHANISM_COLORS["first_best"], linestyle="-.",
-                          label="45° line: all of the achievable gain"),
+                   Line2D([], [], **REFERENCE, label="45° line: all of the achievable gain"),
                    Line2D([], [], marker="X", color=INK, linestyle="none",
                           label="mean (ratio of means = share of first-best gain)")]
         _shared_legend(fig, handles, columns=2)
@@ -592,13 +615,13 @@ def ironing(results, data, path):
         fig, axes = _new_figure(12.0, 7.2, 2, 3)
 
         def shade(ax, x):
-            ax.fill_between(x, 0, 1, where=pooled, color=MECHANISM_COLORS["ivcg_pa"],
-                            alpha=0.10, linewidth=0, transform=ax.get_xaxis_transform(),
+            ax.fill_between(x, 0, 1, where=pooled, **REGION_QTY,
+                            linewidth=0, transform=ax.get_xaxis_transform(),
                             zorder=0)
 
         ax = axes[0, 0]
         shade(ax, q)
-        ax.plot(q, welfare, color=INK_SECONDARY, linewidth=1.4, zorder=3)
+        ax.plot(q, welfare, color=INK, linewidth=1.4, zorder=3)
         ax.plot(q, score, color=MECHANISM_COLORS["ivcg_pa"], linestyle="--", zorder=4)
         ax.set_xlabel("participating quantile q (ordered by bid)")
         ax.set_ylabel("welfare contribution")
@@ -606,7 +629,7 @@ def ironing(results, data, path):
 
         ax = axes[0, 1]
         shade(ax, q)
-        ax.plot(q, psi, color=INK_SECONDARY, linewidth=1.4, zorder=3)
+        ax.plot(q, psi, color=INK, linewidth=1.4, zorder=3)
         ax.plot(q, hull, color=MECHANISM_COLORS["ivcg_pa"], linestyle="--", zorder=4)
         ax.set_xlabel("participating quantile q")
         ax.set_ylabel(r"$\Psi(q) = \int_0^q \hat{w}^{\tau}$")
@@ -615,7 +638,7 @@ def ironing(results, data, path):
         ax = axes[0, 2]
         shade(ax, q)
         ax.plot(q, psi - hull, color=MECHANISM_COLORS["ivcg_pa"], zorder=3)
-        ax.axhline(0, color=INK_SECONDARY, linewidth=0.7)
+        ax.axhline(0, **REFERENCE)
         ax.set_xlabel("participating quantile q")
         ax.set_ylabel(r"$\Psi$ − convex hull of $\Psi$")
         ax.set_title("(c) Gap: positive exactly where bids are pooled", loc="left")
@@ -628,8 +651,8 @@ def ironing(results, data, path):
         order_score = np.concatenate([data["iron_score_start"][:, None],
                                       data["iron_score_end"][:, None]], axis=1).ravel()
         for low, high in _pooled_bid_intervals(data):
-            ax.axvspan(low, high, color=MECHANISM_COLORS["ivcg_pa"], alpha=0.10, linewidth=0)
-        ax.plot(bids, order_welfare, color=INK_SECONDARY, linewidth=1.4, zorder=3)
+            ax.axvspan(low, high, linewidth=0, **REGION_QTY)
+        ax.plot(bids, order_welfare, color=INK, linewidth=1.4, zorder=3)
         ax.plot(bids, order_score, color=MECHANISM_COLORS["ivcg_pa"], linestyle="--", zorder=4)
         ax.set_xlabel("bid b")
         ax.set_ylabel("score")
@@ -642,17 +665,17 @@ def ironing(results, data, path):
                     color=MECHANISM_COLORS[mechanism], linestyle=MECHANISM_LINESTYLES[mechanism],
                     zorder=3)
         for low, high in _pooled_bid_intervals(data):
-            ax.axvspan(low, high, color=MECHANISM_COLORS["ivcg_pa"], alpha=0.10, linewidth=0)
+            ax.axvspan(low, high, linewidth=0, **REGION_QTY)
         ax.set_xlabel("bid b")
         ax.set_ylabel(r"interim allocation $X^{\tau}(b)$")
         _compact_axes(ax, y=False)
         ax.set_title("(e) Interim allocation", loc="left")
         axes[1, 2].axis("off")
-        handles = [Line2D([], [], color=INK_SECONDARY, linewidth=1.4,
+        handles = [Line2D([], [], color=INK, linewidth=1.4,
                           label=r"expected welfare contribution $\hat{w}^{\tau}$ / $\Psi$"),
                    Line2D([], [], color=MECHANISM_COLORS["ivcg_pa"], linestyle="--",
                           label=r"ironed $\bar{\omega}^{\tau}$ (IVCG-PA score) / convex hull"),
-                   Patch(color=MECHANISM_COLORS["ivcg_pa"], alpha=0.25, label="pooled bids"),
+                   Patch(**REGION_QTY, label="pooled bids"),
                    mechanism_line("vcg_pa", label=r"$X^{\tau}$ in VCG-PA"),
                    mechanism_line("ivcg_pa", label=r"$X^{\tau}$ in IVCG-PA")]
         axes[1, 2].legend(handles=handles, loc="center", fontsize=8)
@@ -705,7 +728,7 @@ def marginal_contribution(results, data, types, first_order, path):
                              linestyle=MECHANISM_LINESTYLES[mechanism],
                              marker=MECHANISM_MARKERS[mechanism], markersize=3, zorder=3)
         for axis in (ax, ax_residual):
-            axis.axhline(0, color=INK_SECONDARY, linewidth=0.7, zorder=1)
+            axis.axhline(0, **REFERENCE, zorder=1)
             axis.set_xlim(types["e_limits"])
             axis.set_xlabel("externality e")
             _compact_axes(axis)
@@ -859,7 +882,7 @@ def share_overview(groups, path, title, note=None):
                         markersize=4.5, zorder=3, linestyle="none")
             ax.set_yticks(positions, [row[0] for row in rows], fontsize=6.5)
             ax.axvline(1.0, color=MECHANISM_COLORS["first_best"], linestyle="-.", linewidth=1)
-            ax.axvline(0.0, color=INK_SECONDARY, linewidth=0.7)
+            ax.axvline(0.0, **REFERENCE)
             ax.grid(axis="y", visible=False)
             ax.set_title(panel, loc="left", fontsize=9)
             ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{100 * v:.0f}%"))

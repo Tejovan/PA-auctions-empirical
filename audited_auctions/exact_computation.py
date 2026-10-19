@@ -5,7 +5,7 @@ Exact expected outcomes of score-based auctions with exchangeable bidders and a
 common threshold function τ, for a type distribution made of cells (see
 type_distributions.py): atoms, or cells with a uniform valuation.
 
-Setting (as in the WEB27 core draft): n bidders with i.i.d. types (e, v) ~ H,
+Setting (as in the paper, arxiv_WEB v1): n bidders with i.i.d. types (e, v) ~ H,
 k identical goods, unit demand. Under the participant-truthful threshold (TPT)
 strategy a bidder participates iff v >= τ(e) and then bids v. The first best
 (recipient audit with penalty −e) is the same kind of auction in which every
@@ -31,7 +31,7 @@ the expected valuation; the expected externality is constant.
 Scores: VCG, VCG-PA and the first best score a bid by itself. IVCG-PA scores a
 participant by the ironed welfare contribution ω̄^τ, the nondecreasing L2
 projection of ŵ^τ in quantile space; equivalently, ω̄^τ is the derivative of
-the lower convex hull of Ψ(q) = ∫_0^q ŵ^τ (the core draft's Ψ, up to 1/q).
+the lower convex hull of Ψ(q) = ∫_0^q ŵ^τ (the paper's Ψ of §6 [thm:ironing], with the unnormalized quantile q).
 `iron_quantile_function` computes it exactly (pool-adjacent-violators for
 functions that are linear on each segment; the pool levels are roots of a
 monotone equation solved to machine precision).
@@ -58,7 +58,7 @@ n//2 + 2 nodes per segment is exact (up to floating point):
                       (the critical-value payment is p(b) = b X(b) − R(b),
                        and E[R(bid)] = ∫ X(t) Pr(bid > t) dt)
 
-Facts used (from the core draft): the penalty inducing τ in a normalized DSIC
+Facts used (paper Thm 5.9 [thm:dsic]): the penalty inducing τ in a normalized DSIC
 auction is r(e) = R(τ(e)), with τ clipped to [0, v̄] and r(e) = R(v̄) for an
 excluded externality; the critical-value payment is b X(b) − R(b).
 """

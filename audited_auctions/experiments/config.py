@@ -69,7 +69,7 @@ GENETIC_DEFAULTS = {
     "num_restarts": 1,
 }
 BEST_RESPONSE_DEFAULTS = {
-    "starts": ["zero", "no_competition"],  # also "short_genetic"
+    "starts": ["zero", "zero_welfare"],  # also "short_genetic"
     "max_iterations": 100,
     "relative_tolerance": 1e-10,
     "polish_rounds": 3,
@@ -173,7 +173,7 @@ def method_accepts_form(method, form_label):
     return kind in BEST_RESPONSE_FORMS
 
 
-THRESHOLD_SOURCES = ("polynomial", "constant", "tabulated", "tau_file", "from_run")
+THRESHOLD_SOURCES = ("polynomial", "constant", "tabulated", "cutoff", "tau_file", "from_run")
 
 
 def resolve_threshold(table):
@@ -184,6 +184,9 @@ def resolve_threshold(table):
     if len(sources) != 1:
         raise ConfigError(f"each [[thresholds]] table needs exactly one of {THRESHOLD_SOURCES}")
     source = sources[0]
+    if source == "cutoff" and not (table["cutoff"] == "ex_ante"
+                                   or isinstance(table["cutoff"], (int, float))):
+        raise ConfigError('cutoff must be a number (welfare cutoff w) or "ex_ante"')
     if source != "from_run" and "label" not in table:
         raise ConfigError("[[thresholds]] tables need a label (used in folder names)")
     return {"label": table.get("label"), "source": source, "value": table[source]}

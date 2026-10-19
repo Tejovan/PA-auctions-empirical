@@ -12,6 +12,12 @@ by the optimizers (genetic_search.py, best_response_ascent.py).
                                  with e < ê are excluded (τ = v̄⁺). K + 1
                                  parameters (θ_1..θ_K, ê).
   bins       (label "bins<K>")  constant on each of K bins, K parameters.
+  cutoff     (label "cutoff")   a welfare cutoff w: τ(e) = max(0, w − e), excluded
+                                 (τ = v̄⁺) when w − e > v̄; 1 parameter. Participation is
+                                 v + e >= w. w = 0 is the zero-welfare threshold τ⁰
+                                 (paper §7.2 [sec:restrictions]); the cutoff of the ex
+                                 ante relaxation is ex_ante_cutoff (Thm 8.9
+                                 [thm:k-goods]). Genetic search only.
   nodes      (label "nodes")    one value per externality node of the
                                  distribution (its distinct externality values),
                                  linear interpolation in between. Best-response
@@ -42,8 +48,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-FORM_KINDS = ("polynomial", "knots", "bins", "nodes")
-GENETIC_FORMS = ("polynomial", "knots", "bins")
+FORM_KINDS = ("polynomial", "knots", "bins", "cutoff", "nodes")
+GENETIC_FORMS = ("polynomial", "knots", "bins", "cutoff")
 BEST_RESPONSE_FORMS = ("knots", "bins", "nodes")
 
 
@@ -54,9 +60,12 @@ def parse_form_label(label):
     text = str(label).strip().lower()
     if text == "nodes":
         return "nodes", None
+    if text == "cutoff":
+        return "cutoff", 1
     match = re.fullmatch(r"(poly|polynomial|knots|bins)(\d+)", text)
     if not match:
-        raise ValueError(f"unknown τ form {label!r}: use poly<d>, knots<K>, bins<K> or nodes")
+        raise ValueError(f"unknown τ form {label!r}: use poly<d>, knots<K>, bins<K>, cutoff "
+                         f"or nodes")
     kind = "polynomial" if match.group(1).startswith("poly") else match.group(1)
     size = int(match.group(2))
     if kind == "knots" and size < 2:
@@ -104,12 +113,12 @@ class ThresholdForm:
     @property
     def label(self):
         return {"polynomial": f"poly{self.size}", "knots": f"knots{self.size}",
-                "bins": f"bins{self.size}", "nodes": "nodes"}[self.kind]
+                "bins": f"bins{self.size}", "cutoff": "cutoff", "nodes": "nodes"}[self.kind]
 
     @property
     def num_parameters(self):
         return {"polynomial": self.size + 1, "knots": self.size + 1, "bins": self.size,
-                "nodes": len(self.locations)}[self.kind]
+                "cutoff": 1, "nodes": len(self.locations)}[self.kind]
 
     @property
     def exclusion_value(self):
@@ -148,6 +157,10 @@ class ThresholdForm:
             return np.where(externalities < parameters[-1], self.exclusion_value, values)
         if self.kind == "bins":
             return parameters[np.searchsorted(self.locations, externalities, side="right")]
+        if self.kind == "cutoff":
+            values = parameters[0] - externalities
+            return np.where(values > self.maximum_valuation, self.exclusion_value,
+                            np.maximum(values, 0.0))
         return np.interp(externalities, self.locations, parameters)
 
     def threshold(self, parameters):
@@ -171,6 +184,9 @@ class ThresholdForm:
             from .genetic_search import compute_gene_space
             space = compute_gene_space(type_distribution, self.size, range_multiplier)
             return (np.array([g["low"] for g in space]), np.array([g["high"] for g in space]))
+        if self.kind == "cutoff":  # w >= 0, up to the largest welfare contribution
+            return np.array([0.0]), np.array([self.maximum_valuation
+                                              + max(self.externality_range[1], 0.0)])
         probabilities = type_distribution.probabilities
         valuations = type_distribution.valuation_midpoints
         mean = np.sum(probabilities * valuations)
@@ -200,6 +216,12 @@ class ThresholdForm:
         excluded = values >= self.exclusion_value
         if self.kind == "nodes":
             return np.interp(self.locations, nodes, values)
+        if self.kind == "cutoff":  # mass-weighted mean of τ(e) + e at interior nodes
+            interior = (values > 0) & ~excluded
+            if not interior.any():
+                return np.array([0.0])
+            return np.array([max(0.0, float(np.average(values[interior] + nodes[interior],
+                                                       weights=masses[interior])))])
         if self.kind == "knots":
             num_excluded = int(np.argmin(excluded)) if not excluded.all() else len(nodes)
             if num_excluded == 0:
@@ -231,7 +253,7 @@ def build_threshold_form(label, type_distribution):
     kind, size = parse_form_label(label)
     nodes, masses, _ = externality_nodes(type_distribution)
     externality_range = (float(nodes[0]), float(nodes[-1]))
-    if kind == "polynomial":
+    if kind in ("polynomial", "cutoff"):
         locations = np.empty(0)
     elif kind == "knots":
         locations = np.unique(externality_quantiles(nodes, masses, np.linspace(0, 1, size)))
@@ -249,3 +271,44 @@ def threshold_from_spec(spec, parameters=None):
     """Threshold function of a stored spec (ThresholdForm.spec), optionally with other parameters."""
     form = ThresholdForm.from_spec(spec)
     return form.threshold(spec["parameters"] if parameters is None else parameters)
+
+
+def ex_ante_cutoff(type_distribution, num_bidders, num_goods):
+    """Welfare cutoff w* of the ex ante relaxation for k identical goods (paper Thm 8.9
+    [thm:k-goods]): Pr[v + e > w*] = q* = min{k/n, Pr[v + e > 0]}, w* >= 0.
+
+    The welfare contribution w = v + e is uniform on [lower + e, upper + e] within a
+    cell. For atomic distributions, Pr[w > c] is a step function; the cutoff is then the
+    smallest c with Pr[w > c] <= q*, without the boundary mixing of the paper.
+    """
+    low = type_distribution.valuation_lower + type_distribution.externalities
+    high = type_distribution.valuation_upper + type_distribution.externalities
+    probabilities = type_distribution.probabilities
+
+    def mass_above(c):
+        width = high - low
+        fraction = np.where(width > 0, np.clip((high - c) / np.where(width > 0, width, 1.0),
+                                               0.0, 1.0), (low > c).astype(float))
+        return float(np.sum(probabilities * fraction))
+
+    target = min(num_goods / num_bidders, mass_above(0.0))
+    if mass_above(0.0) <= target:
+        return 0.0
+    left, right = 0.0, float(high.max())
+    for _ in range(200):
+        middle = 0.5 * (left + right)
+        if mass_above(middle) > target:
+            left = middle
+        else:
+            right = middle
+    return right
+
+
+def ex_ante_guarantee(num_bidders, num_goods):
+    """max{β_{n,k}, 1 − 1/e} of paper Thm 8.9 [thm:k-goods]:
+    β_{n,k} = 1 − C(n, k) (1 − k/n)^{n+1−k} (k/n)^k."""
+    from math import comb, exp
+
+    n, k = num_bidders, num_goods
+    beta = 1 - comb(n, k) * (1 - k / n) ** (n + 1 - k) * (k / n) ** k
+    return max(beta, 1 - exp(-1))

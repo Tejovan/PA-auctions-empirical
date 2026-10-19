@@ -4,7 +4,7 @@ A run is described by one TOML file. `python run.py FILE.toml` prints the plan a
 
 | File | Purpose |
 |---|---|
-| [standard_test.toml](standard_test.toml) | standard test of the code: every feature on small grids, about 1 minute |
+| [standard_test.toml](standard_test.toml) | standard test of the code: every feature on small grids, about 1.5 minutes |
 | [evaluate_example.toml](evaluate_example.toml) | evaluate run: given thresholds, and the optima of an earlier run |
 | [optimize_example.toml](optimize_example.toml) | research-size optimize run on the tweet data (several ζ, per-node τ) |
 
@@ -45,12 +45,12 @@ A run is described by one TOML file. `python run.py FILE.toml` prints the plan a
 
 | Key | Default | Meaning |
 |---|---|---|
-| `threshold_forms` | `["knots6"]` | forms of τ: `poly<d>` (polynomial of degree d), `knots<K>` (continuous piecewise linear with K knots + exclusion cutoff), `bins<K>` (constant on K bins), `nodes` (free at every externality node) |
+| `threshold_forms` | `["knots6"]` | forms of τ: `poly<d>` (polynomial of degree d), `knots<K>` (continuous piecewise linear with K knots + exclusion cutoff), `bins<K>` (constant on K bins), `cutoff` (common welfare cutoff w: τ(e) = max(0, w − e), excluded if w − e > v̄; genetic only), `nodes` (free at every externality node) |
 | `objectives` | `["vcg_pa"]` | auction whose exact expected welfare τ maximizes: `vcg_pa`, `ivcg_pa` |
 
 ## `[[optimizers]]` (optimize runs; default: one best-response optimizer)
 
-Combinations of a method with a form it cannot search are skipped and listed in the plan: the genetic search takes `poly`, `knots`, `bins`; best-response ascent takes `knots`, `bins`, `nodes`.
+Combinations of a method with a form it cannot search are skipped and listed in the plan: the genetic search takes `poly`, `knots`, `bins`, `cutoff`; best-response ascent takes `knots`, `bins`, `nodes`.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -66,7 +66,7 @@ Combinations of a method with a form it cannot search are skipped and listed in 
 | `num_local_starts` | 5 | genetic: Nelder–Mead starts |
 | `local_max_evaluations` | 2000 | genetic: evaluations per Nelder–Mead start |
 | `num_restarts` | 1 | genetic: independent restarts (seeds `search`, `search + 1`, …) |
-| `starts` | `["zero", "no_competition"]` | best response: starts (`zero`: τ ≡ 0; `no_competition`: τ(e) = max(0, −e); `short_genetic`) |
+| `starts` | `["zero", "zero_welfare"]` | best response: starts (`zero`: τ ≡ 0; `zero_welfare`: the zero-welfare threshold τ⁰(e) = max(0, −e); `short_genetic`) |
 | `max_iterations` | 100 | best response: iterations per start |
 | `relative_tolerance` | 1e-10 | best response: stop when relative welfare gains fall below this |
 | `polish_rounds` | 3 | best response: gradient polishes |
@@ -81,6 +81,7 @@ Each table has a `label` (folder name `tau-<label>`) and exactly one source:
 | Key | Example | Meaning |
 |---|---|---|
 | `polynomial` | `[0.0, -1.0]` | τ(e) = Σ_m β_m e^m (coefficients from degree 0) |
+| `cutoff` | `0.0` or `"ex_ante"` | welfare cutoff w: τ(e) = max(0, w − e); 0 is the zero-welfare threshold τ⁰; `"ex_ante"` is the cutoff w* of the ex ante relaxation, Pr[v + e > w*] = min{k/n, Pr[v + e > 0]} (paper Thm 8.9), computed on the training distribution for each n, k |
 | `constant` | `0.3` | τ(e) = 0.3 |
 | `tabulated` | `{externalities = [-1, 0], values = [1, 0]}` | piecewise linear through the points, constant outside |
 | `tau_file` | `"runs/<run>/<path>/tau.json"` | a τ saved by an earlier run |

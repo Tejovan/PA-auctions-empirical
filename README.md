@@ -80,12 +80,12 @@ objectives = ["vcg_pa"]
 method = "best_response"
 ```
 
-**Standard test run:** [configs/standard_test.toml](configs/standard_test.toml), about 1 minute with 8 workers.
+**Standard test run:** [configs/standard_test.toml](configs/standard_test.toml), about 1.5 minutes with 8 workers.
 
 - Two distributions: `harmful_middle`, where ironing binds, and the tweet data at ζ ∈ {5, 50}.
 - n ∈ {4, 8} and k ∈ {1, 2}.
-- Forms `poly1` and `knots4`; both objectives; both methods; short searches on coarse grids.
-- 72 combinations. Every feature runs: bootstrap, grid refinement, bandwidth sensitivity, every figure.
+- Forms `poly1`, `knots4` and `cutoff` (common welfare cutoff); both objectives; both methods; short searches on coarse grids.
+- 96 combinations. Every feature runs: bootstrap, grid refinement, bandwidth sensitivity, every figure.
 
 Use it after code changes. For a targeted change, copy it and shrink the lists to make a smoke run.
 
@@ -146,6 +146,11 @@ A comparison figure goes in the `compare/` folder of the deepest level above eve
 | `first_order` | max \|M(e, τ(e))\| / v̄ at interior thresholds | pass if < 10⁻⁴ for the `nodes` form; info for restricted forms and given τ, where it measures the distance from the per-node optimum |
 | `search_starts_spread` | relative welfare spread of the final points of the starts | info: a large value means local optima, and the best start is kept |
 | `bandwidth_sensitivity` | spread of the gain over VCG across smoothing bandwidths | pass if ≤ the width of its bootstrap interval |
+| `ex_ante_guarantee` | W*(τ*)/FB for the ex ante cutoff τ* (`cutoff = "ex_ante"`), on the training distribution | pass if ≥ max{β_{n,k}, 1 − 1/e} (paper Thm 8.9 [thm:k-goods]); info for atomic training data |
+
+**Decomposition of the welfare gap** (`gap-decomposition.csv`, README section): per distribution, ζ, market and class T of thresholds (form, or given threshold), the paper's three gaps (§10 [sec:empirical]) FB − OPT, OPT − OPT^VCG and OPT^VCG − OPT^VCG_T, also as shares of the first-best gain. OPT = sup W* (IVCG-PA) and OPT^VCG = sup W^VCG are the best values found among the run's thresholds, so they are lower bounds; include the `nodes` form for OPT^VCG close to the supremum.
+
+**Benchmarks of the paper:** the zero-welfare threshold τ⁰ (`cutoff = 0.0`), the ex ante cutoff τ* (`cutoff = "ex_ante"`), and the best common welfare cutoff (form `cutoff`, genetic search); [configs/evaluate_example.toml](configs/evaluate_example.toml) evaluates the first two.
 
 **Reusing results:**
 
@@ -171,7 +176,7 @@ cd $HOME/audited-auctions-empirical
 **Synthetic families:**
 
 - the mixtures `a`–`f`, `h`;
-- `example_n`, the analytic benchmark of the core draft;
+- `example_n`, the analytic benchmark of the paper (Example N);
 - `independent`, `harm_rises`, `harmful_middle` (ironing binds), `heavy_tail`.
 
 Every family is a piecewise-uniform distribution on a grid: externalities on nodes, valuations uniform within cells. All quantities are exact for that distribution. Family parameters and grid accuracy are in [audited_auctions/README.md](audited_auctions/README.md#synthetic-families).
