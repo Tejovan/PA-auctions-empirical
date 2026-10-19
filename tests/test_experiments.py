@@ -130,6 +130,16 @@ def test_whole_runs_with_figures_and_reused_thresholds(tmp_path):
     assert (folder / "compare" / "share-of-first-best-gain.pdf").exists()
     readme = (folder / "README.md").read_text()
     assert "## Checks" in readme and summary.path.iloc[0] in readme
+    assert (leaf / "thumbs" / "2_expected-outcomes.webp").exists()
+    assert (leaf / "search" / "thumbs" / "convergence.webp").exists()
+    assert "(compare/thumbs/share-of-first-best-gain.webp)" in readme
+    assert f"({summary.path.iloc[0]}/README.md)" in readme
+    leaf_readme = (leaf / "README.md").read_text()
+    assert "[![2_expected-outcomes](thumbs/2_expected-outcomes.webp)](2_expected-outcomes.pdf)" \
+        in leaf_readme
+    assert "(search/thumbs/convergence.webp)" in leaf_readme
+    assert "(harmful-middle/z1/compare/README.md)" in readme
+    assert "(thumbs/" in (compare / "README.md").read_text()
     record = tomllib.loads((folder / "run.toml").read_text())
     assert record["run"]["num_combinations"] == 6 and "commit" in record["code"]
 

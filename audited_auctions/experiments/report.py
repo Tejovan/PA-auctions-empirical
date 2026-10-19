@@ -18,6 +18,9 @@ saved in the compare/ folder of the deepest level above every varied input:
                                      input ∈ market, form, optimizer, objective, threshold
   <distribution>/compare/welfare-vs-zeta_<fixed inputs>.pdf
   compare/share-of-first-best-gain.pdf
+Every figure has a WebP preview thumbs/<name>.webp next to it. README files: the
+run's README.md (inputs, checks, results, the share overview), one README.md per
+combination and per compare/ folder with the previews, each linked to its PDF.
 
 Paper mode (python run.py --report RUN --paper [NAMES]): one PDF per panel, legend
 and colorbar PDFs, <figure>.caption.txt and <figure>.tex in a paper/ folder next to
@@ -27,6 +30,7 @@ tau-by, welfare-vs-zeta; default all. The share overview has no paper version.
 """
 
 import math
+import os
 import tomllib
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -368,7 +372,8 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
     for row in summary.sort_values("path").to_dict("records"):
         links = " ".join(f"[{Path(file).name.split('_')[0] if '/search/' not in file else Path(file).stem}]"
                          f"({file})" for file in leaf_files.get(row["path"], []))
-        lines.append(f"| [{row['path']}]({row['path']}) | {_share_label(row, 'vcg_pa')} | "
+        _leaf_readme(folder, row, leaf_files.get(row["path"], []))
+        lines.append(f"| [{row['path']}]({row['path']}/README.md) | {_share_label(row, 'vcg_pa')} | "
                      f"{_share_label(row, 'ivcg_pa')} | "
                      f"{figures.compact(row['revenue_change_vcg_pa'])} | {links} |")
     gaps_file = folder / "gap-decomposition.csv"
@@ -392,7 +397,15 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
               "distributions · 4 per-auction gain scatter · 5 IVCG-PA ironing · 6 marginal "
               "contribution and Pigouvian check · tried-taus, convergence: the search.", ""]
     lines += ["## Comparison figures", ""]
-    lines += [f"- [{file}]({file})" for file in sorted(compare_files)] or ["(none)"]
+    by_folder = {}
+    for file in sorted(compare_files):
+        by_folder.setdefault(str(Path(file).parent), []).append(file)
+    lines += _gallery(by_folder.pop("compare", []), ".")
+    for compare, files in by_folder.items():
+        _compare_readme(folder, compare, files)
+        lines.append(f"- [{compare}]({compare}/README.md): {len(files)} figures")
+    if not compare_files:
+        lines.append("(none)")
     lines += ["", "## Files", "",
               "- `run.toml`: resolved configuration, code version, software, host, seeds, timing",
               "- `summary.csv`: one row per combination; `checks.csv`: every check with verdict",
@@ -404,6 +417,36 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
               "`first-order.csv`, `data.npz` (arrays behind the figures)",
               "- `log.txt`: progress messages", ""]
     (folder / "README.md").write_text("\n".join(lines))
+
+
+def _gallery(files, base):
+    """Markdown lines showing the preview of each figure (paths relative to the run
+    folder), linked to the PDF, for a README in folder base (relative to the run)."""
+    lines = []
+    for file in files:
+        relative = Path(os.path.relpath(file, base))
+        lines += [f"**[{relative}]({relative})**  ",
+                  f"[![{relative.stem}]({figures.thumbnail_path(relative)})]({relative})", ""]
+    return lines
+
+
+def _leaf_readme(folder, row, files):
+    path = row["path"]
+    if not (folder / path).is_dir():
+        return
+    up = os.path.relpath(".", path)
+    lines = [f"# {path}", "", f"Run: [README.md]({up}/README.md)", "",
+             f"Share of the first-best welfare gain over VCG: VCG-PA {_share_label(row, 'vcg_pa')}, "
+             f"IVCG-PA {_share_label(row, 'ivcg_pa')}; change of expected revenue over VCG "
+             f"(VCG-PA) {figures.compact(row['revenue_change_vcg_pa'])}. Files: tau.json (τ), "
+             f"tau.csv, results.json, first-order.csv, data.npz.", ""]
+    (folder / path / "README.md").write_text("\n".join(lines + _gallery(files, path)))
+
+
+def _compare_readme(folder, compare, files):
+    up = os.path.relpath(".", compare)
+    lines = [f"# Comparison figures in {compare}", "", f"Run: [README.md]({up}/README.md)", ""]
+    (folder / compare / "README.md").write_text("\n".join(lines + _gallery(files, compare)))
 
 
 def make_report(folder, workers=None, log=print):

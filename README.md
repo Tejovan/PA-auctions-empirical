@@ -96,7 +96,8 @@ Each run writes one folder, `runs/<YYYY-MM-DD_HHMM>_<kind>_<name>/`. Example:
 
 ```
 runs/2026-10-19_1400_optimize_standard-test/
-  README.md          index: inputs, check verdicts, results table with links to every figure
+  README.md          index: inputs, check verdicts, results table (links to each combination's
+                     README and figures), share overview preview, links to compare/ READMEs
   config.toml        the configuration as given
   run.toml           resolved configuration (all defaults explicit), git commit and uncommitted-change
                      flag, package versions, host (local / BU SCC + job id), seeds, data SHA-256,
@@ -120,12 +121,16 @@ runs/2026-10-19_1400_optimize_standard-test/
           1_types-tau-penalties.pdf   2_expected-outcomes.pdf   3_outcome-distributions.pdf
           4_gain-scatter.pdf   5_ironing.pdf   6_marginal-contribution.pdf
           search/tried-taus.pdf   search/convergence.pdf
+          README.md   previews of the combination's figures, each linked to its PDF
+          thumbs/*.webp   search/thumbs/*.webp   previews (also in every compare/ folder)
   tweets/compare/welfare-vs-zeta_n8-k2_vcgpa_knots4_br.pdf   (distributions with several ζ)
 runs/index.csv       one line per run: folder, kind, name, start, seconds, combinations, failures,
                      failed checks, commit, uncommitted changes, host
 ```
 
-A comparison figure goes in the `compare/` folder of the deepest level above every input it varies. `runs/` is not tracked by git.
+A comparison figure goes in the `compare/` folder of the deepest level above every input it varies; each `compare/` folder has a README.md with the previews of its figures. `runs/` is not tracked by git.
+
+**File sizes.** Previews are WebP at 45 pixels per inch (2–26 KB each), for browsing the README files in an editor's Markdown preview or on GitHub; click a preview for the vector PDF. In the PDFs, dense parts (scatter points, marginal-contribution maps, the tried thresholds) are embedded as images at 150 dpi (300 dpi in `--paper` panels); axes, text and curves stay vector. Standard test: 921 PDFs, 45 MB; previews 9 MB.
 
 | Figure | Shows |
 |---|---|

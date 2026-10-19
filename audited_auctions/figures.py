@@ -35,6 +35,11 @@ size in cells of fixed size with fixed margins, so panels of one size align
 side by side; there is no title and no note. Legends outside the axes and
 colorbars go to their own PDFs; <figure>.caption.txt holds the caption draft,
 and <figure>.tex a figure environment that includes the panels.
+
+File size: rasterized artists (scatters, maps, the tried thresholds) are embedded
+at 150 dpi in run figures and at 300 dpi in paper panels; every run figure also
+gets a small WebP preview in thumbs/ next to it (thumbnail_path), shown in the
+run's README files.
 """
 
 import re
@@ -98,7 +103,7 @@ STYLE = {
     "axes.spines.top": False, "axes.spines.right": False, "axes.grid": True,
     "grid.alpha": 0.25, "grid.linewidth": 0.6, "axes.edgecolor": INK_SECONDARY,
     "axes.labelcolor": INK, "xtick.color": INK_SECONDARY, "ytick.color": INK_SECONDARY,
-    "lines.linewidth": 1.8, "savefig.dpi": 300, "pdf.fonttype": 42,
+    "lines.linewidth": 1.8, "savefig.dpi": 150, "pdf.fonttype": 42,
 }
 def _register_latin_modern():
     """Latin Modern (text, and math for Greek letters) from the TeX installation, if present;
@@ -167,7 +172,17 @@ def context_line(combination):
 # multi-panel figures, 0.6 of it for single panels; fixed margins around the axes box.
 PAPER_CELL = {"multi": (3.1, 2.4), "single": (3.9, 2.9)}
 PAPER_MARGINS = {"left": 0.62, "right": 0.12, "bottom": 0.50, "top": 0.12}
+PAPER_DPI = 300  # rasterized artists in paper panels (run figures: STYLE, 150 dpi)
 _PAPER = {"on": False}
+
+# Previews of run figures in the README files: WebP, about 45 pixels per inch.
+THUMBNAIL_DPI = 45
+
+
+def thumbnail_path(path):
+    """Preview of the figure at path: thumbs/<stem>.webp in the figure's folder."""
+    path = Path(path)
+    return path.parent / "thumbs" / f"{path.stem}.webp"
 
 
 def set_paper(on):
@@ -251,7 +266,7 @@ def _save_only(fig, artist, file, bbox_inches):
             item.set_visible(False)
     for item in inner:
         item.set_visible(False)
-    fig.savefig(file, bbox_inches=bbox_inches)
+    fig.savefig(file, bbox_inches=bbox_inches, dpi=PAPER_DPI)
     for item in hidden + inner:
         item.set_visible(True)
 
@@ -352,7 +367,8 @@ def _paper_export(fig, path, title, note):
             ticks = sorted([0.0] + [t for t in ticks if t > norm.linthresh] +
                            [-t for t in ticks if t > norm.linthresh])
             bar.set_ticks(ticks)
-        bar_figure.savefig(folder / f"{stem}_colorbar.pdf", bbox_inches="tight", pad_inches=0.02)
+        bar_figure.savefig(folder / f"{stem}_colorbar.pdf", bbox_inches="tight", pad_inches=0.02,
+                           dpi=PAPER_DPI)
         plt.close(bar_figure)
         legend_files.append(f"{stem}_colorbar.pdf")
     plt.close(fig)
@@ -428,6 +444,10 @@ def _finish(fig, path, title, note=None):
         fig.text(0.01, bottom - 0.008, textwrap.fill(note, width), ha="left", va="top",
                  fontsize=7, color=INK_SECONDARY, transform=fig.transFigure)
     fig.savefig(path, bbox_inches="tight", pad_inches=0.08)
+    thumbnail = thumbnail_path(path)
+    thumbnail.parent.mkdir(exist_ok=True)
+    fig.savefig(thumbnail, bbox_inches="tight", pad_inches=0.08, dpi=THUMBNAIL_DPI,
+                pil_kwargs={"quality": 75})
     plt.close(fig)
     return path
 
@@ -745,7 +765,7 @@ def outcome_distributions(results, data, path):
             mechanisms = [m for m in MECHANISMS if not (metric == "penalty_paid" and m == "vcg")]
             draws = {m: data[f"sim_{m}_{metric}"] for m in mechanisms}
             ax = axes[row, 0]
-            grid = np.linspace(*_range(draws.values()), 400)
+            grid = np.linspace(*_range(draws.values()), 200)
             for mechanism in mechanisms:
                 _density(ax, draws[mechanism], grid, MECHANISM_COLORS[mechanism],
                          MECHANISM_LINESTYLES[mechanism], fill=mechanism != "vcg")
@@ -772,7 +792,7 @@ def outcome_distributions(results, data, path):
                            for m in AUDITED}
             tolerance = 1e-9 * max(1.0, float(np.abs(data[f"sim_vcg_{metric}"]).max()))
             nonzero = {m: d[np.abs(d) > tolerance] for m, d in differences.items()}
-            grid = np.linspace(*_range([v for v in nonzero.values() if len(v)]), 400)
+            grid = np.linspace(*_range([v for v in nonzero.values() if len(v)]), 200)
             lines = []
             for mechanism in AUDITED:
                 share_zero = 1 - len(nonzero[mechanism]) / len(differences[mechanism])
@@ -1034,7 +1054,8 @@ def search_history(results, data, types, path_tried, path_trace):
         tried = data["search_tried"]
         for curve in tried:
             ax.plot(data["search_e"], np.clip(curve, *types["v_limits"]), color="#9a9a9a",
-                    linewidth=0.5, alpha=0.18, zorder=2, rasterized=True)
+                    linewidth=0.5, alpha=0.18, zorder=2, rasterized=True,
+                    antialiased=False)  # without antialiasing the image compresses ~2×
         draw_threshold(ax, data["e_grid"], data["tau_grid"], types, color=THRESHOLD_COLOR,
                        label="best τ found")
         ax.set_title("Tried thresholds", loc="left")
