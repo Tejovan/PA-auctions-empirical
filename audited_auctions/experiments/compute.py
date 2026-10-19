@@ -414,7 +414,7 @@ def _checks(combination, config, prepared, threshold, evaluation, first_order, s
         verdict = ("info" if restricted or combination.objective is None
                    else "pass" if worst < tolerances["first_order_tolerance"] else "fail")
         note = ("max |M^τ(e, τ(e))| / v̄ at interior thresholds; zero at a per-node optimum "
-                "(Thm 5.2)")
+                "(paper: zero marginal contribution at interior optimal thresholds)")
         if verdict == "info":
             note += ("; restricted form or given τ: measures the distance from the "
                      "per-node optimum")

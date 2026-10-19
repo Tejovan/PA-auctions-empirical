@@ -1,6 +1,6 @@
 # Audited auctions: computation, optimization and experiments
 
-Code for the WEB27 paper on auctions with participant audits. The model is in the core draft (`WEB27/drafting/web27_aa_1p_core/` of the paper repository): n bidders, k identical goods, types (e, v), with externality e and valuation v.
+Code for the WEB27 paper on auctions with participant audits. The model is in the paper (`WEB27/arxiv_WEB/` of the paper repository): n bidders, k identical goods, types (e, v), with externality e and valuation v.
 
 For a type distribution and a participation threshold function τ(e) common to all bidders, the package computes four mechanisms exactly:
 

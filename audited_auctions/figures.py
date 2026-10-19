@@ -726,8 +726,8 @@ def marginal_contribution(results, data, types, first_order, path):
         note = ("Marginal contribution M(e, v) = (v + e) X(v) − L(v) of a participating type, "
                 "for the auction and the rivals' thresholds of this τ (training distribution; "
                 "IVCG-PA with its scores fixed). At an optimal interior threshold, M(e, τ(e)) = 0 "
-                "and the penalty equals the Pigouvian charge −eX + L − P (core draft Thm 5.2, "
-                "Rem 5.3). Panels (c), (d): at the externality nodes; charge and M at interior "
+                "and the penalty equals the Pigouvian charge −eX + L − P (paper: optimality "
+                "conditions for thresholds). Panels (c), (d): at the externality nodes; charge and M at interior "
                 "thresholds only; excluded externalities (penalty R(v̄)) are not drawn.")
         return _finish(fig, path, context_line(combination), note)
 
