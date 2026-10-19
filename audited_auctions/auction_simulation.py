@@ -33,6 +33,7 @@ DRAW_METRICS = (
     "externality_welfare",  # Σ_i x_i e_i
     "revenue",  # Σ_i p_i (auction payments only)
     "penalty_paid",  # participant audit: Σ_{participants} r(e_i); recipient audit: Σ_i x_i (-e_i)
+    "bidder_utility",  # Σ_i (v_i x_i − p_i − penalty_i): bidders' net utility
     "num_participants",
     "num_allocated",  # Σ_i x_i
 )
@@ -139,4 +140,6 @@ def simulate_score_auction(
             ).sum(axis=1)
 
     metrics["welfare"] = metrics["valuation_welfare"] + metrics["externality_welfare"]
+    metrics["bidder_utility"] = (metrics["valuation_welfare"] - metrics["revenue"]
+                                 - metrics["penalty_paid"])
     return metrics

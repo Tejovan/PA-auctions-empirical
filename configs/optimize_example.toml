@@ -1,0 +1,37 @@
+# Research-size optimize run on the tweet data:  python run.py configs/optimize_example.toml
+# Per-node and piecewise-linear τ by best-response ascent, a quadratic τ by genetic search,
+# six externality scales with warm starts, full grids, 200 bootstrap resamples.
+# Run --dry-run first for the time estimate.
+
+kind = "optimize"
+name = "tweets-zeta"
+description = "Tweet data: optimal τ over ζ for VCG-PA and IVCG-PA."
+
+[[distributions]]
+source = "tweets"
+externality_scales = [1.0, 2.5, 5.0, 10.0, 25.0, 50.0]
+
+[markets]
+num_bidders = [8, 16]
+num_goods = [1, 2]
+
+[design]
+threshold_forms = ["poly2", "knots6", "nodes"]
+objectives = ["vcg_pa", "ivcg_pa"]
+
+[[optimizers]]
+label = "ga"
+method = "genetic"
+num_restarts = 1
+
+[[optimizers]]
+label = "br"
+method = "best_response"
+warm_start_across_zeta = true
+
+[evaluation]
+num_simulated_auctions = 20000
+num_bootstrap = 200
+
+[checks]
+bandwidth_sensitivity = [0.5, 2.0]

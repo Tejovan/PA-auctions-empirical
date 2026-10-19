@@ -1,19 +1,15 @@
 """
 pipeline.py
 
-One optimization-and-evaluation cell, shared by run_sweep_genetic2.py and
-Collateralized_Auction_genetic2.py:
+Building blocks of one combination of a run (used by experiments/compute.py):
 
   prepare_distributions   build the distribution τ is designed on (training)
                           and the one it is evaluated on (evaluation)
   optimize_threshold      search for τ in a threshold form (threshold_forms.py)
                           with the exact objective: genetic search,
                           best-response ascent, or both
-  optimize_and_evaluate   optimize_threshold, then
-                          exact evaluation of the four mechanisms, one
-                          simulation for per-auction welfare distributions,
-                          and (empirical data) a bootstrap of exact welfare and
-                          an optional bandwidth sensitivity check
+  bandwidth_sensitivity   redesign τ on the training half smoothed with other
+                          bandwidths and evaluate each design on the test half
 
 Synthetic families: training = evaluation = the family's piecewise-uniform
 distribution (H is known; no sampling uncertainty). Optional grid-refinement
@@ -39,7 +35,6 @@ import pandas as pd
 
 from .empirical import (
     EmpiricalSample,
-    bootstrap_welfare,
     exact_welfare_by_mechanism,
     load_empirical_sample,
     sample_distribution,
@@ -47,15 +42,9 @@ from .empirical import (
     truncate_sample,
     valuation_bound,
 )
-from .best_response_ascent import first_order_check, run_best_response_ascent
+from .best_response_ascent import run_best_response_ascent
 from .genetic_search import run_genetic_search
-from .threshold_evaluation import (
-    AUDITED_MECHANISMS,
-    MECHANISMS,
-    evaluate_threshold,
-    grid_refinement_check,
-    ivcg_scoring_rule_for,
-)
+from .threshold_evaluation import AUDITED_MECHANISMS, MECHANISMS, ivcg_scoring_rule_for
 from .threshold_forms import BEST_RESPONSE_FORMS, GENETIC_FORMS, build_threshold_form
 from .type_distributions import SYNTHETIC_FAMILIES, TypeDistribution, synthetic_distribution
 
@@ -138,7 +127,7 @@ def prepare_distributions(source, externality_scale=1.0, valuation_scale=1.0,
     )
 
 
-def _designed_ivcg_rule(prepared, design_distribution, threshold, num_bidders, num_goods):
+def designed_ivcg_rule(prepared, design_distribution, threshold, num_bidders, num_goods):
     """IVCG-PA scoring rule designed on the training side (empirical data only)."""
     if not prepared.is_empirical:
         return None
@@ -226,97 +215,6 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
             "trajectory_forms": trajectory_forms, "search_summaries": summaries}
 
 
-def optimize_and_evaluate(prepared, threshold_form, num_bidders, num_goods,
-                          objective_mechanism="vcg_pa", ga_options=None, ga_seed=None,
-                          num_restarts=1, initial_solution=None, num_simulated_draws=2000,
-                          simulation_seed=None, num_bootstrap=200, bootstrap_seed=0,
-                          grid_refinement=False, sensitivity_bandwidth_scales=(),
-                          num_type_sample=4000, optimizer="auto", genetic_form=None,
-                          best_response_options=None, warm_starts=(), verbose=True):
-    """Optimize τ on prepared.training (optimize_threshold) and evaluate it on prepared.evaluation.
-
-    threshold_form: label ("poly2", "knots6", "bins10", "nodes") or a polynomial degree.
-    sensitivity_bandwidth_scales: empirical data with kernel smoothing only;
-    for each scale, rerun the optimization on the training half smoothed with
-    that bandwidth multiplier and evaluate the resulting design exactly on the
-    same evaluation distribution (record["bandwidth_sensitivity"]).
-
-    Returns a record dict (see run_sweep_genetic2.py README for the fields).
-    """
-    search_options = dict(objective_mechanism=objective_mechanism, optimizer=optimizer,
-                          ga_options=ga_options, ga_seed=ga_seed, num_restarts=num_restarts,
-                          genetic_form=genetic_form,
-                          best_response_options=best_response_options, verbose=verbose)
-    result = optimize_threshold(prepared.training, threshold_form, num_bidders, num_goods,
-                                initial_solution=initial_solution, warm_starts=warm_starts,
-                                **search_options)
-    form, parameters, training_welfare = result["form"], result["parameters"], result["welfare"]
-    threshold = form.threshold(parameters)
-    ivcg_rule = _designed_ivcg_rule(prepared, prepared.training, threshold, num_bidders,
-                                    num_goods)
-    first_order = first_order_check(prepared.training, threshold, num_bidders, num_goods,
-                                    objective_mechanism)
-
-    evaluation = evaluate_threshold(prepared.evaluation, threshold, num_bidders, num_goods,
-                                    num_simulated_draws=num_simulated_draws,
-                                    random_seed=simulation_seed, ivcg_scoring_rule=ivcg_rule)
-
-    bootstrap = None
-    if prepared.is_empirical and num_bootstrap > 0:
-        settings = prepared.settings
-        bootstrap = bootstrap_welfare(
-            prepared.test_sample, threshold, num_bidders, num_goods, num_resamples=num_bootstrap,
-            seed=bootstrap_seed, smoothing=settings["evaluation_smoothing"],
-            bandwidth_scale=settings["bandwidth_scale"], ivcg_scoring_rule=ivcg_rule,
-            num_externality_nodes=settings["num_externality_nodes"],
-            num_valuation_cells=settings["num_valuation_cells"])
-
-    sensitivity = None
-    if (prepared.is_empirical and sensitivity_bandwidth_scales
-            and prepared.settings["smoothing"] == "kernel"):
-        sensitivity = bandwidth_sensitivity(
-            prepared, sensitivity_bandwidth_scales, threshold_form, num_bidders, num_goods,
-            search_options, base_result=(form.spec(parameters), training_welfare, evaluation))
-
-    refinement = None
-    if grid_refinement and not prepared.is_empirical:
-        settings = prepared.settings
-        refinement = grid_refinement_check(
-            settings["family"], threshold, num_bidders, num_goods,
-            externality_scale=settings["externality_scale"], **settings["grid"],
-            **settings["family_options"])
-
-    sample_externalities, sample_valuations = prepared.evaluation.sample_type_points(
-        num_type_sample, np.random.default_rng(0))
-    return {
-        "source": prepared.source,
-        "distribution_settings": prepared.settings,
-        "objective_mechanism": objective_mechanism,
-        "optimizer": result["optimizer"],
-        "threshold_form": form.label,
-        "threshold_spec": form.spec(parameters),
-        "tau_parameters": list(parameters),
-        "polynomial_degree": form.size if form.kind == "polynomial" else None,
-        "tau_coeffs": list(parameters) if form.kind == "polynomial" else None,
-        "num_bidders": num_bidders,
-        "num_goods": num_goods,
-        "training_welfare": training_welfare,
-        "trajectory": result["trajectory"],
-        "trajectory_forms": result["trajectory_forms"],
-        "search_summaries": result["search_summaries"],
-        "first_order_check": first_order,
-        "evaluation": evaluation,
-        "bootstrap": bootstrap,
-        "grid_refinement": refinement,
-        "bandwidth_sensitivity": sensitivity,
-        "type_sample": {"externalities": sample_externalities, "valuations": sample_valuations},
-        "ga_seed": ga_seed,
-        "num_restarts": num_restarts,
-        "simulation_seed": simulation_seed,
-        "bootstrap_seed": bootstrap_seed,
-    }
-
-
 def _sensitivity_row(scale, spec, training_welfare, welfare):
     row = {"bandwidth_scale": scale, "tau_parameters": list(spec["parameters"]),
            "threshold_spec": spec, "training_welfare": training_welfare}
@@ -333,11 +231,15 @@ def bandwidth_sensitivity(prepared, bandwidth_scales, threshold_form, num_bidder
                           search_options, base_result):
     """Redesign τ (and the IVCG-PA scores) on the training half smoothed with each
     bandwidth multiplier, and evaluate each design exactly on the same evaluation
-    distribution. One row per bandwidth scale, including the base design."""
+    distribution. One row per bandwidth scale, including the base design.
+
+    search_options: keyword options of optimize_threshold
+    base_result: (threshold spec, training welfare, mechanism -> exact welfare) of
+    the base design"""
     settings = prepared.settings
-    base_spec, base_training_welfare, base_evaluation = base_result
+    base_spec, base_training_welfare, base_welfare = base_result
     rows = [_sensitivity_row(settings["bandwidth_scale"], base_spec, base_training_welfare,
-                             {m: base_evaluation.exact[m]["welfare"] for m in MECHANISMS})]
+                             base_welfare)]
     for scale in bandwidth_scales:
         if scale == settings["bandwidth_scale"]:
             continue

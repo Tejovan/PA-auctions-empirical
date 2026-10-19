@@ -55,7 +55,7 @@ Each start is run to convergence and the best result is kept. Starts:
                     competition, Prop. 5.6 of the core draft)
   "short_genetic"   a short genetic search in the same form (knots6 for nodes)
 plus any warm starts passed as threshold functions (for example the genetic
-search's result, or the optimum at the previous externality scale of a sweep).
+search's result, or the optimum at the previous externality scale of a run).
 
 Diagnostics: first_order_check reports, at each externality node, the marginal
 welfare of the threshold type, the penalty, the own-allocation charge −e X^τ,
@@ -371,7 +371,7 @@ def ascend(type_distribution, form, parameters, num_bidders, num_goods, mechanis
 
     welfare = welfare_of(parameters)
     history = [{"iteration": 0, "welfare": welfare, "step": None, "gap": None,
-                "parameters": parameters.tolist()}]
+                "parameters": parameters.tolist(), "time": time.time()}]
     small_gains = 0
     for iteration in range(1, max_iterations + 1):
         target, current_payoff, best_payoff, _ = best_response(
@@ -386,13 +386,13 @@ def ascend(type_distribution, form, parameters, num_bidders, num_goods, mechanis
                 break
         if accepted is None:
             history.append({"iteration": iteration, "welfare": welfare, "step": 0.0, "gap": gap,
-                            "parameters": parameters.tolist()})
+                            "parameters": parameters.tolist(), "time": time.time()})
             break
         step, parameters, new_welfare = accepted
         gain = (new_welfare - welfare) / max(abs(welfare), 1e-300)
         welfare = new_welfare
         history.append({"iteration": iteration, "welfare": welfare, "step": step, "gap": gap,
-                        "parameters": parameters.tolist()})
+                        "parameters": parameters.tolist(), "time": time.time()})
         if verbose:
             print(f"    iteration {iteration:3d}  welfare={welfare:.10g}  step={step:g}  "
                   f"best-response gap={gap:.3g}")
@@ -501,7 +501,12 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
     if verbose:
         print(f"Best-response ascent ({objective_mechanism}, {form.label}, "
               f"{form.num_parameters} parameters, {len(start_list)} starts)")
-    best, summaries, trajectory = None, [], []
+    best, summaries, trajectory, trace = None, [], [], []
+
+    def record_trace(name, entries):
+        trace.extend({"stage": name, "iteration": entry["iteration"], "time": entry["time"],
+                      "welfare": float(entry["welfare"])} for entry in entries)
+
     for name, threshold in start_list:
         begin = time.time()
         initial = form.project(threshold, type_distribution)
@@ -510,6 +515,7 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
                                               relative_tolerance, verbose=False)
         start_welfare, iterations = history[0]["welfare"], len(history) - 1
         trajectory.extend(entry["parameters"] for entry in history)
+        record_trace(name, history)
         polish_gains = []
         rounds = 0 if type_distribution.is_atomic else polish_rounds
         for _ in range(rounds):
@@ -524,6 +530,7 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
                                                   max_iterations, relative_tolerance)
             iterations += len(history) - 1
             trajectory.extend(entry["parameters"] for entry in history)
+            record_trace(name, history)
         summaries.append({"start": name, "start_welfare": start_welfare,
                           "welfare": welfare, "iterations": iterations,
                           "polish_gains": polish_gains,
@@ -535,7 +542,8 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
                   f"({time.time() - begin:.1f}s)")
         if best is None or welfare > best[1]:
             best = (parameters, welfare)
-    summary = {"optimizer": "best_response", "form": form.spec(best[0]), "starts": summaries}
+    summary = {"optimizer": "best_response", "form": form.spec(best[0]), "starts": summaries,
+               "trace": trace}
     return SearchResult([float(p) for p in best[0]], float(best[1]), trajectory, summary)
 
 

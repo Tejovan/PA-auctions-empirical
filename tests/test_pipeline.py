@@ -16,7 +16,7 @@ from audited_auctions.empirical import (
     split_sample,
 )
 from audited_auctions.genetic_search import run_genetic_search
-from audited_auctions.pipeline import optimize_and_evaluate, prepare_distributions
+from audited_auctions.pipeline import prepare_distributions
 from audited_auctions.smoothing import kernel_density_distribution
 from audited_auctions.threshold_functions import polynomial_threshold
 
@@ -99,20 +99,6 @@ def test_genetic_search_recovers_example_n_optimum():
     assert tau_at_harm == pytest.approx(0.8, abs=1e-4)
 
 
-def test_pipeline_synthetic_cell():
-    prepared = prepare_distributions("independent", num_externality_nodes=41,
-                                     num_valuation_cells=60)
-    record = optimize_and_evaluate(prepared, 1, 4, 1, ga_options={"num_generations": 10,
-                                                                 "sol_per_pop": 10,
-                                                                 "num_parents_mating": 4},
-                                   ga_seed=0, num_simulated_draws=500, simulation_seed=0,
-                                   grid_refinement=True, verbose=False)
-    gains = record["evaluation"].welfare_gains_over_vcg()
-    assert record["bootstrap"] is None
-    assert gains["first_best"]["share_of_first_best_gain"] == pytest.approx(1.0)
-    assert record["grid_refinement"]["welfare_change"].abs().max() < 1e-2
-
-
 @pytest.mark.parametrize("family_or_population", ["harmful_middle", "population"])
 def test_fixed_ivcg_rule_from_same_distribution_reproduces_ironing(family_or_population):
     from audited_auctions import evaluate_threshold, ivcg_scoring_rule_for, population_distribution
@@ -132,29 +118,6 @@ def test_fixed_ivcg_rule_from_same_distribution_reproduces_ironing(family_or_pop
                                                                rel=1e-9, abs=1e-12)
     np.testing.assert_allclose(fixed.penalty_curves["ivcg_pa"], own.penalty_curves["ivcg_pa"],
                                rtol=1e-9, atol=1e-12)
-
-
-def test_empirical_cell_atomic_evaluation_and_sensitivity(tmp_path):
-    import pandas as pd
-    sample = lognormal_sample(3000, seed=2)
-    path = tmp_path / "population.csv"
-    pd.DataFrame({"e_score": sample.externalities, "v_score": sample.valuations}).to_csv(
-        path, index=False)
-    prepared = prepare_distributions(str(path), num_externality_nodes=61, num_valuation_cells=80,
-                                     evaluation_truncation_quantile=1.0)
-    assert prepared.training.kind == "piecewise_uniform"
-    assert prepared.evaluation.kind == "atomic"
-    # Test rows untruncated (evaluation_truncation_quantile = 1); training truncated at 0.995.
-    assert prepared.test_sample.settings["num_rows_dropped_above_bound"] == 0
-    assert prepared.training_sample.settings["num_rows_dropped_above_bound"] > 0
-    record = optimize_and_evaluate(
-        prepared, 1, 4, 1, ga_options={"num_generations": 8, "sol_per_pop": 8,
-                                       "num_parents_mating": 4},
-        ga_seed=0, num_simulated_draws=300, simulation_seed=0, num_bootstrap=4,
-        sensitivity_bandwidth_scales=(0.5, 2.0), verbose=False)
-    assert record["evaluation"].settings["ivcg_design"] == "external"
-    assert list(record["bandwidth_sensitivity"].index) == [0.5, 1.0, 2.0]
-    assert len(record["bootstrap"].resamples) == 4
 
 
 def test_tau_independent_results_are_cached_and_unchanged():

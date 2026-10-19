@@ -1,0 +1,51 @@
+# Standard test run: exercises every part of the code on small grids in about a minute.
+#   python run.py configs/standard_test.toml --yes
+# Two distributions (a synthetic one where ironing binds, and the tweet data at two ζ),
+# two bidder counts, two good counts, two threshold forms, both objectives, both methods.
+# Short searches and coarse grids: thresholds are good, not fully optimal.
+
+kind = "optimize"
+name = "standard-test"
+description = "Standard test of the code: all run features on small grids."
+
+[[distributions]]
+source = "harmful_middle"        # v ~ U[0,1]; harmful types in a middle band; ironing binds
+num_externality_nodes = 41
+num_valuation_cells = 60
+
+[[distributions]]
+source = "tweets"                # Community Notes data, data/samples/g_full_tweets.csv
+externality_scales = [5.0, 50.0]
+num_externality_nodes = 61
+num_valuation_cells = 100
+
+[markets]
+num_bidders = [4, 8]
+num_goods = [1, 2]
+
+[design]
+threshold_forms = ["poly1", "knots4"]
+objectives = ["vcg_pa", "ivcg_pa"]
+
+[[optimizers]]
+label = "ga"                     # genetic stage + Nelder–Mead, short
+method = "genetic"
+num_generations = 15
+population_size = 16
+num_parents_mating = 6
+stall_generations = 8
+num_local_starts = 2
+local_max_evaluations = 60
+
+[[optimizers]]
+label = "br"                     # best-response ascent (knots4 only; poly1 is skipped)
+method = "best_response"
+max_iterations = 20
+
+[evaluation]
+num_simulated_auctions = 2000
+num_bootstrap = 50
+
+[checks]
+grid_refinement = true
+bandwidth_sensitivity = [0.5, 2.0]

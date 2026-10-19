@@ -211,8 +211,8 @@ def load_population_csv(csv_path, externality_scale=1.0, valuation_scale=1.0):
     """(externalities, valuations) arrays from a CSV with columns e_score and v_score.
 
     The externality is e = externality_scale * e_score (the externality cost ζ
-    of the sweep scripts); the valuation is v = valuation_scale * v_score (the
-    action cost of the sweep scripts).
+    of a run configuration); the valuation is v = valuation_scale * v_score (the
+    value of one action).
     """
     data = pd.read_csv(csv_path, usecols=["e_score", "v_score"])
     return (

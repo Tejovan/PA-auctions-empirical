@@ -11,13 +11,12 @@ Given a joint distribution H of bidder types (e, v) and a common participation t
 
 All four are score-based auctions: the k participants with the highest positive scores win, ties are broken uniformly at random, and payments are critical-value (Myerson) payments, so each auction is DSIC. The notation follows the WEB27 core draft (`WEB27/drafting/web27_aa_1p_core/`).
 
-The penalties are outputs, not inputs: since τ is given, the package computes the penalty function that induces τ in each participant-audit auction. It also searches for the τ that maximizes exact expected welfare, in a polynomial, knot, bin or per-node form, by genetic search or best-response ascent, and runs the full synthetic and empirical pipelines (`pipeline.py`).
+The penalties are outputs, not inputs: since τ is given, the package computes the penalty function that induces τ in each participant-audit auction. It also searches for the τ that maximizes exact expected welfare, in a polynomial, knot, bin or per-node form, by genetic search or best-response ascent. Whole experiments (sets of distributions, markets and designs, with saved data, checks and figures) run from configuration files through `run.py` and the `experiments` subpackage; see the top-level README.
 
 ## Quick start
 
 ```python
 from audited_auctions import evaluate_threshold, synthetic_distribution, polynomial_threshold
-from audited_auctions.figures import plot_threshold_and_penalties, plot_welfare_distributions
 
 distribution = synthetic_distribution("harm_rises")      # piecewise-uniform, v ∈ [0, v̄]
 threshold = polynomial_threshold([0.5, -1.0])            # τ(e) = 0.5 − e
@@ -25,11 +24,9 @@ evaluation = evaluate_threshold(distribution, threshold, num_bidders=8, num_good
                                 num_simulated_draws=20000, random_seed=0)
 print(evaluation.summary_table())          # exact outcomes, gains over VCG, simulated means
 print(evaluation.welfare_gains_over_vcg()) # W_m − W_VCG and share of the first-best gain
-plot_threshold_and_penalties(evaluation, distribution, "threshold_penalties.png")
-plot_welfare_distributions(evaluation, "welfare_distributions.png")
 ```
 
-Command line: `python evaluate_threshold.py --distribution harm_rises --tau-coefficients 0.5,-1 --num-bidders 8 --num-goods 2` (one τ), `python Collateralized_Auction_genetic2.py ...` (optimize one cell), `python run_sweep_genetic2.py ...` (sweeps); see the top-level README.
+Experiments with figures: `python run.py configs/standard_test.toml` (top-level README).
 
 ## Modules
 
@@ -47,9 +44,13 @@ Command line: `python evaluate_threshold.py --distribution harm_rises --tau-coef
 | `genetic_search.py` | Genetic search over a form's parameters with the exact welfare objective: genetic stage, then Nelder–Mead refinement (default). |
 | `marginal_contribution.py` | Exact marginal contribution M^τ(e, v) = (v + e) X^τ(v) − L^τ(v) of a participating type for a fixed auction (rival welfare loss L^τ), as Chebyshev series between breakpoints. |
 | `best_response_ascent.py` | Best-response ascent over knots, bins or nodes, with an exact-gradient polish; `first_order_check` (zero marginal contribution and Pigouvian penalty at each threshold). |
-| `pipeline.py` | One optimization-and-evaluation cell: `prepare_distributions`, `optimize_threshold`, `optimize_and_evaluate`, `bandwidth_sensitivity`. |
-| `figures.py` | `plot_threshold_and_penalties`, `plot_welfare_distributions`. |
-| `sweep_support.py` | Glue for `run_sweep_genetic2.py` and `post_optimization_analysis.py`. |
+| `pipeline.py` | Building blocks of a combination: `prepare_distributions` (training and evaluation distributions), `optimize_threshold` (search in a form with either optimizer), `designed_ivcg_rule`, `bandwidth_sensitivity`. |
+| `figures.py` | Every figure of a run, drawn from saved data (style: fixed color and line style per mechanism, light type distribution behind, shared legends). |
+| `experiments/config.py` | TOML configurations: defaults, validation, expansion into combinations and folder names. |
+| `experiments/compute.py` | One combination: τ (searched or given), exact outcomes, simulation, bootstrap, diagnostics, checks; writes `tau.json`, `tau.csv`, `results.json`, `first-order.csv`, `data.npz`. |
+| `experiments/runner.py` | A run: plan, time estimate, parallel computation, `run.toml`, `summary.csv`, `checks.csv`, `runs/index.csv`. |
+| `experiments/report.py` | Figures and README of a run from its saved files (`python run.py --report`). |
+| `experiments/provenance.py` | Git version, software versions, host (local or BU SCC), data hashes; TOML writer. |
 
 ## Type distributions
 
@@ -86,12 +87,12 @@ The mixtures a–f and h are those of `legacy/alternate_distributions.ipynb` wit
 `empirical.py` and `pipeline.prepare_distributions` (used when the source is a CSV with columns `e_score`, `v_score`):
 
 1. **Scale** (`load_empirical_sample`): e = ζ e_score, v = action_cost × v_score; rows with v ≤ 0 are dropped.
-2. **Split** (`split_sample`): a random train/test split of all rows (default ½/½) with a seed common to all sweep cells. The split is made before truncation, so it does not depend on the truncation level.
+2. **Split** (`split_sample`): a random train/test split of all rows (default ½/½) with a seed common to all combinations of a run (`[seeds] split`). The split is made before truncation, so it does not depend on the truncation level.
 3. **Truncate** (`valuation_bound`, `truncate_sample`): each half drops rows with v above a quantile of the full sample's valuations; that quantile is the bound v̄. Training: `truncation_quantile` (default 0.995; on the Community Notes data the top 0.5% is 60 rows from 393k to 1.6M that would dominate the design and double the bootstrap noise). Test: `evaluation_truncation_quantile` (default the same; 1.0 keeps every row, a robustness check that reports welfare for the whole population at the cost of more noise).
 4. **Design distribution** (training half): kernel-smoothed by default (`--smoothing none` keeps atoms). τ is optimized on it, and the IVCG-PA scoring rule ω̄^τ is ironed on it (`ivcg_scoring_rule_for`).
 5. **Evaluation distribution** (test half): the atomic rows by default (`--evaluation smoothed` smooths them like the training half). τ and the IVCG-PA scoring rule designed on the training half are applied unchanged (`ivcg_scoring_rule=` arguments), so evaluation is out of sample and has no smoothing bias. Penalties r(e) are computed on the evaluation distribution, the population that plays the auction.
 6. **Bootstrap** (`bootstrap_welfare`): resample the test rows with replacement and recompute exact welfare of all four mechanisms, with τ and the IVCG-PA scoring rule fixed at the training design. Reports per-resample welfare, paired gains over VCG and shares of the first-best gain, and percentile intervals. Fast on atomic test rows (no smoothing per resample).
-7. **Bandwidth sensitivity** (`pipeline.bandwidth_sensitivity`, `--sensitivity-bandwidths 0.5,2`): redo the design (genetic search and IVCG-PA scores) on the training half smoothed with each bandwidth multiplier and evaluate each design exactly on the same test rows. Shows whether the results depend on the smoothing choice; it costs one extra genetic search per scale.
+7. **Bandwidth sensitivity** (`pipeline.bandwidth_sensitivity`, configuration `[checks] bandwidth_sensitivity = [0.5, 2.0]`): redo the design (the search and the IVCG-PA scores) on the training half smoothed with each bandwidth multiplier and evaluate each design exactly on the same test rows. Shows whether the results depend on the smoothing choice; it costs one extra search per scale.
 
 **Why IVCG-PA is designed on the training half.** With distinct valuations, each valuation level of an atomic population is a single row, so ŵ^τ(v) = v + e of that row: IVCG-PA ironed on the rows it is evaluated on would rank bidders by their true welfare contribution and approach the first best in sample. Designing the scoring rule on the smoothed training half and applying it to the test rows avoids this.
 
@@ -124,7 +125,7 @@ This replaces the old estimator R(e) = A(e)(τ(e) − P(e)) built from realized 
 
 **Welfare comparisons.** All comparisons are gains over unaudited VCG: `welfare_gains_over_vcg()` gives W_m − W_VCG and the share of the first-best gain, (W_m − W_VCG)/(W_FB − W_VCG); the summary table and the paired per-auction differences use the same baseline.
 
-**Caching of τ-independent results.** Everyone participates in VCG and the first best, so their outcomes do not depend on τ. `tau_independent_outcomes` computes them once per (distribution, n, k) and stores them in `distribution.cache`; every τ evaluated on the same distribution object (all degrees, objectives and bandwidth designs of a sweep cell, which share the distribution of their ζ) reuses them. The bootstrap does the same per resample: resamples are determined by the seed, so VCG and first-best welfare of each resample are stored in `sample.cache` and reused for every τ bootstrapped with that seed (about 5× faster for the second and later τ). Transformed distributions (`with_externality_scale`, `dataclasses.replace`) start with an empty cache.
+**Caching of τ-independent results.** Everyone participates in VCG and the first best, so their outcomes do not depend on τ. `tau_independent_outcomes` computes them once per (distribution, n, k) and stores them in `distribution.cache`; every τ evaluated on the same distribution object (all designs of a run with the same distribution and ζ, in the same worker process) reuses them. The bootstrap does the same per resample: resamples are determined by the seed, so VCG and first-best welfare of each resample are stored in `sample.cache` and reused for every τ bootstrapped with that seed (about 5× faster for the second and later τ). Transformed distributions (`with_externality_scale`, `dataclasses.replace`) start with an empty cache.
 
 **Simulation.** Used only for per-auction welfare distributions and as a check of the exact values. Each draw is one auction; allocations are probabilities (the tie-breaking lottery is averaged out); payments are critical-value payments given the realized rival bids. All mechanisms run on the same draws (common random numbers). For piecewise-uniform cells, valuations are drawn uniformly within the cell.
 
@@ -163,7 +164,7 @@ Each iteration:
 
 It stops when no step raises W, when two consecutive relative gains are below `relative_tolerance` (10⁻¹⁰), or after `max_iterations` (100). A best response moves one bidder while the common τ moves all n, so the ascent can stop short of the best common τ (Thm 5.2: the best common τ satisfies the first-order condition but need not be a profile of best responses). **Gradient polish:** L-BFGS-B on W with the exact gradient ∂W/∂τ(e_j) = −n f_j(τ_j) M^τ(e_j, τ_j), chained to the form's parameters (knots: interpolation weights, cutoff fixed; bins: summed), then more ascent if the polish gained; at most `polish_rounds` (3) rounds; piecewise-uniform distributions only.
 
-**Starts:** `zero` (τ ≡ 0), `no_competition` (τ(e) = max(0, −e), excluded if −e > v̄; first best without competition, Prop. 5.6), optional `short_genetic` (a 40-generation genetic search in the same form, `knots6` for `nodes`), plus warm starts: the genetic search's result (optimizer `genetic+best_response`) and, in sweeps with `--warm-start`, the optimum at the previous ζ rescaled to the new externality scale (τ(e) = τ_prev(e ζ_prev/ζ)). Each start runs to convergence; the best is kept. The genetic search and the ascent are independent: `best_response` needs no genetic run.
+**Starts:** `zero` (τ ≡ 0), `no_competition` (τ(e) = max(0, −e), excluded if −e > v̄; first best without competition, Prop. 5.6), optional `short_genetic` (a 40-generation genetic search in the same form, `knots6` for `nodes`), plus warm starts: the genetic search's result (optimizer `genetic+best_response`) and, with `warm_start_across_zeta = true`, the optimum at the previous ζ rescaled to the new externality scale (τ(e) = τ_prev(e ζ_prev/ζ)). Each start runs to convergence; the best is kept. The genetic search and the ascent are independent: `best_response` needs no genetic run.
 
 **Speed and accuracy** (151 × 150 grid, n = 8, k = 2): `nodes` converges in 0.1–1.1 s (VCG-PA and IVCG-PA, two starts), with interior marginal contribution below 3·10⁻⁵ and best-response gap below 10⁻¹¹; `knots6` in 1–3 s, reaching the Nelder–Mead optimum of the same form to 10⁻¹¹; Example N's optimum t* = 4c/3 exactly in every form. On the Community Notes data (241 nodes, ζ = 5, n = 8, k = 1) `nodes` takes 0.2 s.
 
@@ -171,7 +172,7 @@ It stops when no step raises W, when two consecutive relative gains are below `r
 
 ### Pipeline
 
-`pipeline.optimize_threshold(training, form, n, k, objective_mechanism, optimizer)` runs the search; `optimizer` is `auto` (genetic for polynomials, best response otherwise), `genetic`, `best_response`, or `genetic+best_response` (genetic search in `genetic_form`, default the same form or `knots6` for `nodes`, then the ascent with the genetic result as an extra start). `optimize_and_evaluate(prepared, form, n, k, ...)` adds the evaluation:
+`pipeline.optimize_threshold(training, form, n, k, objective_mechanism, optimizer)` runs the search; `optimizer` is `auto` (genetic for polynomials, best response otherwise), `genetic`, `best_response`, or `genetic+best_response` (genetic search in `genetic_form`, default the same form or `knots6` for `nodes`, then the ascent with the genetic result as an extra start). `experiments/compute.py` adds the evaluation of each combination:
 
 The objective is the **exact** expected welfare of the objective mechanism on the distribution (`expected_welfare`; one exact evaluation of all four mechanisms takes 10–16 ms on the default 151 × 150 grid), not an average over simulated auctions, so it has no Monte Carlo noise and does not fit a particular sample of auctions.
 
@@ -184,16 +185,9 @@ and in both cases one simulation of `num_simulated_draws` auctions on the evalua
 
 ## Figures
 
-`plot_threshold_and_penalties(evaluation, distribution, path)`:
-- **(a)** type distribution in the (e, v) plane (contours for synthetic densities; log shading for smoothed and atomic populations), τ(e) with the abstention region shaded, and the first-best boundary v = −e.
-- **(b)** penalty functions r(e) of VCG-PA and IVCG-PA, and the recipient penalty −e.
-- **(c)** exact expected welfare of the four mechanisms.
+`figures.py` draws the figures of a run from the files that `experiments/compute.py` saves; the list of figures, the folder layout and the checks are in the top-level README. Exact expected values are marked in every distribution figure; bootstrap percentile intervals over test rows (empirical data) give the uncertainty of the expected values, and simulated auctions (the same auctions for every mechanism) give the per-auction distributions. Paired differences from VCG are exactly zero in many auctions (same winners); the figures show the density of the nonzero differences scaled by their share and state the share of zeros.
 
-`plot_welfare_distributions(evaluation, path)`:
-- **(a)** Gaussian-KDE densities of per-auction welfare, with means.
-- **(b)** paired per-auction welfare gains over unaudited VCG (VCG-PA − VCG, IVCG-PA − VCG, first best − VCG). Differences are exactly zero in many auctions (same winners); the panel shows the density of the nonzero differences scaled by their share and reports the share of zeros.
-
-Colors are a fixed, color-vision-checked assignment per mechanism (`MECHANISM_COLORS`); each series also has its own line style.
+Accounting identity used in the expected-outcomes figure, for every mechanism and auction: valuation part Σvx = bidder net utility Σu + revenue Σp + penalties Σr, and welfare W = Σvx + Σex. For the first best, revenue is the critical payment in effective-valuation units and the penalty is −e per unit of allocation, so the identity holds there too.
 
 ## Tests
 
@@ -203,7 +197,9 @@ Colors are a fixed, color-vision-checked assignment per mechanism (`MECHANISM_CO
 
 `tests/test_audited_auctions.py`: Example T (ironing pools valuations 2 and 3; IVCG-PA welfare 40/16; first best 41/16; VCG-PA ≤ 39/16); the second-price penalty τ² (exact for uniform valuations); Example N welfare and penalty (exact); exact ironing of piecewise-linear ŵ^τ against ironing of a fine atomic discretization; ironing binds and helps in `harmful_middle`; exact expectations equal simulated means for all mechanisms and metrics (atomic and piecewise-uniform); a threshold type is indifferent (its simulated auction-utility equals r(e)); IVCG-PA ≥ VCG-PA; inverses of the piecewise-linear score; negative valuations are rejected.
 
-`tests/test_pipeline.py`: every family has bounded non-negative continuous valuations; variance-preserving smoothing keeps the moments; the split is deterministic; bootstrap gains are paired; smoothed and atomic VCG welfare agree; the genetic search recovers the Example N optimum t* = 4c/3 (to 10⁻⁴ in τ and 10⁻¹⁰ in welfare with Nelder–Mead refinement); a synthetic pipeline cell with grid refinement; an IVCG-PA scoring rule designed on a distribution and applied to the same distribution reproduces its ironing exactly (welfare, revenue, penalties; atomic and piecewise uniform); an empirical cell with atomic evaluation, untruncated test rows, bootstrap and bandwidth sensitivity; cached VCG and first-best results equal fresh ones and are reused across τ and in the bootstrap.
+`tests/test_pipeline.py`: every family has bounded non-negative continuous valuations; variance-preserving smoothing keeps the moments; the split is deterministic; bootstrap gains are paired; smoothed and atomic VCG welfare agree; the genetic search recovers the Example N optimum t* = 4c/3 (to 10⁻⁴ in τ and 10⁻¹⁰ in welfare with Nelder–Mead refinement); an IVCG-PA scoring rule designed on a distribution and applied to the same distribution reproduces its ironing exactly (welfare, revenue, penalties; atomic and piecewise uniform); cached VCG and first-best results equal fresh ones and are reused across τ and in the bootstrap.
+
+`tests/test_experiments.py`: configuration errors name the problem; expansion runs every valid combination and skips invalid form–method pairs; the TOML run record re-reads to the same configuration; a synthetic combination writes all files, satisfies the accounting identity and passes its checks, and its `tau.json` rebuilds τ exactly; an empirical combination with bootstrap of every metric and bandwidth sensitivity; a whole optimize run with figures and README, then an evaluate run that reuses its optima (`from_run`) and reproduces their welfare.
 
 `tests/test_best_response.py`: form labels, spec round trip and exclusion cutoff; projection keeps the excluded prefix; marginal contribution equals Example N's formula; the rival welfare loss equals the Clarke payment without externalities (n, k ∈ {(3,1), (8,2), (5,3)}); the gradient equals finite differences (VCG-PA, IVCG-PA); best-response ascent recovers Example N's optimum in the nodes, knots and bins forms; interior thresholds at the nodes optimum have zero marginal contribution and zero best-response gap; genetic+best_response ≥ genetic, nodes ≥ knots; optimizer–form combinations are validated.
 

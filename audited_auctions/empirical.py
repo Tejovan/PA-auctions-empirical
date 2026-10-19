@@ -43,8 +43,10 @@ from .threshold_evaluation import (
     AUDITED_MECHANISMS,
     MECHANISMS,
     PARTICIPANT_AUDIT_MECHANISMS,
+    OUTCOME_METRICS,
     TAU_INDEPENDENT_MECHANISMS,
     build_mechanism_model,
+    exact_outcomes,
     tau_independent_outcomes,
 )
 from .threshold_functions import as_threshold_function
@@ -173,16 +175,18 @@ class BootstrapResult:
 
 def bootstrap_welfare(sample, threshold_function, num_bidders, num_goods, num_resamples=200,
                       seed=0, smoothing="none", bandwidth_scale=1.0, confidence_level=0.95,
-                      ivcg_scoring_rule=None, **grid_options):
+                      ivcg_scoring_rule=None, all_outcomes=False, **grid_options):
     """Bootstrap of exact expected welfare over resamples of the rows of `sample`.
 
     smoothing: how each resample's distribution is built ("none": atomic, the
     default evaluation; "kernel": re-smoothed). ivcg_scoring_rule: the IVCG-PA
     design held fixed across resamples (None: iron each resample).
+    all_outcomes: also every metric of OUTCOME_METRICS (revenue, penalties,
+    welfare parts, bidder utility; about twice the time).
 
     Columns of the result: welfare_<mechanism>, gain_<mechanism> (paired gain
     over VCG on the same resample), share_<mechanism> (share of the first-best
-    gain over VCG).
+    gain over VCG); with all_outcomes, <metric>_<mechanism> for every metric.
     """
     threshold_function = as_threshold_function(threshold_function)
     rng = np.random.default_rng(seed)
@@ -199,13 +203,21 @@ def bootstrap_welfare(sample, threshold_function, num_bidders, num_goods, num_re
         if index in baselines:
             distribution.cache.update(baselines[index])
         try:
-            welfare = exact_welfare_by_mechanism(distribution, threshold_function, num_bidders,
-                                                 num_goods, ivcg_scoring_rule)
+            if all_outcomes:
+                outcomes = exact_outcomes(distribution, threshold_function, num_bidders,
+                                          num_goods, ivcg_scoring_rule)
+                welfare = {m: outcomes[m]["welfare"] for m in MECHANISMS}
+            else:
+                welfare = exact_welfare_by_mechanism(distribution, threshold_function,
+                                                     num_bidders, num_goods, ivcg_scoring_rule)
         except ValueError:  # nobody participates in this resample
             continue
         baselines[index] = {key: value for key, value in distribution.cache.items()
-                            if key[-1] == "welfare"}
+                            if key[-1] in ("welfare", "outcomes")}
         row = {f"welfare_{m}": welfare[m] for m in MECHANISMS}
+        if all_outcomes:
+            row.update({f"{metric}_{m}": outcomes[m][metric]
+                        for metric in OUTCOME_METRICS for m in MECHANISMS})
         first_best_gain = welfare["first_best"] - welfare["vcg"]
         for mechanism in AUDITED_MECHANISMS:
             gain = welfare[mechanism] - welfare["vcg"]

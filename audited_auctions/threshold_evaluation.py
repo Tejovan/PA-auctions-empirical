@@ -193,7 +193,7 @@ def tau_independent_outcomes(type_distribution, mechanism, num_bidders, num_good
     Everyone participates in these mechanisms, so their outcomes do not depend
     on τ; they are cached on the distribution (type_distribution.cache) and
     reused by every τ evaluated on it (all degrees, objectives and bandwidth
-    designs of a sweep cell). welfare_only skips revenue (no allocation integral).
+    designs of a run with the same distribution). welfare_only skips revenue (no allocation integral).
     Returns a copy of the expected_outcomes dict, or the welfare (a float).
     """
     if mechanism not in TAU_INDEPENDENT_MECHANISMS:
@@ -271,6 +271,58 @@ def default_externality_grid(type_distribution, num_points=400, tail_probability
     return np.linspace(lower, upper, num_points)
 
 
+# Expected outcomes reported per mechanism: those of ScoreAuctionModel.expected_outcomes,
+# the penalty paid, and the bidders' net utility. The accounting identity
+#   valuation_welfare = bidder_utility + revenue + penalty_paid
+# holds for every mechanism (welfare = valuation_welfare + externality_welfare).
+OUTCOME_METRICS = ("welfare", "valuation_welfare", "externality_welfare", "revenue",
+                   "penalty_paid", "bidder_utility", "num_participants", "num_allocated")
+
+
+def _exact_outcomes_and_models(type_distribution, threshold_function, num_bidders, num_goods,
+                               ivcg_scoring_rule=None):
+    """Exact outcomes of the four mechanisms, the participant-audit models and their
+    penalty tables. VCG and the first best do not depend on τ: their outcomes are
+    cached on the distribution."""
+    models = {
+        mechanism: build_mechanism_model(mechanism, type_distribution, threshold_function,
+                                         num_bidders, num_goods, ivcg_scoring_rule)
+        for mechanism in PARTICIPANT_AUDIT_MECHANISMS
+    }
+    cell_participation_mass = models["vcg_pa"].cell_participation_mass
+    penalty_tables = {
+        mechanism: {"allocation_integral": models[mechanism].allocation_integral_function,
+                    "maximum_valuation": type_distribution.maximum_valuation}
+        for mechanism in PARTICIPANT_AUDIT_MECHANISMS
+    }
+    exact = {mechanism: (models[mechanism].expected_outcomes()
+                         if mechanism in models
+                         else tau_independent_outcomes(type_distribution, mechanism, num_bidders,
+                                                       num_goods))
+             for mechanism in MECHANISMS}
+    exact["vcg"]["penalty_paid"] = 0.0
+    cell_thresholds = threshold_function(type_distribution.externalities)
+    for mechanism in PARTICIPANT_AUDIT_MECHANISMS:
+        cell_penalties = penalty_from_table(penalty_tables[mechanism], cell_thresholds)
+        exact[mechanism]["penalty_paid"] = num_bidders * float(
+            np.sum(cell_participation_mass * cell_penalties))
+    # The recipient penalty −e is charged to winners: n E[x (−e)].
+    exact["first_best"]["penalty_paid"] = -exact["first_best"]["externality_welfare"]
+    for outcomes in exact.values():
+        outcomes["bidder_utility"] = (outcomes["valuation_welfare"] - outcomes["revenue"]
+                                      - outcomes["penalty_paid"])
+    return exact, models, penalty_tables
+
+
+def exact_outcomes(type_distribution, threshold_function, num_bidders, num_goods,
+                   ivcg_scoring_rule=None):
+    """mechanism -> {metric -> exact expected value} for the metrics in OUTCOME_METRICS."""
+    exact, _, _ = _exact_outcomes_and_models(type_distribution,
+                                             as_threshold_function(threshold_function),
+                                             num_bidders, num_goods, ivcg_scoring_rule)
+    return exact
+
+
 # ─── Main entry point ─────────────────────────────────────────────────────────
 
 
@@ -300,38 +352,13 @@ def evaluate_threshold(
                           (ivcg_scoring_rule_for); default: iron type_distribution
     """
     threshold_function = as_threshold_function(threshold_function)
-    # VCG and the first best do not depend on τ: their exact outcomes are cached
-    # on the distribution; only the participant-audit mechanisms are built here.
-    models = {
-        mechanism: build_mechanism_model(mechanism, type_distribution, threshold_function,
-                                         num_bidders, num_goods, ivcg_scoring_rule)
-        for mechanism in PARTICIPANT_AUDIT_MECHANISMS
-    }
-    cell_participation_mass = models["vcg_pa"].cell_participation_mass
+    exact, models, penalty_tables = _exact_outcomes_and_models(
+        type_distribution, threshold_function, num_bidders, num_goods, ivcg_scoring_rule)
     maximum_valuation = type_distribution.maximum_valuation
-    penalty_tables = {
-        mechanism: {"allocation_integral": models[mechanism].allocation_integral_function,
-                    "maximum_valuation": maximum_valuation}
-        for mechanism in PARTICIPANT_AUDIT_MECHANISMS
-    }
 
     def penalty_function(mechanism):
         return lambda externalities: penalty_from_table(
             penalty_tables[mechanism], threshold_function(externalities))
-
-    # Exact expectations --------------------------------------------------------
-    exact = {mechanism: (models[mechanism].expected_outcomes()
-                         if mechanism in models
-                         else tau_independent_outcomes(type_distribution, mechanism, num_bidders,
-                                                       num_goods))
-             for mechanism in MECHANISMS}
-    exact["vcg"]["penalty_paid"] = 0.0
-    for mechanism in PARTICIPANT_AUDIT_MECHANISMS:
-        cell_penalties = penalty_function(mechanism)(type_distribution.externalities)
-        exact[mechanism]["penalty_paid"] = num_bidders * float(
-            np.sum(cell_participation_mass * cell_penalties))
-    # The recipient penalty −e is charged to winners: n E[x (−e)].
-    exact["first_best"]["penalty_paid"] = -exact["first_best"]["externality_welfare"]
 
     # Curves for plotting -------------------------------------------------------
     if externality_grid is None:

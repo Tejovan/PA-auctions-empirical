@@ -7,10 +7,12 @@ participation threshold function τ(e). See audited_auctions/README.md.
 from .threshold_evaluation import (
     MECHANISM_LABELS,
     MECHANISMS,
+    OUTCOME_METRICS,
     ThresholdEvaluation,
     build_mechanism_model,
     build_mechanism_models,
     evaluate_threshold,
+    exact_outcomes,
     expected_welfare,
     grid_refinement_check,
     ivcg_scoring_rule_for,

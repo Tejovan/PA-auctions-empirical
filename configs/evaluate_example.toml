@@ -1,0 +1,34 @@
+# Evaluate given thresholds:  python run.py configs/evaluate_example.toml
+# Two hand-written thresholds on two synthetic families; uncomment from_run to evaluate
+# every optimum of an earlier run (same distribution label, ζ, n, k) again.
+
+kind = "evaluate"
+name = "given-thresholds"
+description = "Fixed thresholds τ(e) = max(0, −e) and τ(e) = 0.3 − e on two synthetic families."
+
+[[distributions]]
+source = "harm_rises"
+
+[[distributions]]
+source = "harmful_middle"
+
+[markets]
+num_bidders = [8]
+num_goods = [1, 2]
+
+[[thresholds]]
+label = "no-competition"         # first best without competition (core draft Prop 5.6)
+tabulated = {externalities = [-3.0, 0.0, 3.0], values = [3.0, 0.0, 0.0]}
+
+[[thresholds]]
+label = "linear"
+polynomial = [0.3, -1.0]
+
+# [[thresholds]]
+# from_run = "runs/2026-10-19_1400_optimize_standard-test"
+
+[evaluation]
+num_simulated_auctions = 5000
+
+[checks]
+grid_refinement = true

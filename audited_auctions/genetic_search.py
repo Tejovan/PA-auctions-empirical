@@ -10,7 +10,7 @@ Two stages (default):
 
 1. Genetic algorithm (global exploration). pygad with tournament selection,
    single-point crossover and Gaussian mutation scaled to each coefficient's
-   search range, as in the original Collateralized_Auction_genetic2.py; warm
+   search range, as in the original genetic search of this repository; warm
    start optional. It stops after num_generations, or earlier once the best
    welfare has not improved for stall_generations generations.
 2. Nelder–Mead refinement (local convergence). Started from the
@@ -100,7 +100,8 @@ class SearchResult:
 
     coefficients, welfare : best τ coefficients and their exact welfare
     trajectory            : every coefficient vector in each generation's population
-    summary               : genetic optimum, generations run, number of distinct
+    summary               : genetic optimum, generations run, convergence trace
+                            (best welfare against evaluations and time), number of distinct
                             objective evaluations, and per local start the starting
                             and final welfare, evaluations and convergence flag
     """
@@ -200,12 +201,19 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
         initial_population[0] = np.clip(seed_row, lows, highs)
 
     cache = {}
+    # Convergence trace: best welfare so far after each new objective evaluation
+    # that improves it (stage, number of evaluations, wall-clock time stamp).
+    trace, stage = [], {"name": "genetic", "best": -np.inf}
 
     def welfare_of(coefficients):
         key = tuple(np.round(coefficients, 12))
         if key not in cache:
             cache[key] = expected_welfare(type_distribution, form.threshold(coefficients),
                                           num_bidders, num_goods, objective_mechanism)
+            if cache[key] > stage["best"]:
+                stage["best"] = cache[key]
+                trace.append({"stage": stage["name"], "evaluations": len(cache),
+                              "time": time.time(), "welfare": float(cache[key])})
         return cache[key]
 
     def fitness_batch(ga_instance, solutions, solution_index):  # noqa: ARG001
@@ -259,6 +267,7 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
               f"{ga.generations_completed} generations: welfare {best_welfare:.8g}")
 
     if local_refinement == "nelder_mead":
+        stage["name"] = "nelder_mead"
         fitness = [welfare_of(solution) for solution in ga.population]
         starts = _best_distinct(ga.population, fitness, num_local_starts)
         if not any(np.allclose(start, best_coefficients) for start in starts):
@@ -277,6 +286,9 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
                   f"converged {sum(r['converged'] for r in local_results)}/{len(local_results)}")
 
     summary["num_objective_evaluations"] = len(cache)
+    trace.append({"stage": "end", "evaluations": len(cache), "time": time.time(),
+                  "welfare": float(best_welfare)})
+    summary["trace"] = trace
     summary["form"] = form.spec(best_coefficients)
     if verbose:
         print(f"Best τ: β = {[f'{c:.6g}' for c in best_coefficients]}, welfare {best_welfare:.8g}")

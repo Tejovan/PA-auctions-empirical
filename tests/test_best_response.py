@@ -15,7 +15,7 @@ from audited_auctions.best_response_ascent import (
     welfare_and_gradient,
 )
 from audited_auctions.marginal_contribution import RivalWelfareLoss
-from audited_auctions.pipeline import optimize_and_evaluate, prepare_distributions
+from audited_auctions.pipeline import optimize_threshold, prepare_distributions
 from audited_auctions.threshold_evaluation import build_mechanism_model, expected_welfare
 from audited_auctions.threshold_forms import (
     build_threshold_form,
@@ -117,24 +117,26 @@ def test_optimum_has_zero_marginal_contribution_at_interior_thresholds():
 
 def test_best_response_beats_or_matches_polynomial_genetic_search():
     prepared = prepare_distributions("harm_rises", **SMALL_GRID)
-    genetic = optimize_and_evaluate(prepared, "poly1", 5, 2, ga_options={"num_generations": 15},
-                                    ga_seed=0, num_simulated_draws=50, verbose=False)
-    combined = optimize_and_evaluate(prepared, "knots4", 5, 2, optimizer="genetic+best_response",
-                                     genetic_form="poly1", ga_options={"num_generations": 15},
-                                     ga_seed=0, num_simulated_draws=50, verbose=False)
-    nodes = optimize_and_evaluate(prepared, "nodes", 5, 2, num_simulated_draws=50,
-                                  verbose=False)
+    ga_options = {"num_generations": 15}
+    genetic = optimize_threshold(prepared.training, "poly1", 5, 2, optimizer="genetic",
+                                 ga_options=ga_options, ga_seed=0, verbose=False)
+    combined = optimize_threshold(prepared.training, "knots4", 5, 2,
+                                  optimizer="genetic+best_response", genetic_form="poly1",
+                                  ga_options=ga_options, ga_seed=0, verbose=False)
+    nodes = optimize_threshold(prepared.training, "nodes", 5, 2, verbose=False)
     assert combined["optimizer"] == "genetic+best_response"
-    assert combined["training_welfare"] >= genetic["training_welfare"] - 1e-12
-    assert nodes["training_welfare"] >= combined["training_welfare"] - 1e-9
-    assert nodes["tau_coeffs"] is None and nodes["threshold_spec"]["form"] == "nodes"
-    forms = {spec["form"] for spec in combined["trajectory_forms"]}
-    assert forms == {"polynomial", "knots"}
+    assert combined["welfare"] >= genetic["welfare"] - 1e-12
+    assert nodes["welfare"] >= combined["welfare"] - 1e-9
+    assert nodes["form"].kind == "nodes"
+    assert {spec["form"] for spec in combined["trajectory_forms"]} == {"polynomial", "knots"}
+    traces = [summary["trace"] for summary in combined["search_summaries"]]
+    assert all(len(trace) > 0 for trace in traces)
 
 
 def test_genetic_search_rejects_nodes_and_best_response_rejects_polynomials():
     prepared = prepare_distributions("harm_rises", **SMALL_GRID)
     with pytest.raises(ValueError):
-        optimize_and_evaluate(prepared, "nodes", 4, 1, optimizer="genetic", verbose=False)
+        optimize_threshold(prepared.training, "nodes", 4, 1, optimizer="genetic", verbose=False)
     with pytest.raises(ValueError):
-        optimize_and_evaluate(prepared, "poly1", 4, 1, optimizer="best_response", verbose=False)
+        optimize_threshold(prepared.training, "poly1", 4, 1, optimizer="best_response",
+                           verbose=False)
