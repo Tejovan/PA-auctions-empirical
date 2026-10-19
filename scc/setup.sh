@@ -37,6 +37,7 @@ export UV_PYTHON_INSTALL_DIR=/projectnb/$PROJECT/$USER/uv-python
 
 cd "$CODE"
 uv sync --frozen --python 3.13
+.venv/bin/python -c "import pytest" 2>/dev/null || uv pip install --python .venv/bin/python pytest  # not in uv.lock
 [ -L runs ] || { [ -d runs ] && mv runs "$RUNS/from-home-$(date +%s)"; ln -s "$RUNS" runs; }
 
 .venv/bin/python -m pytest -q tests
