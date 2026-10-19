@@ -50,14 +50,14 @@ LABELS = {"vcg": "VCG (no audit)", "vcg_pa": "VCG-PA", "ivcg_pa": "IVCG-PA",
           "first_best": "First best (recipient audit)"}
 SHORT = {"vcg": "VCG", "vcg_pa": "VCG-PA", "ivcg_pa": "IVCG-PA", "first_best": "First best"}
 MECHANISM_COLORS = {"vcg": "#7a7974", "vcg_pa": "#2a78d6", "ivcg_pa": "#c0392b",
-                    "first_best": "#1baf7a"}
+                    "first_best": "#19a170"}
 MECHANISM_LINESTYLES = {"vcg": ":", "vcg_pa": "-", "ivcg_pa": "--", "first_best": "-."}
 MECHANISM_HATCHES = {"vcg_pa": "", "ivcg_pa": "//", "first_best": ".."}
 MECHANISM_MARKERS = {"vcg": "o", "vcg_pa": "s", "ivcg_pa": "D", "first_best": "^"}
 # Components of welfare: W = bidder net utility + revenue + penalties + externality part.
 COMPONENTS = ("bidder_utility", "revenue", "penalty_paid", "externality_welfare")
-COMPONENT_COLORS = {"bidder_utility": "#d98e04", "revenue": "#5e3c99",
-                    "penalty_paid": "#cc79a7", "externality_welfare": "#3b3b3b"}
+COMPONENT_COLORS = {"bidder_utility": "#bb7a03", "revenue": "#5e3c99",
+                    "penalty_paid": "#be538e", "externality_welfare": "#3b3b3b"}
 COMPONENT_HATCHES = {"bidder_utility": "", "revenue": "", "penalty_paid": "",
                      "externality_welfare": "xx"}
 METRIC_LABELS = {"welfare": "welfare W", "valuation_welfare": "valuation part Σvx",
@@ -65,8 +65,9 @@ METRIC_LABELS = {"welfare": "welfare W", "valuation_welfare": "valuation part Σ
                  "penalty_paid": "penalties Σr", "bidder_utility": "bidder net utility Σu"}
 # Categorical series that are not mechanisms (forms, optimizers, given thresholds).
 # Non-mechanism series; mechanism hues are reserved (CLAUDE_files/figure_style.md).
-# All eight colors (with MECHANISM_COLORS) pass check_palette.py with CIEDE2000 >= 8.5.
-CATEGORY_COLORS = ("#d98e04", "#5e3c99", "#cc79a7", "#3b3b3b")
+# All eight colors (with MECHANISM_COLORS) pass check_palette.py: contrast >= 3:1 on white,
+# CIEDE2000 >= 8.5 under simulated color-vision deficiency.
+CATEGORY_COLORS = ("#bb7a03", "#5e3c99", "#be538e", "#3b3b3b")
 CATEGORY_LINESTYLES = ("-", "--", "-.", ":", (0, (6, 2)), (0, (3, 1, 1, 1)), (0, (1, 1)))
 THRESHOLD_COLOR = "#0b0b0b"
 # Regions (figstyle.tex): abstention or exclusion light gray, pooled bids (a region that
@@ -464,13 +465,13 @@ def _mean_strip(ax, means, intervals, mechanisms):
                 color=MECHANISM_COLORS[mechanism], markersize=4.5, transform=transform,
                 zorder=6, markeredgecolor="white", markeredgewidth=0.6)
         ax.axvline(means[mechanism], color=MECHANISM_COLORS[mechanism],
-                   linestyle=MECHANISM_LINESTYLES[mechanism], linewidth=0.8, alpha=0.7,
+                   linestyle=MECHANISM_LINESTYLES[mechanism], linewidth=1.0, alpha=0.8,
                    zorder=4)
 
 
 def _text_box(ax, lines):
     ax.text(0.99, 0.70, "\n".join(lines), transform=ax.transAxes, ha="right", va="top",
-            fontsize=6.5, color=INK, zorder=7,
+            fontsize=7, color=INK, zorder=7,
             bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "alpha": 0.85,
                   "edgecolor": "none"})
 

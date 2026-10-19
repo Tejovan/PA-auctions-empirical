@@ -1,8 +1,11 @@
-"""Color-vision-deficiency check for categorical palettes.
+"""Accessibility check for categorical palettes (CLAUDE_files/figure_style.md).
 
-Simulates protan, deutan and tritan vision (Machado et al. 2009, severity 1) and prints the
-smallest CIEDE2000 difference between any two colors. Target: at least 8 in every row.
-Usage: python check_palette.py "#d98e04" "#5e3c99" ...
+1. Contrast of each color against white (WCAG 2.1 ratio). Target: at least 3 for lines and markers.
+2. Smallest CIEDE2000 difference between any two colors, with normal vision and simulated protan,
+   deutan and tritan vision (Machado et al. 2009, severity 1). Target: at least 8 in every row.
+3. Grayscale lightness L* of each color (information): colors with close L* are distinct in
+   grayscale print only by line style or marker.
+Usage: python check_palette.py "#bb7a03" "#5e3c99" ...
 """
 import numpy as np, itertools, sys
 # Machado et al. (2009) severity-1.0 matrices (linear RGB)
@@ -45,5 +48,14 @@ def check(pal,show=True):
         worst=min(worst,mn[0])
         if show: print(f"{k:7s} min ΔE {mn[0]:5.1f} ({mn[1]} vs {mn[2]})")
     return worst
+def contrast(h):
+    y=float(np.array([0.2126,0.7152,0.0722])@lin(h))
+    return 1.05/(y+0.05)
+def report(pal):
+    for h in pal:
+        c=contrast(h)
+        print(f"{h}  contrast {c:5.2f} {'ok' if c>=3 else 'LOW'}  L* {lab(lin(h))[0]:5.1f}")
+    return min(contrast(h) for h in pal), check(pal)
 if __name__=="__main__":
-    check(sys.argv[1:])
+    c,d=report(sys.argv[1:])
+    print("PASS" if c>=3 and d>=8 else "FAIL")
