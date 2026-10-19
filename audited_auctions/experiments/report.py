@@ -176,7 +176,7 @@ def _overlay(folder, varied, rows, target):
             linestyle = figures.MECHANISM_LINESTYLES[row["objective"]]
             label = f"objective {figures.SHORT[row['objective']]}: {welfare}"
         else:
-            color = figures.CATEGORY_COLORS[index % 7]
+            color = figures.CATEGORY_COLORS[index % len(figures.CATEGORY_COLORS)]
             linestyle = figures.CATEGORY_LINESTYLES[index % 7]
             label = f"{row[varied]}: {welfare}"
             if varied == "optimizer":

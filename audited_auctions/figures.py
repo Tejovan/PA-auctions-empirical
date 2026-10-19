@@ -56,15 +56,17 @@ MECHANISM_HATCHES = {"vcg_pa": "", "ivcg_pa": "//", "first_best": ".."}
 MECHANISM_MARKERS = {"vcg": "o", "vcg_pa": "s", "ivcg_pa": "D", "first_best": "^"}
 # Components of welfare: W = bidder net utility + revenue + penalties + externality part.
 COMPONENTS = ("bidder_utility", "revenue", "penalty_paid", "externality_welfare")
-COMPONENT_COLORS = {"bidder_utility": "#d98e04", "revenue": "#8a5fbf",
-                    "penalty_paid": "#a0522d", "externality_welfare": "#5c5c5c"}
+COMPONENT_COLORS = {"bidder_utility": "#d98e04", "revenue": "#5e3c99",
+                    "penalty_paid": "#cc79a7", "externality_welfare": "#3b3b3b"}
 COMPONENT_HATCHES = {"bidder_utility": "", "revenue": "", "penalty_paid": "",
                      "externality_welfare": "xx"}
 METRIC_LABELS = {"welfare": "welfare W", "valuation_welfare": "valuation part Σvx",
                  "externality_welfare": "externality part Σex", "revenue": "revenue Σp",
                  "penalty_paid": "penalties Σr", "bidder_utility": "bidder net utility Σu"}
 # Categorical series that are not mechanisms (forms, optimizers, given thresholds).
-CATEGORY_COLORS = ("#2a78d6", "#d98e04", "#8a5fbf", "#1baf7a", "#a0522d", "#c0392b", "#5c5c5c")
+# Non-mechanism series; mechanism hues are reserved (CLAUDE_files/figure_style.md).
+# All eight colors (with MECHANISM_COLORS) pass check_palette.py with CIEDE2000 >= 8.5.
+CATEGORY_COLORS = ("#d98e04", "#5e3c99", "#cc79a7", "#3b3b3b")
 CATEGORY_LINESTYLES = ("-", "--", "-.", ":", (0, (6, 2)), (0, (3, 1, 1, 1)), (0, (1, 1)))
 THRESHOLD_COLOR = "#0b0b0b"
 INK = "#0b0b0b"
@@ -768,7 +770,7 @@ def search_history(results, data, types, path_tried, path_trace):
             seconds = np.array([p["seconds"] for p in points])
             welfare = np.maximum.accumulate(np.array([p["welfare"] for p in points]))
             gap = np.maximum((best - welfare) / scale, 1e-13)
-            ax.step(seconds, gap, where="post", color=CATEGORY_COLORS[index % 7],
+            ax.step(seconds, gap, where="post", color=CATEGORY_COLORS[index % len(CATEGORY_COLORS)],
                     linestyle=CATEGORY_LINESTYLES[index % 7], label=f"{optimizer}: {label}")
         ax.set_yscale("log")
         ax.set_xlabel("seconds since the start of the search")
