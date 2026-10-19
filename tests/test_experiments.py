@@ -5,6 +5,7 @@ reuse a saved τ, and a whole small run with figures and README.
 """
 
 import json
+import re
 import tomllib
 
 import numpy as np
@@ -131,6 +132,23 @@ def test_whole_runs_with_figures_and_reused_thresholds(tmp_path):
     assert "## Checks" in readme and summary.path.iloc[0] in readme
     record = tomllib.loads((folder / "run.toml").read_text())
     assert record["run"]["num_combinations"] == 6 and "commit" in record["code"]
+
+    # paper mode: one PDF per panel at the fixed cell size, legend, caption and snippet
+    from audited_auctions.experiments.report import make_paper_figures
+    from audited_auctions.figures import PAPER_CELL
+    make_paper_figures(folder, ["outcomes", "tau-by"], workers=1)
+    paper = leaf / "paper"
+    for name in ("2_expected-outcomes_a.pdf", "2_expected-outcomes_b.pdf",
+                 "2_expected-outcomes_a_legend.pdf", "2_expected-outcomes.tex",
+                 "2_expected-outcomes.caption.txt"):
+        assert (paper / name).exists(), name
+    box = re.search(rb"/MediaBox \[ *0 0 ([\d.]+) ([\d.]+) *\]",
+                    (paper / "2_expected-outcomes_a.pdf").read_bytes())
+    assert (float(box[1]) / 72, float(box[2]) / 72) == pytest.approx(PAPER_CELL["multi"], abs=0.01)
+    assert not (paper / "1_types-tau-penalties.tex").exists()
+    assert r"\includegraphics{2_expected-outcomes_b.pdf}" in \
+        (paper / "2_expected-outcomes.tex").read_text()
+    assert any((compare / "paper").glob("tau-by-market_*.tex"))
 
     evaluate_file = tmp_path / "evaluate.toml"
     evaluate_file.write_text(to_toml({

@@ -18,6 +18,12 @@ saved in the compare/ folder of the deepest level above every varied input:
                                      input ∈ market, form, optimizer, objective, threshold
   <distribution>/compare/welfare-vs-zeta_<fixed inputs>.pdf
   compare/share-of-first-best-gain.pdf
+
+Paper mode (python run.py --report RUN --paper [NAMES]): one PDF per panel, legend
+and colorbar PDFs, <figure>.caption.txt and <figure>.tex in a paper/ folder next to
+each figure (figures.py, "Paper mode"); the run's figures and README stay as they
+are. NAMES (comma separated) selects figures: the keys of LEAF_FIGURES and
+tau-by, welfare-vs-zeta; default all. The share overview has no paper version.
 """
 
 import math
@@ -43,6 +49,8 @@ LEAF_FIGURES = {
     "trace": "search/convergence.pdf",
 }
 
+PAPER_FIGURES = (*LEAF_FIGURES, "tau-by", "welfare-vs-zeta")
+
 # Inputs that comparison figures vary; "market" stands for (n, k).
 OVERLAY_INPUTS = {"optimize": ("market", "threshold_form", "optimizer", "objective"),
                   "evaluate": ("market", "tau_label")}
@@ -62,9 +70,11 @@ def _load_data(leaf):
         return {key: data[key] for key in data.files}
 
 
-def leaf_figures(folder, path):
-    """Draw the figures of one combination; returns their paths relative to the run folder."""
+def leaf_figures(folder, path, select=None):
+    """Draw the figures of one combination (all, or the keys in select); returns their paths
+    relative to the run folder."""
     folder = Path(folder)
+    wanted = lambda key: select is None or key in select  # noqa: E731
     leaf = folder / path
     results = read_json(leaf / "results.json")
     data, types = _load_data(leaf), _load_types(folder, results)
@@ -76,17 +86,21 @@ def leaf_figures(folder, path):
         drawn.append(f"{path}/{LEAF_FIGURES[key]}")
         return file
 
-    figures.types_tau_penalties(results, data, types, target("types"))
-    figures.expected_outcomes(results, target("outcomes"))
-    figures.outcome_distributions(results, data, target("distributions"))
-    figures.gain_scatter(results, data, target("scatter"))
-    if results["ironing_binds"]:
+    if wanted("types"):
+        figures.types_tau_penalties(results, data, types, target("types"))
+    if wanted("outcomes"):
+        figures.expected_outcomes(results, target("outcomes"))
+    if wanted("distributions"):
+        figures.outcome_distributions(results, data, target("distributions"))
+    if wanted("scatter"):
+        figures.gain_scatter(results, data, target("scatter"))
+    if results["ironing_binds"] and wanted("ironing"):
         figures.ironing(results, data, target("ironing"))
     first_order_file = leaf / "first-order.csv"
-    if "mc_vcg_pa" in data and first_order_file.exists():
+    if "mc_vcg_pa" in data and first_order_file.exists() and wanted("marginal"):
         figures.marginal_contribution(results, data, types, pd.read_csv(first_order_file),
                                       target("marginal"))
-    if results.get("search"):
+    if results.get("search") and (wanted("tried") or wanted("trace")):
         figures.search_history(results, data, types, target("tried"), target("trace"))
     return drawn
 
@@ -242,10 +256,12 @@ def _overview(folder, rows, kind, target):
     return target
 
 
-def _run_job(job):
+def _run_job(job, paper=None):
+    """paper: None (the run's figures) or the set of figure names to export as panels."""
+    figures.set_paper(paper is not None)
     kind, arguments = job
     if kind == "leaf":
-        return leaf_figures(*arguments)
+        return leaf_figures(*arguments, select=paper)
     function = {"overlay": _overlay, "zeta": _zeta, "overview": _overview}[kind]
     return [function(*arguments)]
 
@@ -419,6 +435,34 @@ def make_report(folder, workers=None, log=print):
     log(f"Report: {sum(len(f) for f in leaf_files.values())} combination figures, "
         f"{len(compare_files)} comparison figures, README.md")
     return files
+
+
+def make_paper_figures(folder, select=None, workers=None, log=print):
+    """Export the figures of a run (all, or the names in select; see PAPER_FIGURES) as
+    panel PDFs with caption drafts and LaTeX snippets in paper/ folders."""
+    folder = Path(folder)
+    select = set(select or PAPER_FIGURES)
+    unknown = select - set(PAPER_FIGURES)
+    if unknown:
+        raise ValueError(f"unknown figure names {sorted(unknown)}; choose from "
+                         f"{', '.join(PAPER_FIGURES)}")
+    with open(folder / "run.toml", "rb") as file:
+        record = tomllib.load(file)
+    summary = pd.read_csv(folder / "summary.csv")
+    jobs = [("leaf", (str(folder), path)) for path in summary.path]
+    names = {"overlay": "tau-by", "zeta": "welfare-vs-zeta"}
+    jobs += [job for job in comparison_jobs(folder, summary, record["run"]["kind"])
+             if names.get(job[0]) in select]
+    workers = workers or record["host"].get("workers", 1)
+    papers = [select] * len(jobs)
+    if workers > 1:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            outputs = list(pool.map(_run_job, jobs, papers, chunksize=1))
+    else:
+        outputs = [_run_job(job, paper) for job, paper in zip(jobs, papers)]
+    count = sum(len(files) for files in outputs)
+    log(f"Paper figures: {count} figures exported as panels into paper/ folders")
+    return [file for files in outputs for file in files]
 
 
 def write_readme(folder, files):

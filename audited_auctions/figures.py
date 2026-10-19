@@ -27,9 +27,19 @@ Across combinations:
   threshold_overlay         τ of several combinations on one type plot
   welfare_against_zeta      expected welfare and gains over VCG against ζ
   share_overview            share of the first-best gain of every combination
+
+Paper mode (set_paper(True); python run.py --report RUN --paper): the same
+functions export each panel as its own PDF in a paper/ folder next to the
+figure, for multi-panel figures built in LaTeX. Panels are drawn at printed
+size in cells of fixed size with fixed margins, so panels of one size align
+side by side; there is no title and no note. Legends outside the axes and
+colorbars go to their own PDFs; <figure>.caption.txt holds the caption draft,
+and <figure>.tex a figure environment that includes the panels.
 """
 
+import re
 import textwrap
+from pathlib import Path
 
 import matplotlib
 
@@ -37,7 +47,9 @@ matplotlib.use("Agg")
 import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.cm import ScalarMappable
 from matplotlib.colors import LogNorm, SymLogNorm
+from matplotlib.transforms import Bbox
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.ticker import FuncFormatter
@@ -149,10 +161,244 @@ def context_line(combination):
     return "  ·  ".join(parts)
 
 
+# ─── Paper mode ─────────────────────────────────────────────────────────────────
+
+# Cell of one panel at printed size (inches): half of a 6.5 in text width for panels of
+# multi-panel figures, 0.6 of it for single panels; fixed margins around the axes box.
+PAPER_CELL = {"multi": (3.1, 2.4), "single": (3.9, 2.9)}
+PAPER_MARGINS = {"left": 0.62, "right": 0.12, "bottom": 0.50, "top": 0.12}
+_PAPER = {"on": False}
+
+
+def set_paper(on):
+    """Switch paper mode on or off (module-wide; each worker process sets it)."""
+    _PAPER["on"] = bool(on)
+
+
 def _new_figure(width, height, rows=1, columns=1, **options):
-    fig, axes = plt.subplots(rows, columns, figsize=(width, height), layout="constrained",
-                             squeeze=False, **options)
+    if not _PAPER["on"]:
+        fig, axes = plt.subplots(rows, columns, figsize=(width, height), layout="constrained",
+                                 squeeze=False, **options)
+        return fig, axes
+    cell_width, cell_height = PAPER_CELL["single" if rows * columns == 1 else "multi"]
+    margin = PAPER_MARGINS
+    fig, axes = plt.subplots(rows, columns, figsize=(columns * cell_width, rows * cell_height),
+                             squeeze=False)
+    figure_width, figure_height = columns * cell_width, rows * cell_height
+    for row in range(rows):
+        for column in range(columns):
+            left = column * cell_width + margin["left"]
+            bottom = (rows - 1 - row) * cell_height + margin["bottom"]
+            axes[row, column].set_position([
+                left / figure_width, bottom / figure_height,
+                (cell_width - margin["left"] - margin["right"]) / figure_width,
+                (cell_height - margin["bottom"] - margin["top"]) / figure_height])
     return fig, axes
+
+
+def _colorbar(fig, mesh, axes, label):
+    """Colorbar beside the axes; in paper mode, kept for its own PDF instead."""
+    if _PAPER["on"]:
+        fig.paper_colorbar = (mesh.norm, mesh.cmap, label)
+        return
+    colorbar = fig.colorbar(mesh, ax=axes, shrink=0.9, pad=0.01)
+    colorbar.set_label(label)
+
+
+_LATEX_SYMBOLS = {
+    "α": r"\alpha", "β": r"\beta", "γ": r"\gamma", "δ": r"\delta", "ε": r"\varepsilon",
+    "ζ": r"\zeta", "λ": r"\lambda", "μ": r"\mu", "π": r"\pi", "σ": r"\sigma", "τ": r"\tau",
+    "ψ": r"\psi", "ω": r"\omega", "Σ": r"\Sigma", "Ψ": r"\Psi", "Δ": r"\Delta",
+    "−": "-", "×": r"\times", "≥": r"\geq", "≤": r"\leq", "≈": r"\approx", "·": r"\cdot",
+    "∫": r"\int", "⁺": "^{+}", "⁰": "^{0}", "°": r"^{\circ}", "|": "|"}
+
+
+def latex_text(text):
+    """Figure text (Unicode, matplotlib mathtext) as LaTeX text for captions and titles."""
+    out = []
+    for index, part in enumerate(str(text).split("$")):
+        if index % 2:  # mathtext is LaTeX already
+            out.append(f"${part}$")
+            continue
+        part = re.sub(r"(\w)\u0304", lambda m: f"$\\bar{{{m.group(1)}}}$", part)
+        part = re.sub(r"([%&#_])", r"\\\1", part)
+        part = "".join(f"${_LATEX_SYMBOLS[c]}$" if c in _LATEX_SYMBOLS and c != "−"
+                       else ("-" if c == "−" else c) for c in part)
+        out.append(part.replace("$$", ""))
+    return "".join(out)
+
+
+def _panel_title(ax):
+    """Panel title without its letter, removed from the axes."""
+    title = ax.get_title(loc="left") or ax.get_title()
+    ax.set_title("", loc="left")
+    ax.set_title("")
+    return re.sub(r"^\([a-z]\)\s*", "", title)
+
+
+def _save_only(fig, artist, file, bbox_inches):
+    """Save the figure cropped to bbox_inches with only artist (an axes or a legend) drawn."""
+    hidden = [a for a in fig.axes if a.get_visible()] + [a for a in fig.legends
+                                                         if a.get_visible()]
+    owner = artist if artist in fig.axes else None
+    if owner is None and artist not in fig.legends:  # an axes legend: keep its axes, hide
+        owner = artist.axes                             # everything else in that axes
+        inner = [c for c in owner.get_children() if c is not artist and c.get_visible()]
+    else:
+        inner = []
+    for item in hidden:
+        if item is not owner and item is not artist:
+            item.set_visible(False)
+    for item in inner:
+        item.set_visible(False)
+    fig.savefig(file, bbox_inches=bbox_inches)
+    for item in hidden + inner:
+        item.set_visible(True)
+
+
+def _extent_inches(fig, artist, pad=0.04):
+    renderer = fig.canvas.get_renderer()
+    box = artist.get_window_extent(renderer).transformed(fig.dpi_scale_trans.inverted())
+    return Bbox.from_extents(box.x0 - pad, box.y0 - pad, box.x1 + pad, box.y1 + pad)
+
+
+def _fit_legend(fig, legend, width):
+    """Redraw a legend with as many columns as fit in width (inches); returns the legend."""
+    handles, labels = legend.legend_handles, [text.get_text() for text in legend.texts]
+    owner = None if legend in fig.legends else legend.axes
+    columns = legend._ncols
+    while True:
+        options = {"handles": handles, "labels": labels, "ncol": columns,
+                   "loc": "upper center", "bbox_to_anchor": (0.5, -0.1)}
+        if owner is not None:
+            new = owner.legend(**options, bbox_transform=fig.transFigure)
+        else:
+            legend.remove()
+            new = fig.legend(**options, bbox_transform=fig.transFigure)
+        fig.canvas.draw()
+        if columns == 1 or _extent_inches(fig, new).width <= width:
+            return new
+        legend, columns = new, columns - 1
+
+
+def _paper_export(fig, path, title, note):
+    """Each panel, legend and colorbar of the figure as its own PDF in path.parent/paper/,
+    with <stem>.caption.txt and <stem>.tex."""
+    path = Path(path)
+    folder = path.parent / "paper"
+    folder.mkdir(exist_ok=True)
+    stem = path.stem
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    panels, legend_axes = [], []
+    for ax in fig.axes:
+        if not ax.get_visible():
+            continue
+        if ax.axison:
+            panels.append(ax)
+        elif ax.get_legend() is not None:
+            legend_axes.append(ax)
+    single = len(panels) == 1
+    cell_width, cell_height = PAPER_CELL["single" if single else "multi"]
+    margin = PAPER_MARGINS
+    files, titles, legends = [], [], []
+    for index, ax in enumerate(panels):
+        letter = chr(97 + index)
+        titles.append(_panel_title(ax))
+        legend = ax.get_legend()
+        if legend is not None:
+            inside = ax.bbox.contains(*legend.get_window_extent(renderer).p0) and \
+                ax.bbox.contains(*legend.get_window_extent(renderer).p1)
+            if not inside:
+                legends.append((legend, f"{stem}_legend.pdf" if single
+                                else f"{stem}_{letter}_legend.pdf"))
+                legend.set_visible(False)
+        box = ax.get_position()
+        x0 = box.x0 * fig.get_figwidth() - margin["left"]
+        y0 = box.y0 * fig.get_figheight() - margin["bottom"]
+        file = f"{stem}.pdf" if single else f"{stem}_{letter}.pdf"
+        _save_only(fig, ax, folder / file, Bbox.from_bounds(x0, y0, cell_width, cell_height))
+        files.append(file)
+    pending = getattr(fig, "pending_legend", None)
+    shared = None
+    if pending is not None:
+        handles, columns = pending
+        shared = fig.legend(handles=handles, loc="upper center", ncol=columns,
+                            bbox_to_anchor=(0.5, -0.1), bbox_transform=fig.transFigure)
+    elif legend_axes:
+        shared = legend_axes[0].get_legend()
+    if shared is not None:
+        legends.append((shared, f"{stem}_legend.pdf"))
+    legend_files = []
+    for legend, file in legends:
+        legend.set_visible(True)
+        legend = _fit_legend(fig, legend, 6.5 if file == f"{stem}_legend.pdf" and not single
+                             else cell_width)
+        _save_only(fig, legend, folder / file, _extent_inches(fig, legend))
+        legend_files.append(file)
+    colorbar = getattr(fig, "paper_colorbar", None)
+    if colorbar is not None:
+        norm, cmap, label = colorbar
+        bar_figure = plt.figure(figsize=(cell_width, 0.62))
+        bar_axes = bar_figure.add_axes([margin["left"] / cell_width, 0.62, 
+                                        1 - (margin["left"] + margin["right"]) / cell_width,
+                                        0.16])
+        bar = bar_figure.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=bar_axes,
+                                  orientation="horizontal")
+        bar.set_label(label)
+        if hasattr(norm, "linthresh"):  # symmetric log: ±10^d, ±10^(d−2) and 0 only
+            decade = np.floor(np.log10(norm.vmax))
+            ticks = [10 ** decade, 10 ** (decade - 2)]
+            ticks = sorted([0.0] + [t for t in ticks if t > norm.linthresh] +
+                           [-t for t in ticks if t > norm.linthresh])
+            bar.set_ticks(ticks)
+        bar_figure.savefig(folder / f"{stem}_colorbar.pdf", bbox_inches="tight", pad_inches=0.02)
+        plt.close(bar_figure)
+        legend_files.append(f"{stem}_colorbar.pdf")
+    plt.close(fig)
+    _write_caption(folder, stem, title, note, titles, single)
+    _write_snippet(folder, stem, files, titles, legend_files, note, single)
+    return folder / files[0]
+
+
+def _write_caption(folder, stem, title, note, titles, single):
+    lines = [f"Settings: {title}", ""]
+    if not single:
+        lines += [f"({chr(97 + i)}) {t}" for i, t in enumerate(titles)] + [""]
+    if note:
+        lines += [textwrap.fill(note, 96)]
+    (folder / f"{stem}.caption.txt").write_text("\n".join(lines) + "\n")
+
+
+def _write_snippet(folder, stem, files, titles, legend_files, note, single):
+    """A figure environment with the panels in rows of two, the legends below and a caption
+    draft; graphics are referenced by file name (add the paper/ folder to \\graphicspath)."""
+    label = re.sub(r"^\d+_", "", stem)
+    lines = [f"% Drawn by run.py --report RUN --paper; caption draft from {stem}.caption.txt.",
+             r"\begin{figure}[t]", r"\centering"]
+    if single:
+        lines.append(rf"\includegraphics{{{files[0]}}}")
+    else:
+        for index, (file, title) in enumerate(zip(files, titles)):
+            letter = chr(97 + index)
+            lines += [r"\begin{minipage}[t]{0.48\linewidth}\centering",
+                      rf"{{\small ({letter}) {latex_text(title)}}}\\[2pt]",
+                      rf"\includegraphics{{{file}}}" + (
+                          rf"\\[2pt]\includegraphics{{{stem}_{letter}_legend.pdf}}"
+                          if f"{stem}_{letter}_legend.pdf" in legend_files else ""),
+                      r"\end{minipage}" + (r"\hfill" if index % 2 == 0 and index + 1 < len(files)
+                                           else r"\par\medskip")]
+    for file in legend_files:
+        if not re.search(r"_[a-z]_legend\.pdf$", file):
+            lines.append(rf"\includegraphics{{{file}}}\par")
+    if single:
+        caption = latex_text(titles[0]) + "." if titles[0] else ""
+    else:
+        caption = " ".join(f"({chr(97 + i)}) {latex_text(t)}." for i, t in enumerate(titles))
+    if note:
+        caption = (caption + " " + latex_text(note)).strip()
+    lines += [rf"\caption{{{caption}}}", rf"\label{{fig:{label}}}", r"\end{figure}"]
+    (folder / f"{stem}.tex").write_text("\n".join(lines) + "\n")
 
 
 def _finish(fig, path, title, note=None):
@@ -160,7 +406,10 @@ def _finish(fig, path, title, note=None):
 
     The axes are laid out by the constrained layout engine first; the layout is then
     frozen, so the legend and the note can be stacked under the lowest axes element.
+    In paper mode, export the panels instead (_paper_export).
     """
+    if _PAPER["on"]:
+        return _paper_export(fig, path, title, note)
     fig.suptitle(title, x=0.01, ha="left", fontsize=10, color=INK)
     fig.canvas.draw()
     fig.set_layout_engine("none")
@@ -374,9 +623,13 @@ def expected_outcomes(results, path):
                                                      [max(interval[1] - welfare, 0)]],
                             color=INK, capsize=3, linewidth=1, zorder=4)
             share = results["share_of_first_best_gain"].get(mechanism)
-            text = f"W = {exact_number(welfare)}"
-            if mechanism in ("vcg_pa", "ivcg_pa"):
-                text += f"\n{_percent(share)} of first-\nbest gain"
+            if _PAPER["on"]:  # narrow panel: value and share only (caption names them)
+                text = compact(welfare) + (f"\n{_percent(share)}"
+                                           if mechanism in ("vcg_pa", "ivcg_pa") else "")
+            else:
+                text = f"W = {exact_number(welfare)}"
+                if mechanism in ("vcg_pa", "ivcg_pa"):
+                    text += f"\n{_percent(share)} of first-\nbest gain"
             stack_top = sum(max(exact[mechanism][c], 0.0) for c in COMPONENTS)
             label_at = max(stack_top, interval[1] if interval else welfare)
             ax.annotate(text, (position, label_at), xytext=(0, 4), textcoords="offset points",
@@ -415,9 +668,11 @@ def expected_outcomes(results, path):
                                     color=INK, capsize=2, linewidth=0.9, zorder=3)
         ax.axhline(0, **REFERENCE, zorder=1)
         ax.set_xticks(np.arange(len(metrics)),
+                      ["W", "Σvx", "Σex", "Σp", "Σr", "Σu"] if _PAPER["on"] else
                       ["W", "Σvx", "Σex", "revenue\nΣp", "penalties\nΣr", "net utility\nΣu"])
         ax.grid(axis="x", visible=False)
-        ax.set_ylabel("expected change over VCG per auction")
+        ax.set_ylabel("change over VCG" if _PAPER["on"]
+                      else "expected change over VCG per auction")
         _compact_axes(ax, x=False)
         ax.set_title("(b) Changes over VCG (paired by auction)", loc="left")
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=3)
@@ -428,6 +683,10 @@ def expected_outcomes(results, path):
         else:
             note = "Exact expected values; the distribution is known, so there is no sampling error."
         note += " W = Σu + Σp + Σr + Σex and Σvx = Σu + Σp + Σr."
+        if _PAPER["on"]:
+            note += (" Numbers above the bars: expected welfare W and, for VCG-PA and IVCG-PA, "
+                     "the share of the first-best gain over VCG. Σp: revenue; Σr: penalties; "
+                     "Σu: bidder net utility.")
         return _finish(fig, path, context_line(combination), note)
 
 
@@ -577,6 +836,13 @@ def gain_scatter(results, data, path):
                 _compact_axes(ax)
                 ax.set_title(f"({chr(97 + 2 * row + column)}) {SHORT[mechanism]}: {title}",
                              loc="left")
+        for column in range(2):  # panels of the same quantity share their limits
+            limits = [axes[row, column] for row in range(2)]
+            for getter, setter in (("get_xlim", "set_xlim"), ("get_ylim", "set_ylim")):
+                low = min(getattr(ax, getter)()[0] for ax in limits)
+                high = max(getattr(ax, getter)()[1] for ax in limits)
+                for ax in limits:
+                    getattr(ax, setter)(low, high)
         handles = [mechanism_line("vcg_pa", marker="o", linestyle="none", label="VCG-PA auction"),
                    mechanism_line("ivcg_pa", marker="o", linestyle="none",
                                   label="IVCG-PA auction"),
@@ -626,6 +892,7 @@ def ironing(results, data, path):
         ax.plot(q, score, color=MECHANISM_COLORS["ivcg_pa"], linestyle="--", zorder=4)
         ax.set_xlabel("participating quantile q (ordered by bid)")
         ax.set_ylabel("welfare contribution")
+        _compact_axes(ax, x=False)
         ax.set_title(r"(a) $\hat{w}^{\tau}(q)$ and ironed $\bar{\omega}^{\tau}(q)$", loc="left")
 
         ax = axes[0, 1]
@@ -634,6 +901,7 @@ def ironing(results, data, path):
         ax.plot(q, hull, color=MECHANISM_COLORS["ivcg_pa"], linestyle="--", zorder=4)
         ax.set_xlabel("participating quantile q")
         ax.set_ylabel(r"$\Psi(q) = \int_0^q \hat{w}^{\tau}$")
+        _compact_axes(ax, x=False)
         ax.set_title(r"(b) $\Psi$ and its convex hull", loc="left")
 
         ax = axes[0, 2]
@@ -711,8 +979,7 @@ def marginal_contribution(results, data, types, first_order, path):
             type_plane_axes(ax, types)
             ax.set_title(f"({'ab'[column]}) " + r"$M^{\tau}(e, v)$" + f" in {SHORT[mechanism]}",
                          loc="left")
-        colorbar = fig.colorbar(mesh, ax=axes[0, :], shrink=0.9, pad=0.01)
-        colorbar.set_label(r"marginal contribution $M^{\tau}(e, v)$")
+        _colorbar(fig, mesh, axes[0, :], r"marginal contribution $M^{\tau}(e, v)$")
 
         ax, ax_residual = axes[1, 0], axes[1, 1]
         low, high = types["e_limits"]
@@ -881,7 +1148,7 @@ def share_overview(groups, path, title, note=None):
                         markersize=5, zorder=3, linestyle="none")
                 ax.plot(share_ipa, position + 0.18, marker="D", color=MECHANISM_COLORS["ivcg_pa"],
                         markersize=4.5, zorder=3, linestyle="none")
-            ax.set_yticks(positions, [row[0] for row in rows], fontsize=6.5)
+            ax.set_yticks(positions, [row[0] for row in rows], fontsize=7)
             ax.axvline(1.0, color=MECHANISM_COLORS["first_best"], linestyle="-.", linewidth=1)
             ax.axvline(0.0, **REFERENCE)
             ax.grid(axis="y", visible=False)

@@ -8,6 +8,9 @@ run.py — run experiments of the audited_auctions package from configuration fi
     python run.py CONFIG.toml --workers 4     number of parallel worker processes
     python run.py CONFIG.toml --no-report     compute only; draw figures later
     python run.py --report RUN_FOLDER         (re)draw all figures and README of a run
+    python run.py --report RUN_FOLDER --paper [NAMES]
+                                              figures for a paper: one PDF per panel, caption
+                                              draft and LaTeX snippet in paper/ folders
     python run.py --options                   list distributions, forms, optimizers, ...
 
 Configurations are TOML files; configs/README.md documents every key, and
@@ -63,16 +66,25 @@ def main():
                         help="worker processes (default: output.workers, else cores − 1, ≤ 8)")
     parser.add_argument("--no-report", action="store_true", help="skip the figures")
     parser.add_argument("--report", metavar="RUN_FOLDER", help="redraw figures of a run")
+    parser.add_argument("--paper", nargs="?", const="", metavar="NAMES",
+                        help="with --report: export panels for a paper (comma-separated "
+                             "figure names, default all)")
     parser.add_argument("--options", action="store_true", help="list the available options")
     args = parser.parse_args()
 
     if args.options:
         list_options()
         return
+    if args.paper is not None and not args.report:
+        parser.error("--paper needs --report RUN_FOLDER")
     if args.report:
-        from audited_auctions.experiments.report import make_report
+        from audited_auctions.experiments.report import make_paper_figures, make_report
 
-        make_report(Path(args.report), workers=args.workers)
+        if args.paper is not None:
+            names = [n.strip() for n in args.paper.split(",") if n.strip()] or None
+            make_paper_figures(Path(args.report), names, workers=args.workers)
+        else:
+            make_report(Path(args.report), workers=args.workers)
         return
     if not args.config:
         parser.error("give a configuration file, --report RUN_FOLDER or --options")
