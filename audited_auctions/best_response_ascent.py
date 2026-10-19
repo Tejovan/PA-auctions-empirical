@@ -5,22 +5,22 @@ Best-response ascent: search for a common threshold function τ (in a
 threshold_forms.ThresholdForm of kind knots, bins or nodes) that maximizes the
 exact expected welfare of VCG-PA or IVCG-PA.
 
-Theory (core draft, Appendix E). Hold the auction and the rivals' thresholds
+Theory (core draft v7, §5.1 and App. E). Hold the auction and the rivals' thresholds
 fixed. Then expected welfare is linear in one bidder's participation set
-(Prop. E.1):
+(Prop. 5.4):
 
     W(τ_i, τ_{-i}) = W(bidder i out) + Σ_nodes g_e(τ_i(e)),
     g_e(t) = E[1{v >= t, e_i = e} M^τ(e, v)],
 
-with the marginal welfare M^τ(e, v) = A^τ(v) + e X^τ(v) (marginal_welfare.py).
+with the marginal contribution M^τ(e, v) = A^τ(v) + e X^τ(v) (marginal_contribution.py).
 The best response of one bidder maximizes Σ_e g_e(τ(e)) over the form
-(Cor. E.2). For a common τ (all bidders move together), the derivative of W in
-τ(e) is −n Pr[e] f(τ(e) | e) M^τ(e, τ(e)) (Prop. E.5), so the best response
+(Cor. 5.5). For a common τ (all bidders move together), the derivative of W in
+τ(e) is −n Pr[e] f(τ(e) | e) M^τ(e, τ(e)) (§5.1, derivatives of welfare), so the best response
 is an ascent direction but not an improvement guarantee: each iteration
 
   1. computes A^τ, X^τ exactly for the current τ (one model of the objective
      auction; for IVCG-PA the ironed scores of the current τ are held fixed,
-     an envelope argument),
+     justified at a joint optimum, core draft §5.4),
   2. computes the best response τ' within the form:
        nodes, bins : for each node (bin), the exact maximizer of g (of the sum
                      of g over the bin's nodes) over t ∈ [0, v̄] ∪ {v̄⁺}:
@@ -41,7 +41,7 @@ thresholds (a best response moves one bidder; the common τ moves all n), so the
 ascent can stop short of the optimum. After it stops, L-BFGS-B maximizes W
 over the form's parameters with the exact gradient
 
-    ∂W/∂τ(e_j) = −n f_j(τ(e_j)) M^τ(e_j, τ(e_j))        (Prop. E.5),
+    ∂W/∂τ(e_j) = −n f_j(τ(e_j)) M^τ(e_j, τ(e_j))        (§5.1, derivatives of welfare),
 
 f_j the density of v at node j (zero below 0 and above v̄), chained to the
 form's parameters (knots: interpolation weights, cutoff held fixed; bins: sum
@@ -52,7 +52,7 @@ a step function of τ for atomic distributions).
 Each start is run to convergence and the best result is kept. Starts:
   "zero"            τ ≡ 0 (VCG-PA without exclusions; welfare of VCG)
   "no_competition"  τ(e) = max(0, −e), excluded if −e > v̄ (the first best without
-                    competition, Prop. 5.1 of the core draft)
+                    competition, Prop. 5.6 of the core draft)
   "short_genetic"   a short genetic search in the same form (knots6 for nodes)
 plus any warm starts passed as threshold functions (for example the genetic
 search's result, or the optimum at the previous externality scale of a sweep).
@@ -69,7 +69,7 @@ import pandas as pd
 from numpy.polynomial import chebyshev
 
 from .genetic_search import SearchResult, run_genetic_search
-from .marginal_welfare import valuation_functions
+from .marginal_contribution import valuation_functions
 from .threshold_evaluation import build_mechanism_model, expected_welfare
 from .threshold_forms import BEST_RESPONSE_FORMS, build_threshold_form, externality_nodes
 
@@ -406,7 +406,7 @@ def welfare_and_gradient(type_distribution, form, parameters, num_bidders, num_g
                          mechanism):
     """Exact W(τ) and its gradient in the form's parameters (piecewise-uniform cells).
 
-    Node gradient −n f_j M^τ(e_j, τ_j) (Prop. E.5; one-sided at cell edges: the
+    Node gradient −n f_j M^τ(e_j, τ_j) (core draft §5.1; one-sided at cell edges: the
     density of the cell above τ_j); knots: chained through the interpolation
     weights of included nodes, zero for the cutoff; bins: summed over the bin.
     """
@@ -539,23 +539,24 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
     return SearchResult([float(p) for p in best[0]], float(best[1]), trajectory, summary)
 
 
-# ─── First-order (Pigouvian) check ─────────────────────────────────────────────
+# ─── First-order check ──────────────────────────────────────────────────────────
 
 
 def first_order_check(type_distribution, threshold_function, num_bidders, num_goods,
                       mechanism="vcg_pa"):
-    """Per externality node: the threshold type's marginal welfare and penalty terms.
+    """Per externality node: the threshold type's marginal contribution and penalty terms.
 
     Columns: externality, mass, threshold (clipped to [0, v̄]), status (interior:
     0 < τ < v̄; zero; excluded), interim allocation X^τ(τ), penalty r(e) =
     R(τ(e)), own-allocation charge −e X^τ(τ), displaced term L^τ(τ) − p(τ)
     (rival welfare loss minus the critical-value payment; the displaced
-    externality Δ^τ in VCG-PA), marginal welfare M^τ(e, τ(e)) = r − (−e X^τ +
+    externality Δ^τ in VCG-PA), marginal contribution M^τ(e, τ(e)) = r − (−e X^τ +
     displaced), and the best-response gap max_t g_e(t) − g_e(τ(e)).
 
     At an optimal common τ, interior thresholds where the density of v given e
-    is positive have zero marginal welfare (Prop. E.5): the penalty equals the
-    Pigouvian charge −e X^τ + Δ^τ.
+    is positive have zero marginal contribution (core draft Thm 5.2): the penalty
+    equals the Pigouvian charge −e X^τ + L^τ − P^τ (Rem. 5.3, Cor. E.2), which is
+    −e X^τ + Δ^τ in VCG-PA.
     """
     model = build_mechanism_model(mechanism, type_distribution, threshold_function, num_bidders,
                                   num_goods)
@@ -575,7 +576,7 @@ def first_order_check(type_distribution, threshold_function, num_bidders, num_go
     return pd.DataFrame({
         "externality": nodes, "mass": masses, "threshold": clipped, "status": status,
         "allocation": allocation, "penalty": penalty, "own_allocation_charge": -nodes * allocation,
-        "displaced_term": loss - payment, "marginal_welfare": np.where(raw >= maximum, np.nan,
-                                                                       marginal),
+        "displaced_term": loss - payment,
+        "marginal_contribution": np.where(raw >= maximum, np.nan, marginal),
         "best_response_gap": np.maximum(best_value - current, 0.0),
     })

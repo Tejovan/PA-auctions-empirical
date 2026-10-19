@@ -157,7 +157,7 @@ def main():
     interior = record["first_order_check"].query("status == 'interior'")
     if len(interior):
         print(f"\nFirst-order check (training distribution): {len(interior)} interior thresholds, "
-              f"max |marginal welfare| {interior['marginal_welfare'].abs().max():.3g}, "
+              f"max |marginal contribution| {interior['marginal_contribution'].abs().max():.3g}, "
               f"total best-response gap {record['first_order_check']['best_response_gap'].sum():.3g}")
     if record["grid_refinement"] is not None:
         print("\nGrid refinement check:")

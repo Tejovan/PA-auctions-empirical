@@ -1,5 +1,5 @@
 """
-Tests of the threshold forms, the marginal welfare, best-response ascent and the
+Tests of the threshold forms, the marginal contribution, best-response ascent and the
 gradient polish. Run from WEB27/code with
 
     .venv/bin/python -m pytest tests -q
@@ -14,7 +14,7 @@ from audited_auctions.best_response_ascent import (
     run_best_response_ascent,
     welfare_and_gradient,
 )
-from audited_auctions.marginal_welfare import RivalWelfareLoss
+from audited_auctions.marginal_contribution import RivalWelfareLoss
 from audited_auctions.pipeline import optimize_and_evaluate, prepare_distributions
 from audited_auctions.threshold_evaluation import build_mechanism_model, expected_welfare
 from audited_auctions.threshold_forms import (
@@ -58,7 +58,7 @@ def test_projection_keeps_excluded_prefix():
     assert np.all(np.isfinite(values[nodes > -0.9]))
 
 
-def test_marginal_welfare_matches_example_n():
+def test_marginal_contribution_matches_example_n():
     c = 0.6
     distribution = synthetic_distribution("example_n", harm=c, num_valuation_cells=60)
     for t in (0.3, 0.8):
@@ -104,14 +104,14 @@ def test_best_response_ascent_recovers_example_n(label):
     assert result.welfare == pytest.approx(example_n_welfare(c, 4 * c / 3), abs=1e-10)
 
 
-def test_optimum_has_zero_marginal_welfare_at_interior_thresholds():
+def test_optimum_has_zero_marginal_contribution_at_interior_thresholds():
     distribution = synthetic_distribution("harmful_middle", **SMALL_GRID)
     result = run_best_response_ascent(distribution, "nodes", 6, 2, verbose=False)
     form = build_threshold_form("nodes", distribution)
     check = first_order_check(distribution, form.threshold(result.coefficients), 6, 2)
     interior = check[check.status == "interior"]
     assert len(interior) > 0
-    assert interior.marginal_welfare.abs().max() < 1e-4
+    assert interior.marginal_contribution.abs().max() < 1e-4
     assert check.best_response_gap.sum() < 1e-8
 
 

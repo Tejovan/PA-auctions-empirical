@@ -1,7 +1,7 @@
 """
-marginal_welfare.py
+marginal_contribution.py
 
-Marginal welfare of a participating type (core draft, Appendix E), computed
+Marginal contribution of a participating type (core draft v7, Def. 5.1), computed
 exactly for a score-based auction model (exact_computation.ScoreAuctionModel)
 held fixed:
 
@@ -11,7 +11,7 @@ where X^τ(v) is the interim allocation of a bid v against n − 1 rivals playin
 the TPT strategy for τ, and L^τ(v) is the expected welfare that the rivals lose
 when the bidder participates with bid v instead of abstaining. M^τ is affine in
 the externality e, so it is given by the two functions A^τ, X^τ of the
-valuation (core draft, Rem. E.6).
+valuation (core draft, Rem. E.3).
 
 Rival welfare loss (k identical goods, unit demand, uniform tie-breaking, only
 positive scores allocated). Let S_(k) be the k-th highest rival score
@@ -30,11 +30,12 @@ B(q) = Pr[Bin(n − 1, P − q) <= k − 1], so dB = (n − 1) Bin(k − 1; n �
 ĉ is the welfare contribution ŵ^τ on segments with increasing scores, and the
 mass-weighted mean of ŵ^τ over a run of segments with the same constant score
 (an atom, or an ironing pool of IVCG-PA, where the mean equals the ironed
-score). For VCG-PA, L = P + Δ (Clarke payment plus displaced externality) and
-M = Ū + e X − Δ (Cor. E.4).
+score). In every DSIC auction, M = Ū + e X − (L − P) with P the interim payment;
+for VCG-PA, L = P + Δ (Clarke payment plus displaced externality), so
+M = Ū + e X − Δ (core draft Rem. 5.3, Cor. E.2).
 
-The marginal welfare holds the auction fixed: for IVCG-PA, the ironed scores
-of the current τ (envelope argument; core draft §5, joint choice).
+The marginal contribution holds the auction fixed: for IVCG-PA, the ironed scores
+of the current τ (justified at a joint optimum; core draft §5.4).
 
 Exactness. Between consecutive breakpoints (cell edges of the distribution,
 segment ends of the model, knots of the scoring rule), X and L are polynomials
