@@ -37,6 +37,7 @@ python run.py configs/standard_test.toml --dry-run  # plan and time estimate onl
 python run.py CONFIG.toml --yes --workers 8         # no question (batch jobs), 8 processes
 python run.py CONFIG.toml --no-report               # compute only
 python run.py --report runs/<run folder>            # redraw every figure of a run from its saved data
+python run.py --report runs/<run folder> --paper    # figures for a paper (below); --paper outcomes,ironing selects
 python run.py --options                             # distributions, forms, optimizers, all defaults
 ```
 
@@ -137,6 +138,15 @@ A comparison figure goes in the `compare/` folder of the deepest level above eve
 | search | tried thresholds (subset) behind the best one; convergence trace of every start and stage |
 | compare | τ overlays across markets (color: n/k on a perceptually uniform scale; line style: k), forms, optimizers (with time and first-order residual) and objectives; welfare against ζ; share of the first-best gain of every combination |
 
+**Figures for a paper** (`--report RUN --paper [NAMES]`): writes a `paper/` folder next to each figure; the run's figures and README stay as they are. Per figure:
+
+- `<figure>_<letter>.pdf`: one PDF per panel, at printed size (panels of multi-panel figures 3.1 × 2.4 in, half of a 6.5 in text width; single panels `<figure>.pdf`, 3.9 × 2.9 in), with fixed margins around the axes box, so panels placed side by side align; no title, no note, no panel letter;
+- `<figure>_legend.pdf` (shared legend), `<figure>_<letter>_legend.pdf` (legend of one panel), `<figure>_colorbar.pdf`: legends wrapped to the panel or text width;
+- `<figure>.caption.txt`: the run settings, the panel titles and the note, as a caption draft;
+- `<figure>.tex`: a `figure` environment with the panels in rows of two (`0.48\linewidth` minipages, "(a) title" above each), the legends and a caption draft; it references the PDFs by file name, so add the `paper/` folder to `\graphicspath`. Include the PDFs at their natural size (no `width=`), so the 8 pt tick labels and 9 pt axis labels keep their size.
+
+NAMES (comma separated): `types`, `outcomes`, `distributions`, `scatter`, `ironing`, `marginal`, `tried`, `trace`, `tau-by`, `welfare-vs-zeta`; default all. The share overview has no paper version. Paper-mode changes: expected outcomes use symbol tick labels and short value labels (the caption draft names them); colorbars are horizontal, with ticks 0, ±10^d and ±10^(d−2).
+
 **Checks** (`checks.csv`; counts in the run's README):
 
 | Check | Value | Verdict |
@@ -160,14 +170,7 @@ A comparison figure goes in the `compare/` folder of the deepest level above eve
 
 ### On the BU SCC cluster
 
-```bash
-#!/bin/bash -l
-#$ -pe omp 16
-#$ -l h_rt=12:00:00
-module load python3
-cd $HOME/audited-auctions-empirical
-.venv/bin/python run.py configs/optimize_example.toml --yes --workers $NSLOTS
-```
+Setup and job scripts are in [scc/](scc/README.md): one-time `scc/scc.sh setup PROJECT`, then `scc/scc.sh submit configs/X.toml SLOTS HOURS` from your machine, `scc/scc.sh fetch` for the results.
 
 `run.toml` records the host, the job id (`JOB_ID`) and the slots.
 
