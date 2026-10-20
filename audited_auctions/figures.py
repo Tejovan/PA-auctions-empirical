@@ -427,7 +427,8 @@ def _finish(fig, path, title, note=None):
     """
     if _PAPER["on"]:
         return _paper_export(fig, path, title, note)
-    fig.suptitle(title, x=0.01, ha="left", fontsize=10, color=INK)
+    fig.suptitle(_wrap_title(title, fig.get_figwidth()), x=0.01, ha="left", fontsize=10,
+                 color=INK)
     fig.canvas.draw()
     fig.set_layout_engine("none")
     renderer = fig.canvas.get_renderer()
@@ -451,6 +452,19 @@ def _finish(fig, path, title, note=None):
                 pil_kwargs={"quality": 75})
     plt.close(fig)
     return path
+
+
+def _wrap_title(title, width_inches, characters_per_inch=13.5):
+    """Break a context line between its "  ·  " parts so that no line is wider than the
+    figure (a wider title would widen the saved PDF with empty space)."""
+    limit = int(characters_per_inch * width_inches)
+    lines = []
+    for part in title.split("  ·  "):
+        if lines and len(lines[-1]) + 5 + len(part) <= limit:
+            lines[-1] += "  ·  " + part
+        else:
+            lines.append(part)
+    return "\n".join(lines)
 
 
 def _shared_legend(fig, handles, columns=4):
@@ -565,7 +579,7 @@ def _visible_pooled_intervals(data, v_limits, minimum_share=0.003):
 def types_tau_penalties(results, data, types, path):
     combination = results["combination"]
     with plt.rc_context(STYLE):
-        fig, axes = _new_figure(10.5, 4.4, 1, 2)
+        fig, axes = _new_figure(6.5, 3.0, 1, 2)
         ax = axes[0, 0]
         draw_types(ax, types)
         e_grid, tau = data["e_grid"], data["tau_grid"]
@@ -629,7 +643,7 @@ def expected_outcomes(results, path):
     combination, exact = results["combination"], results["exact"]
     bootstrap = results.get("bootstrap")
     with plt.rc_context(STYLE):
-        fig, axes = _new_figure(11.5, 4.6, 1, 2, gridspec_kw={"width_ratios": [0.85, 1.15]})
+        fig, axes = _new_figure(6.5, 3.2, 1, 2, gridspec_kw={"width_ratios": [0.85, 1.15]})
         ax = axes[0, 0]
         positions = np.arange(len(MECHANISMS))
         for position, mechanism in zip(positions, MECHANISMS):
@@ -644,13 +658,9 @@ def expected_outcomes(results, path):
                                                      [max(interval[1] - welfare, 0)]],
                             color=INK, capsize=3, linewidth=1, zorder=4)
             share = results["share_of_first_best_gain"].get(mechanism)
-            if _PAPER["on"]:  # narrow panel: value and share only (caption names them)
-                text = compact(welfare) + (f"\n{_percent(share)}"
-                                           if mechanism in ("vcg_pa", "ivcg_pa") else "")
-            else:
-                text = f"W = {exact_number(welfare)}"
-                if mechanism in ("vcg_pa", "ivcg_pa"):
-                    text += f"\n{_percent(share)} of first-\nbest gain"
+            # value and share of the first-best gain only (the note names them)
+            text = compact(welfare) + (f"\n{_percent(share)}"
+                                       if mechanism in ("vcg_pa", "ivcg_pa") else "")
             stack_top = sum(max(exact[mechanism][c], 0.0) for c in COMPONENTS)
             label_at = max(stack_top, interval[1] if interval else welfare)
             ax.annotate(text, (position, label_at), xytext=(0, 4), textcoords="offset points",
@@ -658,16 +668,16 @@ def expected_outcomes(results, path):
         ax.axhline(0, **REFERENCE, zorder=1)
         top = max(sum(max(exact[m][c], 0.0) for c in COMPONENTS) for m in MECHANISMS)
         ax.set_ylim(top=1.3 * top)
-        ax.set_xticks(positions, [SHORT[m] for m in MECHANISMS])
+        ax.set_xticks(positions, ["VCG", "VCG-PA", "IVCG-PA", "First\nbest"])
         ax.grid(axis="x", visible=False)
         ax.set_ylabel("expected value per auction")
         _compact_axes(ax, x=False)
-        ax.set_title("(a) Expected welfare W and its components", loc="left")
+        ax.set_title("(a) Welfare W and its components", loc="left")
         ax.legend(handles=[Patch(facecolor=COMPONENT_COLORS[c], hatch=COMPONENT_HATCHES[c],
                                  edgecolor="white", label=METRIC_LABELS[c]) for c in COMPONENTS]
                   + [Line2D([], [], marker="D", color=INK, linestyle="none",
                             label="welfare W (sum)")],
-                  loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=3)
+                  loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2)
 
         ax = axes[0, 1]
         metrics = ("welfare", "valuation_welfare", "externality_welfare", "revenue",
@@ -688,14 +698,11 @@ def expected_outcomes(results, path):
                                                            [max(interval[1] - value, 0)]],
                                     color=INK, capsize=2, linewidth=0.9, zorder=3)
         ax.axhline(0, **REFERENCE, zorder=1)
-        ax.set_xticks(np.arange(len(metrics)),
-                      ["W", "Σvx", "Σex", "Σp", "Σr", "Σu"] if _PAPER["on"] else
-                      ["W", "Σvx", "Σex", "revenue\nΣp", "penalties\nΣr", "net utility\nΣu"])
+        ax.set_xticks(np.arange(len(metrics)), ["W", "Σvx", "Σex", "Σp", "Σr", "Σu"])
         ax.grid(axis="x", visible=False)
-        ax.set_ylabel("change over VCG" if _PAPER["on"]
-                      else "expected change over VCG per auction")
+        ax.set_ylabel("change over VCG per auction")
         _compact_axes(ax, x=False)
-        ax.set_title("(b) Changes over VCG (paired by auction)", loc="left")
+        ax.set_title("(b) Changes over VCG", loc="left")
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=3)
         if bootstrap:
             note = (f"Exact expected values on the evaluation distribution (test half). Error "
@@ -704,10 +711,9 @@ def expected_outcomes(results, path):
         else:
             note = "Exact expected values; the distribution is known, so there is no sampling error."
         note += " W = Σu + Σp + Σr + Σex and Σvx = Σu + Σp + Σr."
-        if _PAPER["on"]:
-            note += (" Numbers above the bars: expected welfare W and, for VCG-PA and IVCG-PA, "
-                     "the share of the first-best gain over VCG. Σp: revenue; Σr: penalties; "
-                     "Σu: bidder net utility.")
+        note += (" Numbers above the bars: expected welfare W and, for VCG-PA and IVCG-PA, "
+                 "the share of the first-best gain over VCG. Σp: revenue; Σr: penalties; "
+                 "Σu: bidder net utility; Σvx: valuation part; Σex: externality part.")
         return _finish(fig, path, context_line(combination), note)
 
 
@@ -761,7 +767,7 @@ def outcome_distributions(results, data, path):
     bootstrap = results.get("bootstrap") or {}
     metrics = ("welfare", "valuation_welfare", "externality_welfare", "revenue", "penalty_paid")
     with plt.rc_context(STYLE):
-        fig, axes = _new_figure(11.0, 13.0, len(metrics), 2)
+        fig, axes = _new_figure(6.5, 2.2 * len(metrics), len(metrics), 2)
         for row, metric in enumerate(metrics):
             mechanisms = [m for m in MECHANISMS if not (metric == "penalty_paid" and m == "vcg")]
             draws = {m: data[f"sim_{m}_{metric}"] for m in mechanisms}
@@ -828,7 +834,7 @@ def gain_scatter(results, data, path):
     combination = results["combination"]
     first_best_gain = data["sim_first_best_welfare"] - data["sim_vcg_welfare"]
     with plt.rc_context(STYLE):
-        fig, axes = _new_figure(9.5, 8.2, 2, 2)
+        fig, axes = _new_figure(6.5, 5.6, 2, 2)
         for row, mechanism in enumerate(PARTICIPANT_AUDITS):
             gain = data[f"sim_{mechanism}_welfare"] - data["sim_vcg_welfare"]
             revenue = data[f"sim_{mechanism}_revenue"] - data["sim_vcg_revenue"]
@@ -850,8 +856,13 @@ def gain_scatter(results, data, path):
                     ax.plot([low, high], [low, high], zorder=2, **REFERENCE)
                 ax.plot(np.mean(x), np.mean(y), marker="X", color=INK, markersize=9,
                         markeredgecolor="white", zorder=5)
-                ax.text(0.02, 0.98, f"{100 * zero.mean():.0f}% of auctions at (0, 0)",
-                        transform=ax.transAxes, ha="left", va="top", fontsize=7, color=INK)
+                corner = (0.02, 0.98, "left", "top") if column == 0 else (0.98, 0.03, "right",
+                                                                          "bottom")
+                ax.text(corner[0], corner[1], f"{100 * zero.mean():.0f}% of auctions at (0, 0)",
+                        transform=ax.transAxes, ha=corner[2], va=corner[3], fontsize=7,
+                        color=INK, zorder=6,
+                        bbox={"boxstyle": "round,pad=0.2", "facecolor": "white", "alpha": 0.85,
+                              "edgecolor": "none"})
                 ax.set_xlabel(x_label)
                 ax.set_ylabel(y_label)
                 _compact_axes(ax)
@@ -900,7 +911,7 @@ def ironing(results, data, path):
     _, score, hull = _integrated(q_start, q_end, data["iron_score_start"], data["iron_score_end"])
     pooled = np.abs(welfare - score) > 1e-9 * max(1.0, float(np.abs(welfare).max()))
     with plt.rc_context(STYLE):
-        fig, axes = _new_figure(12.0, 7.2, 2, 3)
+        fig, axes = _new_figure(9.3, 5.6, 2, 3)
 
         def shade(ax, x):
             ax.fill_between(x, 0, 1, where=pooled, **REGION_QTY,
@@ -977,7 +988,7 @@ def ironing(results, data, path):
 def marginal_contribution(results, data, types, first_order, path):
     combination = results["combination"]
     with plt.rc_context(STYLE):
-        fig, axes = _new_figure(11.0, 8.6, 2, 2)
+        fig, axes = _new_figure(6.5, 5.6, 2, 2)
         values = np.concatenate([np.abs(data[f"mc_{m}"]).ravel() for m in PARTICIPANT_AUDITS])
         limit = float(np.quantile(values[np.isfinite(values)], 0.98)) or 1.0
         # Symmetric logarithmic scale: M varies over orders of magnitude, and its sign
@@ -1022,9 +1033,9 @@ def marginal_contribution(results, data, types, first_order, path):
             axis.set_xlabel("externality e")
             _compact_axes(axis)
         ax.set_ylabel("penalty")
-        ax.set_title("(c) Penalty r(e) and Pigouvian charge −eX + L − P", loc="left")
+        ax.set_title("(c) Penalty r(e) and Pigouvian charge", loc="left")
         ax_residual.set_ylabel(r"$M^{\tau}(e, \tau(e))$")
-        ax_residual.set_title("(d) Marginal contribution of threshold types", loc="left")
+        ax_residual.set_title("(d) M of threshold types", loc="left")
         handles = [Line2D([], [], color=INK, linestyle="--", linewidth=1,
                           label=r"$M^{\tau} = 0$ (zero contour)"),
                    Line2D([], [], color=THRESHOLD_COLOR, linewidth=2, label="threshold τ(e)"),
@@ -1036,7 +1047,7 @@ def marginal_contribution(results, data, types, first_order, path):
                    mechanism_line("ivcg_pa", label=r"IVCG-PA: penalty / $M^{\tau}$"),
                    mechanism_line("ivcg_pa", linestyle=":", marker="D", markersize=3,
                                   label="IVCG-PA: Pigouvian charge")]
-        _shared_legend(fig, handles, columns=4)
+        _shared_legend(fig, handles, columns=3)
         note = ("Marginal contribution M(e, v) = (v + e) X(v) − L(v) of a participating type, "
                 "for the auction and the rivals' thresholds of this τ (training distribution; "
                 "IVCG-PA with its scores fixed). At an optimal interior threshold, M(e, τ(e)) = 0 "
@@ -1049,7 +1060,7 @@ def marginal_contribution(results, data, types, first_order, path):
 def search_history(results, data, types, path_tried, path_trace):
     combination, search = results["combination"], results["search"]
     with plt.rc_context(STYLE):
-        fig, axes = _new_figure(6.2, 4.8)
+        fig, axes = _new_figure(3.9, 3.3)
         ax = axes[0, 0]
         draw_types(ax, types, alpha=0.45)
         tried = data["search_tried"]
@@ -1067,11 +1078,13 @@ def search_history(results, data, types, path_tried, path_trace):
         ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2)
         _finish(fig, path_tried, context_line(combination))
 
-        fig, axes = _new_figure(6.2, 4.2)
+        fig, axes = _new_figure(3.9, 3.0)
         ax = axes[0, 0]
         trace = search["trace"]
         best = max(point["welfare"] for point in trace)
-        scale = max(abs(best), 1e-300)
+        benchmarks = search.get("training_benchmarks")
+        gain = benchmarks["first_best"] - benchmarks["vcg"] if benchmarks else 0.0
+        scale = gain if gain > 0 else max(abs(best), 1e-300)
         groups = {}
         for point in trace:
             if point["stage"] == "end":
@@ -1087,7 +1100,8 @@ def search_history(results, data, types, path_tried, path_trace):
                     linestyle=CATEGORY_LINESTYLES[index % 7], label=f"{optimizer}: {label}")
         ax.set_yscale("log")
         ax.set_xlabel("seconds since the start of the search")
-        ax.set_ylabel("(best W − W so far) / |best W|")
+        ax.set_ylabel("(best W − W so far) / (FB − W_VCG)" if gain > 0
+                      else "(best W − W so far) / |best W|")
         ax.set_title("Convergence of the search (training objective)", loc="left")
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=2)
         note = (f"Best training welfare {compact(best)} after {search['seconds']:.1f} s; values "
@@ -1126,7 +1140,7 @@ def search_iterations(results, path, tolerances):
     unit = gain if gain > 0 else max(abs(benchmarks["first_best"]), 1e-300)
     best = max(point["welfare"] for line in lines for point in line["points"])
     with plt.rc_context(STYLE):
-        fig, axes = _new_figure(7.4, 7.6, 3, 2, sharex=True)
+        fig, axes = _new_figure(6.5, 7.6, 3, 2, sharex=True)
         axes[2, 1].set_visible(False)
         handles = []
         for index, line in enumerate(lines):
@@ -1204,7 +1218,7 @@ def search_iterations(results, path, tolerances):
 def threshold_overlay(entries, types, title, path, note=None):
     """entries: dicts with e_grid, tau_grid, label, color, linestyle."""
     with plt.rc_context(STYLE):
-        fig, axes = _new_figure(7.4, 5.4)
+        fig, axes = _new_figure(3.9, 3.3)
         ax = axes[0, 0]
         draw_types(ax, types, alpha=0.45)
         ax.plot(types["e_grid"], -types["e_grid"], color=MECHANISM_COLORS["first_best"],
@@ -1217,7 +1231,7 @@ def threshold_overlay(entries, types, title, path, note=None):
             handles.append(line)
         handles.append(Line2D([], [], color=MECHANISM_COLORS["first_best"], linestyle="-.",
                               label="v = −e (first best)"))
-        ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.01, 1.0), ncol=1)
+        _shared_legend(fig, handles, columns=1)
         return _finish(fig, path, title, note)
 
 
@@ -1226,7 +1240,7 @@ def welfare_against_zeta(rows, title, path, note=None):
     rows = sorted(rows, key=lambda r: r["zeta"])
     zetas = np.array([r["zeta"] for r in rows])
     with plt.rc_context(STYLE):
-        fig, axes = _new_figure(10.5, 4.2, 1, 2)
+        fig, axes = _new_figure(6.5, 3.0, 1, 2)
         for column, (key, mechanisms, label) in enumerate((
                 ("welfare", MECHANISMS, "expected welfare W"),
                 ("gain", AUDITED, "expected welfare gain over VCG"))):
@@ -1261,7 +1275,7 @@ def share_overview(groups, path, title, note=None):
     """groups: {panel title: [(row label, share VCG-PA, share IVCG-PA, interval VCG-PA)]}."""
     rows_total = sum(len(rows) for rows in groups.values())
     with plt.rc_context(STYLE):
-        fig, axes = _new_figure(7.5, 1.2 + 0.19 * rows_total + 0.5 * len(groups), len(groups), 1,
+        fig, axes = _new_figure(6.5, 1.2 + 0.19 * rows_total + 0.5 * len(groups), len(groups), 1,
                                 gridspec_kw={"height_ratios": [len(r) for r in groups.values()]})
         for ax, (panel, rows) in zip(axes[:, 0], groups.items()):
             positions = np.arange(len(rows))[::-1]
