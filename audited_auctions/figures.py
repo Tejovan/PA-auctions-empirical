@@ -28,6 +28,8 @@ Across combinations:
   threshold_overlay         τ of several combinations on one type plot
   welfare_against_zeta      expected welfare and gains over VCG against ζ
   share_overview            share of the first-best gain of every combination
+README gallery (draw_distributions.py):
+  distribution_preview      type density of a synthetic family, WebP only
 
 Paper mode (set_paper(True); python run.py --report RUN --paper): the same
 functions export each panel as its own PDF in a paper/ folder next to the
@@ -178,6 +180,8 @@ _PAPER = {"on": False}
 
 # Previews of run figures in the README files: WebP, about 45 pixels per inch.
 THUMBNAIL_DPI = 45
+# Previews of the synthetic families in the code README: WebP, about 70 pixels per inch.
+DISTRIBUTION_PREVIEW_DPI = 70
 
 
 def thumbnail_path(path):
@@ -1233,6 +1237,20 @@ def threshold_overlay(entries, types, title, path, note=None):
                               label="v = −e (first best)"))
         _shared_legend(fig, handles, columns=1)
         return _finish(fig, path, title, note)
+
+
+def distribution_preview(types, title, path):
+    """Type density with the line v = −e (welfare contribution w = 0), saved as WebP only."""
+    with plt.rc_context(STYLE):
+        fig, axes = _new_figure(3.1, 2.4)
+        ax = axes[0, 0]
+        draw_types(ax, types, alpha=0.9)
+        ax.plot(types["e_grid"], -types["e_grid"], color=MECHANISM_COLORS["first_best"],
+                linestyle="-.", linewidth=1.2, zorder=2)
+        ax.set_title(title, loc="left")
+        fig.savefig(path, dpi=DISTRIBUTION_PREVIEW_DPI, pil_kwargs={"quality": 80})
+        plt.close(fig)
+    return path
 
 
 def welfare_against_zeta(rows, title, path, note=None):

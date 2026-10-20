@@ -446,11 +446,16 @@ Login nodes are for light work only (e.g. the smoke test, `--report`); submit ev
 
 ## 6. Distributions and data
 
-**Synthetic families:**
+**Synthetic families:** type density at ζ = 1 (darker = more mass) and the dash-dot line v = −e (types above the line have welfare contribution w = v + e > 0).
 
-- the mixtures `a`–`f`, `h`;
-- `example_n`, the analytic benchmark of the paper (Example N);
-- `independent`, `harm_rises`, `harmful_middle` (ironing binds), `heavy_tail`.
+| | | |
+|---|---|---|
+| ![a](docs/distributions/a.webp)<br>`a`: one normal at (e, v) = (0, 1) | ![b](docs/distributions/b.webp)<br>`b`: harmful and benign normals, equal v | ![c](docs/distributions/c.webp)<br>`c`: harmful types have low v |
+| ![d](docs/distributions/d.webp)<br>`d`: harmful types have high v | ![e](docs/distributions/e.webp)<br>`e`: no harm; two v levels | ![f](docs/distributions/f.webp)<br>`f`: four normals (b–e combined) |
+| ![h](docs/distributions/h.webp)<br>`h`: one normal at (e, v) = (0, 2) | ![example_n](docs/distributions/example_n.webp)<br>`example_n`: Example N: e ∈ {−0.6, 0}, v ~ U[0, 1] | ![independent](docs/distributions/independent.webp)<br>`independent`: v ~ U[0, 1] independent of e ~ N(−0.3, 0.5²) |
+| ![harm_rises](docs/distributions/harm_rises.webp)<br>`harm_rises`: one normal, correlation −0.6 | ![harmful_middle](docs/distributions/harmful_middle.webp)<br>`harmful_middle`: harmful types for v ∈ [0.5, 0.75); ironing binds | ![heavy_tail](docs/distributions/heavy_tail.webp)<br>`heavy_tail`: lognormal v (log axis), harm grows with v |
+
+[draw_distributions.py](draw_distributions.py) redraws these previews into [docs/distributions/](docs/distributions/) (about 2 s).
 
 Every family is a piecewise-uniform distribution on a grid: externalities on nodes, valuations uniform within cells. All quantities are exact for that distribution. Parameters and grid accuracy: [audited_auctions/README.md](audited_auctions/README.md#synthetic-families).
 
@@ -521,6 +526,7 @@ The set has 11,811 tweets created between 2022-12-16 and 2025-01-18, each with a
 | [audited_auctions/](audited_auctions/) | the package: distributions, exact computation, simulation, optimizers, figures |
 | [audited_auctions/experiments/](audited_auctions/experiments/) | runs: configuration, computation of combinations, run records, report |
 | [scc/](scc/) | BU SCC scripts |
+| [draw_distributions.py](draw_distributions.py), [docs/distributions/](docs/distributions/) | previews of the synthetic families (§6) |
 | [tests/](tests/) | unit tests |
 | `data/samples/`, `full_tweets.csv` | the tweet data |
 | [legacy/](legacy/) | superseded scripts, notebooks and outputs of the EC 2025 / EAAMO 2026 workflow ([legacy/README.md](legacy/README.md)) |

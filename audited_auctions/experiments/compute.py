@@ -119,9 +119,10 @@ def plot_geometry(prepared):
                  distribution.maximum_valuation)
     if e_high <= e_low:
         e_low, e_high = e_low - 0.5, e_high + 0.5
-    # Heavy-tailed valuations (empirical data): symmetric logarithmic valuation axis,
-    # linear below the median valuation.
-    v_linear_below = (quantile(distribution.valuation_midpoints, 0.5) if prepared.is_empirical
+    # Heavy-tailed valuations (empirical data, heavy_tail family): symmetric logarithmic
+    # valuation axis, linear below the median valuation.
+    heavy_tailed = prepared.is_empirical or prepared.settings.get("family") == "heavy_tail"
+    v_linear_below = (quantile(distribution.valuation_midpoints, 0.5) if heavy_tailed
                       else 0.0)
     e_pad, v_pad = 0.04 * (e_high - e_low), 0.04 * (v_high - v_low)
     e_limits = (e_low - e_pad, e_high + e_pad)
