@@ -59,6 +59,29 @@ Each start is run to convergence and the best result is kept. Starts:
 plus any warm starts passed as threshold functions (for example the genetic
 search's result, or the optimum at the previous externality scale of a run).
 
+Stopping. The ascent stops for one of the stop_reason values: "no_improving_step",
+"small_gain" (relative gain below relative_tolerance in two consecutive
+iterations), "max_iterations" or "time_limit" (deadline, a time.time() value:
+the current iteration or polish ends, later starts are skipped, and the best
+point so far is kept). The polish (L-BFGS-B) stops on its projected gradient
+(gtol), which is the first-order condition in the form's parameters.
+
+Per-iteration diagnostics (history of each start), at the current τ:
+  stationarity      v̄ Σ_j |∂W/∂θ_j| / scale, the projected gradient of W in the form's
+                    parameters θ (at τ(e) = 0 and exclusion only the one-sided
+                    derivative into [0, v̄] that raises W counts): the
+                    rate of change of W if every parameter moves by v̄ in its
+                    ascent direction, in units of scale (the first-best gain
+                    FB − W_VCG when given, else |W|). Zero at a stationary point.
+  max_marginal      largest violation, / v̄, over nodes with positive mass, of the
+                    first-order conditions of an optimal common τ: |M^τ(e, τ(e))| at
+                    interior thresholds (zero marginal contribution, Prop. 7.9
+                    [prop:zero-marginal-equal]), max(0, −M(e, 0)) at τ(e) = 0 and
+                    max(0, M(e, v̄)) at exclusion.
+  gap               best-response gap Σ_e max_t g_e(t) − Σ_e g_e(τ(e)), in units of
+                    scale: the gain one bidder could get by deviating alone.
+Not zero at an optimum in general: a common optimum need not be a best response.
+
 Diagnostics: first_order_check reports, at each externality node, the marginal
 contribution of the threshold type, the penalty, the own-allocation charge −e X^τ,
 the displaced welfare term, and the best-response gap.
@@ -336,7 +359,7 @@ def best_response(type_distribution, form, current_parameters, num_bidders, num_
 
 
 def _start_thresholds(starts, type_distribution, form, num_bidders, num_goods, mechanism,
-                      short_genetic_generations, seed):
+                      short_genetic_generations, seed, deadline=None):
     maximum = type_distribution.maximum_valuation
     thresholds = []
     for start in starts:
@@ -355,16 +378,50 @@ def _start_thresholds(starts, type_distribution, form, num_bidders, num_goods, m
                                         threshold_form=genetic_form,
                                         num_generations=short_genetic_generations,
                                         sol_per_pop=30, num_parents_mating=10, seed=seed,
-                                        local_refinement="none", verbose=False)
+                                        local_refinement="none", verbose=False,
+                                        deadline=deadline)
             thresholds.append(("short_genetic", genetic_form.threshold(search.coefficients)))
         else:
             raise ValueError(f"unknown start {start!r}")
     return thresholds
 
 
+def _past(deadline):
+    return deadline is not None and time.time() >= deadline
+
+
+def first_order_measures(type_distribution, form, parameters, num_bidders, functions, welfare,
+                         scale=None):
+    """(stationarity, max_marginal) of τ = form.threshold(parameters); see the module
+    docstring. functions: valuation_functions of the objective model at this τ.
+    Stationarity is None for atomic distributions (W is a step function of τ)."""
+    nodes, masses, node_of_cell = externality_nodes(type_distribution)
+    maximum = float(type_distribution.maximum_valuation)
+    values = form.finite_values(parameters, nodes)
+    clipped = np.clip(values, 0.0, maximum)
+    allocation, loss = functions.rival_welfare_loss(clipped)
+    marginal = (clipped + nodes) * allocation - loss
+    # Violation of the first-order conditions: |M| at interior thresholds; at τ = 0,
+    # M(e, 0) < 0 (raising τ helps); at exclusion, M(e, v̄) > 0 (admitting types helps).
+    violation = np.where(values <= 0, np.maximum(-marginal, 0.0),
+                         np.where(values >= maximum, np.maximum(marginal, 0.0), np.abs(marginal)))
+    violation = violation[(masses > 0) & np.isfinite(violation)]
+    max_marginal = float(np.max(violation) / maximum) if len(violation) else 0.0
+    if type_distribution.is_atomic:
+        return None, max_marginal
+    payoffs = ParticipationPayoffs(type_distribution, functions, node_of_cell, len(nodes))
+    gradient = _parameter_gradient(type_distribution, form, parameters, num_bidders, functions,
+                                   payoffs, bounds=True)
+    scale = scale if scale else max(abs(welfare), 1e-300)
+    return float(maximum * np.sum(np.abs(gradient)) / scale), max_marginal
+
+
 def ascend(type_distribution, form, parameters, num_bidders, num_goods, mechanism,
-           max_iterations=100, relative_tolerance=1e-10, verbose=False):
-    """Best-response ascent from one start; returns (parameters, welfare, history)."""
+           max_iterations=100, relative_tolerance=1e-10, verbose=False, deadline=None,
+           scale=None, first_iteration=0):
+    """Best-response ascent from one start; returns (parameters, welfare, history,
+    stop_reason). History entries: iteration, welfare, step, gap, stationarity,
+    max_marginal (measures at that entry's τ), parameters, time."""
     parameters = np.asarray(parameters, dtype=float)
 
     def welfare_of(candidate):
@@ -372,13 +429,21 @@ def ascend(type_distribution, form, parameters, num_bidders, num_goods, mechanis
                                 num_goods, mechanism)
 
     welfare = welfare_of(parameters)
-    history = [{"iteration": 0, "welfare": welfare, "step": None, "gap": None,
+    history = [{"iteration": first_iteration, "welfare": welfare, "step": None, "gap": None,
+                "stationarity": None, "max_marginal": None,
                 "parameters": parameters.tolist(), "time": time.time()}]
-    small_gains = 0
-    for iteration in range(1, max_iterations + 1):
-        target, current_payoff, best_payoff, _ = best_response(
+    unit = scale if scale else max(abs(welfare), 1e-300)
+    small_gains, stop_reason = 0, "max_iterations"
+    for iteration in range(first_iteration + 1, first_iteration + max_iterations + 1):
+        if _past(deadline):
+            stop_reason = "time_limit"
+            break
+        target, current_payoff, best_payoff, payoffs = best_response(
             type_distribution, form, parameters, num_bidders, num_goods, mechanism)
         gap = best_payoff - current_payoff
+        stationarity, max_marginal = first_order_measures(
+            type_distribution, form, parameters, num_bidders, payoffs.functions, welfare, scale)
+        history[-1].update(gap=gap / unit, stationarity=stationarity, max_marginal=max_marginal)
         accepted = None
         for step in STEP_SIZES:
             candidate = parameters + step * (target - parameters)
@@ -387,21 +452,22 @@ def ascend(type_distribution, form, parameters, num_bidders, num_goods, mechanis
                 accepted = (step, candidate, candidate_welfare)
                 break
         if accepted is None:
-            history.append({"iteration": iteration, "welfare": welfare, "step": 0.0, "gap": gap,
-                            "parameters": parameters.tolist(), "time": time.time()})
+            stop_reason = "no_improving_step"
             break
         step, parameters, new_welfare = accepted
         gain = (new_welfare - welfare) / max(abs(welfare), 1e-300)
         welfare = new_welfare
-        history.append({"iteration": iteration, "welfare": welfare, "step": step, "gap": gap,
+        history.append({"iteration": iteration, "welfare": welfare, "step": step, "gap": None,
+                        "stationarity": None, "max_marginal": None,
                         "parameters": parameters.tolist(), "time": time.time()})
         if verbose:
             print(f"    iteration {iteration:3d}  welfare={welfare:.10g}  step={step:g}  "
                   f"best-response gap={gap:.3g}")
         small_gains = small_gains + 1 if gain < relative_tolerance else 0
         if small_gains >= 2:
+            stop_reason = "small_gain"
             break
-    return parameters, welfare, history
+    return parameters, welfare, history, stop_reason
 
 
 def welfare_and_gradient(type_distribution, form, parameters, num_bidders, num_goods,
@@ -423,8 +489,25 @@ def welfare_and_gradient(type_distribution, form, parameters, num_bidders, num_g
     functions = valuation_functions(model, type_distribution)
     nodes, _, node_of_cell = externality_nodes(type_distribution)
     payoffs = ParticipationPayoffs(type_distribution, functions, node_of_cell, len(nodes))
+    return welfare, _parameter_gradient(type_distribution, form, parameters, num_bidders,
+                                        functions, payoffs)
+
+
+def _parameter_gradient(type_distribution, form, parameters, num_bidders, functions, payoffs,
+                        bounds=False):
+    """∂W/∂θ for the form's parameters θ; payoffs: ParticipationPayoffs grouped by node.
+
+    bounds=False: zero where τ(e) is clipped to 0 or excluded (W is flat in the
+    parameter there). bounds=True: at τ(e) = 0 and at exclusion, the one-sided
+    derivative into [0, v̄] if it raises W, else zero (the projected gradient of the
+    first-order (KKT) conditions with bounds 0 and v̄)."""
+    parameters = np.asarray(parameters, dtype=float)
+    nodes, _, _ = externality_nodes(type_distribution)
     values = form.finite_values(parameters, nodes)
-    active = (values > 0) & (values < form.maximum_valuation)
+    maximum = form.maximum_valuation
+    at_zero = np.abs(values) <= 1e-12 * maximum
+    excluded = values >= maximum
+    active = ((values > 0) & (values < maximum)) | (bounds & (at_zero | excluded))
     clipped = np.clip(values, 0.0, form.maximum_valuation)
     interval = functions.interval_of(clipped)
     x = functions.local_coordinate(interval, clipped)
@@ -432,12 +515,15 @@ def welfare_and_gradient(type_distribution, form, parameters, num_bidders, num_g
     base = chebyshev.chebval(x, functions.coefficients_a[:, interval], tensor=False)
     density = payoffs.density[np.arange(len(nodes)), interval]
     node_gradient = np.where(active, -num_bidders * density * (base + nodes * allocation), 0.0)
+    if bounds:  # only feasible, improving directions: raise τ from 0, lower τ from v̄
+        node_gradient = np.where(at_zero, np.maximum(node_gradient, 0.0),
+                                 np.where(excluded, np.minimum(node_gradient, 0.0), node_gradient))
     if form.kind == "nodes":
-        return welfare, np.interp(form.locations, nodes, node_gradient) if len(
+        return np.interp(form.locations, nodes, node_gradient) if len(
             form.locations) != len(nodes) else node_gradient
     if form.kind == "bins":
         bin_of_node = np.searchsorted(form.locations, nodes, side="right")
-        return welfare, np.bincount(bin_of_node, node_gradient, form.size)
+        return np.bincount(bin_of_node, node_gradient, form.size)
     knots = form.locations
     segment = np.clip(np.searchsorted(knots, nodes, side="right") - 1, 0, len(knots) - 2)
     weight = np.clip((knots[segment + 1] - nodes) / (knots[segment + 1] - knots[segment]),
@@ -446,11 +532,11 @@ def welfare_and_gradient(type_distribution, form, parameters, num_bidders, num_g
     gradient = np.zeros_like(parameters)
     np.add.at(gradient, segment[included], (node_gradient * weight)[included])
     np.add.at(gradient, segment[included] + 1, (node_gradient * (1 - weight))[included])
-    return welfare, gradient
+    return gradient
 
 
 def polish(type_distribution, form, parameters, num_bidders, num_goods, mechanism,
-           max_iterations=200):
+           max_iterations=200, deadline=None):
     """L-BFGS-B on W with the exact gradient (knots: cutoff fixed); returns (parameters, W)."""
     from scipy.optimize import minimize
 
@@ -469,7 +555,12 @@ def polish(type_distribution, form, parameters, num_bidders, num_goods, mechanis
         bounds[-1] = (parameters[-1], parameters[-1])
     if form.kind in ("nodes", "bins"):
         bounds = [(0.0, form.exclusion_value)] * len(parameters)
+    def callback(intermediate_result):  # noqa: ARG001
+        if _past(deadline):
+            raise StopIteration
+
     outcome = minimize(objective, parameters, jac=True, method="L-BFGS-B", bounds=bounds,
+                       callback=callback,
                        options={"maxiter": max_iterations, "ftol": 1e-15, "gtol": 1e-12})
     welfare = expected_welfare(type_distribution, form.threshold(outcome.x), num_bidders,
                                num_goods, mechanism)
@@ -478,11 +569,26 @@ def polish(type_distribution, form, parameters, num_bidders, num_goods, mechanis
     return parameters, start_welfare
 
 
+def _complete_measures(type_distribution, form, entry, num_bidders, num_goods, mechanism,
+                       scale):
+    """Fill the gap and first-order measures of a history entry that has none."""
+    if entry["max_marginal"] is not None:
+        return
+    target, current_payoff, best_payoff, payoffs = best_response(
+        type_distribution, form, entry["parameters"], num_bidders, num_goods, mechanism)
+    stationarity, max_marginal = first_order_measures(
+        type_distribution, form, entry["parameters"], num_bidders, payoffs.functions,
+        entry["welfare"], scale)
+    unit = scale if scale else max(abs(entry["welfare"]), 1e-300)
+    entry.update(gap=(best_payoff - current_payoff) / unit, stationarity=stationarity,
+                 max_marginal=max_marginal)
+
+
 def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num_goods,
                              objective_mechanism="vcg_pa", starts=DEFAULT_STARTS,
                              warm_starts=(), max_iterations=100, relative_tolerance=1e-10,
                              short_genetic_generations=40, polish_rounds=DEFAULT_POLISH_ROUNDS,
-                             seed=None, verbose=True):
+                             seed=None, verbose=True, deadline=None, scale=None):
     """Maximize the exact welfare of objective_mechanism over τ in threshold_form.
 
     threshold_form : a ThresholdForm or a label ("knots6", "bins10", "nodes")
@@ -491,6 +597,9 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
                      an attribute start_name labels them in the summary
     polish_rounds  : gradient polishes (each followed by more ascent); 0 = none;
                      skipped for atomic distributions
+    deadline       : time.time() value after which the search stops gracefully
+                     (starts not begun are listed with stop_reason "skipped (time limit)")
+    scale          : welfare unit of the diagnostics (the first-best gain FB − W_VCG)
     Returns a genetic_search.SearchResult (coefficients = parameters of the form).
     """
     form = (threshold_form if not isinstance(threshold_form, str)
@@ -499,7 +608,7 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
         raise ValueError(f"best-response ascent needs a form in {BEST_RESPONSE_FORMS}")
     start_list = _start_thresholds(list(starts) + list(warm_starts), type_distribution, form,
                                    num_bidders, num_goods, objective_mechanism,
-                                   short_genetic_generations, seed)
+                                   short_genetic_generations, seed, deadline)
     if verbose:
         print(f"Best-response ascent ({objective_mechanism}, {form.label}, "
               f"{form.num_parameters} parameters, {len(start_list)} starts)")
@@ -509,39 +618,63 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
         trace.extend({"stage": name, "iteration": entry["iteration"], "time": entry["time"],
                       "welfare": float(entry["welfare"])} for entry in entries)
 
+    def diagnostics(entries, stage):
+        return [{"iteration": e["iteration"], "stage": stage, "time": e["time"],
+                 "welfare": float(e["welfare"]), "gap": e["gap"],
+                 "stationarity": e["stationarity"], "max_marginal": e["max_marginal"]}
+                for e in entries]
+
     for name, threshold in start_list:
+        if _past(deadline) and best is not None:
+            summaries.append({"start": name, "start_welfare": None, "welfare": None,
+                              "iterations": 0, "polish_gains": [], "final_gap": None,
+                              "seconds": 0.0, "parameters": None,
+                              "stop_reason": "skipped (time limit)", "history": []})
+            continue
         begin = time.time()
         initial = form.project(threshold, type_distribution)
-        parameters, welfare, history = ascend(type_distribution, form, initial, num_bidders,
-                                              num_goods, objective_mechanism, max_iterations,
-                                              relative_tolerance, verbose=False)
+        parameters, welfare, history, stop_reason = ascend(
+            type_distribution, form, initial, num_bidders, num_goods, objective_mechanism,
+            max_iterations, relative_tolerance, verbose=False, deadline=deadline, scale=scale)
         start_welfare, iterations = history[0]["welfare"], len(history) - 1
         trajectory.extend(entry["parameters"] for entry in history)
         record_trace(name, history)
+        records = diagnostics(history, "ascent")
         polish_gains = []
         rounds = 0 if type_distribution.is_atomic else polish_rounds
         for _ in range(rounds):
+            if _past(deadline):
+                stop_reason = "time_limit"
+                break
             polished, polished_welfare = polish(type_distribution, form, parameters,
-                                                num_bidders, num_goods, objective_mechanism)
+                                                num_bidders, num_goods, objective_mechanism,
+                                                deadline=deadline)
             gain = polished_welfare - welfare
             if gain <= relative_tolerance * max(abs(welfare), 1e-300):
                 break
             polish_gains.append(gain)
-            parameters, welfare, history = ascend(type_distribution, form, polished,
-                                                  num_bidders, num_goods, objective_mechanism,
-                                                  max_iterations, relative_tolerance)
+            parameters, welfare, history, stop_reason = ascend(
+                type_distribution, form, polished, num_bidders, num_goods, objective_mechanism,
+                max_iterations, relative_tolerance, deadline=deadline, scale=scale,
+                first_iteration=records[-1]["iteration"] + 1)
             iterations += len(history) - 1
             trajectory.extend(entry["parameters"] for entry in history)
             record_trace(name, history)
+            records += diagnostics(history[:1], "polish") + diagnostics(history[1:], "ascent")
+        _complete_measures(type_distribution, form, history[-1], num_bidders, num_goods,
+                           objective_mechanism, scale)
+        records[-1].update({key: history[-1][key]
+                            for key in ("gap", "stationarity", "max_marginal")})
         summaries.append({"start": name, "start_welfare": start_welfare,
                           "welfare": welfare, "iterations": iterations,
                           "polish_gains": polish_gains,
                           "final_gap": history[-1]["gap"], "seconds": time.time() - begin,
-                          "parameters": parameters.tolist()})
+                          "parameters": parameters.tolist(), "stop_reason": stop_reason,
+                          "history": records})
         if verbose:
             print(f"  start {name:15s}: welfare {start_welfare:.10g} -> {welfare:.10g} "
                   f"in {iterations} iterations, {len(polish_gains)} polishes "
-                  f"({time.time() - begin:.1f}s)")
+                  f"({time.time() - begin:.1f}s, {stop_reason})")
         if best is None or welfare > best[1]:
             best = (parameters, welfare)
     summary = {"optimizer": "best_response", "form": form.spec(best[0]), "starts": summaries,

@@ -11,7 +11,7 @@ Figures of each combination (in its folder):
   4_gain-scatter.pdf            per-auction captured gain; revenue vs welfare change
   5_ironing.pdf                 IVCG-PA ironing (only when ironing binds)
   6_marginal-contribution.pdf   marginal contribution maps; Pigouvian check
-  search/tried-taus.pdf, search/convergence.pdf   (optimize runs)
+  search/tried-taus.pdf, search/convergence.pdf, search/iterations.pdf   (optimize runs)
 Comparison figures: a figure that varies some inputs and fixes the others is
 saved in the compare/ folder of the deepest level above every varied input:
   <distribution>/z<ζ>/compare/tau-by-<input>_<fixed inputs>.pdf
@@ -51,6 +51,7 @@ LEAF_FIGURES = {
     "marginal": "6_marginal-contribution.pdf",
     "tried": "search/tried-taus.pdf",
     "trace": "search/convergence.pdf",
+    "iterations": "search/iterations.pdf",
 }
 
 PAPER_FIGURES = (*LEAF_FIGURES, "tau-by", "welfare-vs-zeta")
@@ -106,6 +107,12 @@ def leaf_figures(folder, path, select=None):
                                       target("marginal"))
     if results.get("search") and (wanted("tried") or wanted("trace")):
         figures.search_history(results, data, types, target("tried"), target("trace"))
+    if results.get("search") and results["search"].get("history") and wanted("iterations"):
+        tolerance = next((c["tolerance"] for c in results["checks"] if c["check"] == "first_order"),
+                         1e-4)
+        figures.search_iterations(results, target("iterations"),
+                                  {"welfare": 1e-4, "stationarity": 1e-4,
+                                   "max_marginal": tolerance, "gap": 1e-4})
     return drawn
 
 

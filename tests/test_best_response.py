@@ -140,3 +140,35 @@ def test_genetic_search_rejects_nodes_and_best_response_rejects_polynomials():
     with pytest.raises(ValueError):
         optimize_threshold(prepared.training, "poly1", 4, 1, optimizer="best_response",
                            verbose=False)
+
+
+def test_ascent_history_reaches_first_order_conditions():
+    distribution = synthetic_distribution("harmful_middle", **SMALL_GRID)
+    result = run_best_response_ascent(distribution, "nodes", 6, 2, verbose=False)
+    for start in result.summary["starts"]:
+        assert start["stop_reason"] in ("no_improving_step", "small_gain")
+        last = start["history"][-1]
+        assert last["max_marginal"] < 1e-4 and last["stationarity"] < 1e-6
+    # τ ≡ 0 satisfies the first-order conditions (a bidder with v = 0 never wins, so
+    # M(e, 0) = 0) but is not optimal; the best-response gap detects it.
+    zero = next(s for s in result.summary["starts"] if s["start"] == "zero")
+    assert zero["history"][0]["stationarity"] < 1e-12
+    assert zero["history"][0]["gap"] > 1e-3
+    assert zero["welfare"] > zero["start_welfare"]
+
+
+def test_time_limit_stops_gracefully():
+    import time
+
+    distribution = synthetic_distribution("harmful_middle", **SMALL_GRID)
+    result = run_best_response_ascent(distribution, "nodes", 6, 2, verbose=False,
+                                      deadline=time.time())
+    reasons = [s["stop_reason"] for s in result.summary["starts"]]
+    assert reasons == ["time_limit", "skipped (time limit)"]
+    assert np.isfinite(result.welfare)
+    search = optimize_threshold(distribution, "poly1", 6, 2, optimizer="genetic",
+                                ga_options={"num_generations": 50}, ga_seed=0, verbose=False,
+                                time_limit=0.0)
+    summary = search["search_summaries"][0]
+    assert summary["stop_reason"] == "time_limit" and summary["generations_run"] == 1
+    assert summary["local_starts"] == []

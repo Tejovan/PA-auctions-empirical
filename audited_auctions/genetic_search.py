@@ -12,7 +12,10 @@ Two stages (default):
    single-point crossover and Gaussian mutation scaled to each coefficient's
    search range, as in the original genetic search of this repository; warm
    start optional. It stops after num_generations, or earlier once the best
-   welfare has not improved for stall_generations generations.
+   welfare has risen by at most stall_tolerance × welfare_scale (the first-best
+   gain FB − W_VCG when given, else |best welfare|) over the last
+   stall_generations generations. (A rule of exact equality would let gains of
+   1e-12 restart the count, so the stage would run out its generations.)
 2. Nelder–Mead refinement (local convergence). Started from the
    num_local_starts best distinct candidates of the final population, in
    coordinates scaled to the search ranges (each coefficient's range maps to
@@ -26,6 +29,10 @@ and precise. Neither stage guarantees the global optimum of a non-convex
 objective; restarts (pipeline num_restarts) and several local starts reduce the
 risk. local_refinement="none" runs the genetic algorithm alone, for all
 num_generations.
+
+Time limit. With a deadline (a time.time() value), the genetic stage stops after
+the generation in progress and Nelder–Mead after its current iteration; the
+best point found so far is kept, and stop_reason records "time_limit".
 
 The objective is exact (threshold_evaluation.expected_welfare), computed on the
 distribution itself, so it has no Monte Carlo noise.
@@ -87,6 +94,7 @@ LOCAL_REFINEMENTS = ("nelder_mead", "none")
 
 # Defaults lean toward reliable convergence over speed.
 DEFAULT_STALL_GENERATIONS = 60
+DEFAULT_STALL_TOLERANCE = 1e-4      # gain over stall_generations generations, in welfare_scale
 DEFAULT_NUM_LOCAL_STARTS = 5
 DEFAULT_LOCAL_MAX_EVALUATIONS = 2000
 LOCAL_COORDINATE_TOLERANCE = 1e-7   # in range-scaled coordinates
@@ -100,10 +108,14 @@ class SearchResult:
 
     coefficients, welfare : best τ coefficients and their exact welfare
     trajectory            : every coefficient vector in each generation's population
-    summary               : genetic optimum, generations run, convergence trace
-                            (best welfare against evaluations and time), number of distinct
-                            objective evaluations, and per local start the starting
-                            and final welfare, evaluations and convergence flag
+    summary               : genetic optimum, generations run, stop_reason ("stalled",
+                            "max_generations", "time_limit"), history (best welfare
+                            after each generation), convergence trace (best welfare
+                            against evaluations and time), number of distinct objective
+                            evaluations, and per local start the starting and final
+                            welfare, evaluations, stop_reason ("converged",
+                            "max_evaluations", "time_limit") and history (welfare
+                            after each iteration)
     """
 
     coefficients: list
@@ -112,11 +124,16 @@ class SearchResult:
     summary: dict = field(default_factory=dict)
 
 
-def refine_with_nelder_mead(welfare_of, starts, lows, highs, max_evaluations):
+def _past(deadline):
+    return deadline is not None and time.time() >= deadline
+
+
+def refine_with_nelder_mead(welfare_of, starts, lows, highs, max_evaluations, deadline=None):
     """Nelder–Mead from each start, in coordinates where each coefficient's range is [0, 1].
 
     Returns a list of dicts (start, coefficients, welfare, start_welfare,
-    evaluations, converged), one per start.
+    evaluations, converged, stop_reason, history), one per start; starts not
+    begun before the deadline are left out.
     """
     span = highs - lows
 
@@ -125,21 +142,34 @@ def refine_with_nelder_mead(welfare_of, starts, lows, highs, max_evaluations):
 
     results = []
     for start in starts:
+        if _past(deadline):
+            break
         start = np.asarray(start, dtype=float)
         start_welfare = welfare_of(start)
         scaled_start = (start - lows) / span
         simplex = np.vstack([scaled_start,
                              scaled_start + INITIAL_SIMPLEX_STEP * np.eye(len(start))])
+        history = [{"iteration": 0, "welfare": float(start_welfare), "time": time.time()}]
+
+        def callback(intermediate_result):
+            history.append({"iteration": len(history), "welfare": float(-intermediate_result.fun),
+                            "time": time.time()})
+            if _past(deadline):
+                raise StopIteration
+
         outcome = minimize(
             lambda scaled: -welfare_of(to_coefficients(scaled)), scaled_start,
-            method="Nelder-Mead",
+            method="Nelder-Mead", callback=callback,
             options={"initial_simplex": simplex, "xatol": LOCAL_COORDINATE_TOLERANCE,
                      "fatol": LOCAL_RELATIVE_WELFARE_TOLERANCE * max(abs(start_welfare), 1.0),
                      "maxfev": max_evaluations, "adaptive": True})
+        stop_reason = ("converged" if outcome.success
+                       else "time_limit" if _past(deadline) else "max_evaluations")
         results.append({"start": start.tolist(),
                         "coefficients": to_coefficients(outcome.x).tolist(),
                         "welfare": float(-outcome.fun), "start_welfare": float(start_welfare),
-                        "evaluations": int(outcome.nfev), "converged": bool(outcome.success)})
+                        "evaluations": int(outcome.nfev), "converged": bool(outcome.success),
+                        "stop_reason": stop_reason, "history": history})
     return results
 
 
@@ -162,17 +192,22 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
                        mutation_sigma_fraction=0.15, range_multiplier=3.0, seed=None,
                        initial_solution=None, local_refinement="nelder_mead",
                        stall_generations=DEFAULT_STALL_GENERATIONS,
+                       stall_tolerance=DEFAULT_STALL_TOLERANCE,
                        num_local_starts=DEFAULT_NUM_LOCAL_STARTS,
                        local_max_evaluations=DEFAULT_LOCAL_MAX_EVALUATIONS, verbose=True,
-                       threshold_form=None):
+                       threshold_form=None, deadline=None, welfare_scale=None):
     """Maximize exact expected welfare of objective_mechanism over τ in a form.
 
     threshold_form        : a ThresholdForm or label ("poly2", "knots6", "bins10");
                             default: the polynomial of degree polynomial_degree
 
     local_refinement      : "nelder_mead" (default) or "none" (genetic algorithm only)
-    stall_generations     : with refinement, stop the genetic stage after this many
-                            generations without improvement (None: never early)
+    stall_generations     : with refinement, stop the genetic stage once the best welfare
+                            has risen by at most stall_tolerance × welfare_scale over
+                            this many generations (None: never early)
+    welfare_scale         : welfare unit of the stall rule (pipeline: the first-best gain
+                            FB − W_VCG); None: |best welfare|
+    deadline              : time.time() value after which the search stops gracefully
     num_local_starts      : Nelder–Mead starts (best distinct final candidates)
     local_max_evaluations : objective evaluations allowed per Nelder–Mead start
 
@@ -219,16 +254,32 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
     def fitness_batch(ga_instance, solutions, solution_index):  # noqa: ARG001
         return np.array([welfare_of(solution) for solution in np.atleast_2d(solutions)])
 
-    trajectory = []
+    trajectory, history = [], []
+    stall = local_refinement != "none" and stall_generations
+    stop = {"reason": "max_generations"}
 
     def on_generation(ga_instance):
         trajectory.extend(solution.tolist() for solution in ga_instance.population)
+        history.append({"iteration": ga_instance.generations_completed,
+                        "welfare": float(np.max(ga_instance.last_generation_fitness)),
+                        "time": time.time()})
+        if len(history) > 1:
+            history[-1]["welfare"] = max(history[-1]["welfare"], history[-2]["welfare"])
         if verbose and (ga_instance.generations_completed % 25 == 0
                         or ga_instance.generations_completed == num_generations):
             best, fitness, _ = ga_instance.best_solution(
                 pop_fitness=ga_instance.last_generation_fitness)
             print(f"  generation {ga_instance.generations_completed:4d}  welfare={fitness:.6g}  "
                   f"β={[f'{c:.4g}' for c in best]}")
+        if _past(deadline):
+            stop["reason"] = "time_limit"
+            return "stop"
+        if stall and len(history) > stall_generations:
+            now, before = history[-1]["welfare"], history[-1 - stall_generations]["welfare"]
+            if now - before <= stall_tolerance * (welfare_scale or max(abs(now), 1e-300)):
+                stop["reason"] = "stalled"
+                return "stop"
+        return None
 
     if verbose:
         ranges = "  ".join(f"β{i} ∈ [{g['low']:.4g}, {g['high']:.4g}]"
@@ -250,8 +301,6 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
         on_generation=on_generation,
         random_seed=seed,
         suppress_warnings=True,
-        stop_criteria=(f"saturate_{stall_generations}"
-                       if local_refinement != "none" and stall_generations else None),
     )
     start = time.time()
     ga.run()
@@ -261,12 +310,13 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
     summary = {"optimizer": "genetic", "genetic_coefficients": best_coefficients.tolist(),
                "genetic_welfare": best_welfare,
                "generations_run": int(ga.generations_completed),
+               "stop_reason": stop["reason"], "history": history,
                "local_refinement": local_refinement, "local_starts": []}
     if verbose:
         print(f"Genetic stage done in {time.time() - start:.1f}s after "
               f"{ga.generations_completed} generations: welfare {best_welfare:.8g}")
 
-    if local_refinement == "nelder_mead":
+    if local_refinement == "nelder_mead" and not _past(deadline):
         stage["name"] = "nelder_mead"
         fitness = [welfare_of(solution) for solution in ga.population]
         starts = _best_distinct(ga.population, fitness, num_local_starts)
@@ -274,9 +324,10 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
             starts = [best_coefficients] + starts[:-1]
         local_start = time.time()
         local_results = refine_with_nelder_mead(welfare_of, starts, lows, highs,
-                                                local_max_evaluations)
+                                                local_max_evaluations, deadline)
         summary["local_starts"] = local_results
-        best_local = max(local_results, key=lambda result: result["welfare"])
+        best_local = max(local_results, key=lambda result: result["welfare"],
+                         default={"welfare": -np.inf})
         if best_local["welfare"] > best_welfare:
             best_coefficients = np.array(best_local["coefficients"])
             best_welfare = best_local["welfare"]

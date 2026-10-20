@@ -23,6 +23,7 @@ Per combination:
   marginal_contribution     maps of M^τ(e, v), penalty vs Pigouvian charge,
                             marginal contribution of threshold types
   search_history            tried thresholds; convergence of the search
+  search_iterations         welfare and stopping diagnostics per iteration, one line per start
 Across combinations:
   threshold_overlay         τ of several combinations on one type plot
   welfare_against_zeta      expected welfare and gains over VCG against ζ
@@ -1092,6 +1093,109 @@ def search_history(results, data, types, path_tried, path_trace):
         note = (f"Best training welfare {compact(best)} after {search['seconds']:.1f} s; values "
                 f"below 1e-13 are drawn at 1e-13.")
         return _finish(fig, path_trace, context_line(combination), note)
+
+
+STOP_LABELS = {"no_improving_step": "no improving step", "small_gain": "small gain",
+               "max_iterations": "iteration cap", "time_limit": "time limit",
+               "stalled": "stalled", "max_generations": "generation cap",
+               "converged": "converged", "max_evaluations": "evaluation cap"}
+FLOOR = 1e-12  # log panels: smaller values (and zeros) are drawn here
+
+
+def _reference(ax, value, text, axis="y"):
+    """Dashed reference line with its label at the right end, above the line."""
+    ax.axhline(value, **REFERENCE, zorder=1)
+    ax.annotate(text, (1.0, value), xycoords=("axes fraction", "data"), xytext=(-2, 2),
+                textcoords="offset points", ha="right", va="bottom", fontsize=7,
+                color=INK_SECONDARY)
+
+
+def search_iterations(results, path, tolerances):
+    """Welfare and stopping diagnostics against the iteration, one line per start.
+
+    (a) share of the first-best gain (W − W_VCG)/(FB − W_VCG) on the training
+    distribution; (b) distance to the best welfare found, in units of the first-best
+    gain; (c) stationarity (projected gradient of W in the form's parameters); (d)
+    largest violation of the first-order conditions in M(e, τ(e))/v̄; (e) best-response
+    gap. tolerances: target levels drawn in (b)–(e).
+    """
+    combination, search = results["combination"], results["search"]
+    lines = search["history"]
+    benchmarks = search["training_benchmarks"]
+    gain = benchmarks["first_best"] - benchmarks["vcg"]
+    unit = gain if gain > 0 else max(abs(benchmarks["first_best"]), 1e-300)
+    best = max(point["welfare"] for line in lines for point in line["points"])
+    with plt.rc_context(STYLE):
+        fig, axes = _new_figure(7.4, 7.6, 3, 2, sharex=True)
+        axes[2, 1].set_visible(False)
+        handles = []
+        for index, line in enumerate(lines):
+            points = line["points"]
+            style = {"color": CATEGORY_COLORS[index % len(CATEGORY_COLORS)],
+                     "linestyle": CATEGORY_LINESTYLES[index % len(CATEGORY_LINESTYLES)],
+                     "linewidth": 1.2}
+            x = np.array([p["iteration"] for p in points], dtype=float)
+            welfare = np.array([p["welfare"] for p in points])
+            axes[0, 0].plot(x, (welfare - benchmarks["vcg"]) / unit, **style)
+            axes[0, 1].plot(x, np.maximum((best - welfare) / unit, FLOOR), **style)
+            for ax, key in ((axes[1, 0], "stationarity"), (axes[1, 1], "max_marginal"),
+                            (axes[2, 0], "gap")):
+                values = np.array([np.nan if p.get(key) is None else p[key] for p in points],
+                                  dtype=float)
+                shown = np.isfinite(values)
+                if shown.any():
+                    ax.plot(x[shown], np.maximum(values[shown], FLOOR), marker="o",
+                            markersize=2.5, **style)
+            polished = [i for i, p in enumerate(points) if p.get("stage") == "polish"]
+            if polished:
+                axes[0, 0].plot(x[polished], (welfare[polished] - benchmarks["vcg"]) / unit,
+                                linestyle="none", marker="o", markersize=5,
+                                markerfacecolor="white", color=style["color"], zorder=4)
+            stop = STOP_LABELS.get(line["stop_reason"], line["stop_reason"])
+            handles.append(Line2D([], [], **style,
+                                  label=f"{line['optimizer']}: {line['start']} ({stop})"))
+        ax = axes[0, 0]
+        _reference(ax, 0.0, "VCG")
+        _reference(ax, 1.0, "first best")
+        ax.set_ylabel("(W − W_VCG) / (FB − W_VCG)")
+        ax.set_title("(a) Share of the first-best gain", loc="left")
+        ax = axes[0, 1]
+        ax.set_yscale("log")
+        _reference(ax, tolerances["welfare"], f"target {tolerances['welfare']:g}")
+        ax.set_ylabel("(best W − W) / (FB − W_VCG)")
+        ax.set_title("(b) Distance to the best welfare found", loc="left")
+        diagnostics = any(p.get("max_marginal") is not None
+                          for line in lines for p in line["points"])
+        panels = ((axes[1, 0], "stationarity", "v̄ Σ|∂W/∂θ| / (FB − W_VCG)",
+                   "(c) Stationarity in the form's parameters θ"),
+                  (axes[1, 1], "max_marginal", "first-order violation in M / v̄",
+                   "(d) Zero marginal contribution"),
+                  (axes[2, 0], "gap", "best-response gap / (FB − W_VCG)",
+                   "(e) Gain of one bidder deviating alone"))
+        for ax, key, label, title in panels:
+            ax.set_title(title, loc="left")
+            ax.set_xlabel("iteration (generation for the genetic stage)")
+            ax.xaxis.set_tick_params(labelbottom=True)
+            if not diagnostics:
+                ax.set_yticks([])
+                ax.text(0.5, 0.5, "best-response ascent only\n(forms knots, bins, nodes)",
+                        transform=ax.transAxes, ha="center", va="center", fontsize=7,
+                        color=INK_SECONDARY)
+                continue
+            ax.set_yscale("log")
+            _reference(ax, tolerances[key], f"target {tolerances[key]:g}")
+            ax.set_ylabel(label)
+        _shared_legend(fig, handles, columns=2)
+        note = (f"Training distribution: W_VCG = {compact(benchmarks['vcg'])}, "
+                f"FB = {compact(benchmarks['first_best'])}, best W found = {compact(best)}. "
+                f"(c)–(e): best-response ascent, at the τ of each iteration; hollow circles in "
+                f"(a): after a gradient polish. (c) is zero at a stationary point in the form, (d) "
+                f"at a τ that meets the first-order conditions node by node (|M| at interior τ, "
+                f"M(e, 0) < 0 at τ = 0, M(e, v̄) > 0 at exclusion; need not reach zero for "
+                f"restricted forms). τ ≡ 0 meets both (M(e, 0) = 0) without being optimal; (e) "
+                f"detects it, but (e) need not be zero at an optimal common τ. "
+                f"Values below {FLOOR:g} are drawn at {FLOOR:g}. Legend: start (stop reason).")
+        return _finish(fig, path, context_line(combination), note)
 
 
 # ─── Across combinations ────────────────────────────────────────────────────────

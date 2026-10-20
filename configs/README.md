@@ -62,7 +62,8 @@ Combinations of a method with a form it cannot search are skipped and listed in 
 | `mutation_probability` | 0.25 | genetic: mutation probability per gene |
 | `range_multiplier` | 3.0 | genetic: width of the search ranges of polynomial coefficients |
 | `local_refinement` | `"nelder_mead"` | genetic: `"nelder_mead"` or `"none"` |
-| `stall_generations` | 60 | genetic: stop after this many generations without improvement |
+| `stall_generations` | 60 | genetic: stop once the best welfare has risen by at most `stall_tolerance` over this many generations |
+| `stall_tolerance` | 1e-4 | genetic: the stall rule's gain, in units of the first-best gain FB − W_VCG on the training distribution |
 | `num_local_starts` | 5 | genetic: Nelder–Mead starts |
 | `local_max_evaluations` | 2000 | genetic: evaluations per Nelder–Mead start |
 | `num_restarts` | 1 | genetic: independent restarts (seeds `search`, `search + 1`, …) |
@@ -72,6 +73,7 @@ Combinations of a method with a form it cannot search are skipped and listed in 
 | `polish_rounds` | 3 | best response: gradient polishes |
 | `short_genetic_generations` | 40 | best response: generations of the `short_genetic` start |
 | `genetic_form` | same form, or `knots6` for `nodes` | `genetic+best_response`: form of the genetic stage |
+| `time_limit_minutes` | 60 | search time per combination (all stages and starts); past it every stage stops after its current iteration, later starts are skipped, the best τ so far is kept and check `search_stop` fails; 0 = no limit |
 | `warm_start_across_zeta` | false | best response: also start from the optimum at the previous ζ, rescaled (τ(e) = τ_prev(e ζ_prev / ζ)); the ζ values of a distribution then run in sequence |
 
 ## `[[thresholds]]` (evaluate runs; at least one)

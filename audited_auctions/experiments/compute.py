@@ -249,7 +249,9 @@ def _search(combination, prepared, config, warm_start):
                           optimizer=optimizer["method"], ga_options=genetic,
                           ga_seed=config["seeds"]["search"], num_restarts=num_restarts,
                           genetic_form=optimizer["genetic_form"],
-                          best_response_options=dict(optimizer["best_response"]), verbose=False)
+                          best_response_options=dict(optimizer["best_response"]), verbose=False,
+                          time_limit=(60.0 * optimizer["time_limit_minutes"]
+                                      if optimizer["time_limit_minutes"] else None))
     begin = time.time()
     result = optimize_threshold(prepared.training, combination.threshold_form,
                                 combination.num_bidders, combination.num_goods,
@@ -272,6 +274,28 @@ def _trace(result):
     return points
 
 
+def _history(result):
+    """Per start of the search: welfare and stopping diagnostics at each iteration
+    (generation for the genetic stage), for search/iterations.pdf."""
+    lines = []
+    for index, summary in enumerate(result["search_summaries"]):
+        if summary.get("optimizer") == "best_response":
+            lines.extend({"optimizer": "best_response", "start": s["start"],
+                          "stop_reason": s["stop_reason"], "points": s["history"]}
+                         for s in summary["starts"] if s["history"])
+            continue
+        lines.append({"optimizer": "genetic", "start": f"genetic run {index}",
+                      "stop_reason": summary["stop_reason"], "points": summary["history"]})
+        lines.extend({"optimizer": "nelder_mead", "start": f"run {index}, local start {i}",
+                      "stop_reason": s["stop_reason"], "points": s["history"]}
+                     for i, s in enumerate(summary.get("local_starts", [])))
+    for line in lines:
+        begin = line["points"][0]["time"] if line["points"] else 0.0
+        line["points"] = [{**{k: v for k, v in point.items() if k != "time"},
+                           "seconds": point["time"] - begin} for point in line["points"]]
+    return lines
+
+
 def _search_summary(result):
     """Search statistics for results.json (without parameter vectors and traces)."""
     starts = []
@@ -280,17 +304,25 @@ def _search_summary(result):
             starts.extend({"optimizer": "best_response", "start": s["start"],
                            "start_welfare": s["start_welfare"], "welfare": s["welfare"],
                            "iterations": s["iterations"], "seconds": s["seconds"],
-                           "polishes": len(s["polish_gains"])} for s in summary["starts"])
+                           "polishes": len(s["polish_gains"]), "stop_reason": s["stop_reason"],
+                           **({key: s["history"][-1][key]
+                               for key in ("gap", "stationarity", "max_marginal")}
+                              if s["history"] else {})}
+                          for s in summary["starts"])
         else:
             starts.append({"optimizer": "genetic", "start": "genetic stage",
                            "welfare": summary["genetic_welfare"],
                            "generations": summary["generations_run"],
+                           "stop_reason": summary["stop_reason"],
                            "evaluations": summary.get("num_objective_evaluations")})
             starts.extend({"optimizer": "nelder_mead", "start": f"local start {i}",
                            "start_welfare": s["start_welfare"], "welfare": s["welfare"],
-                           "evaluations": s["evaluations"], "converged": s["converged"]}
+                           "evaluations": s["evaluations"], "converged": s["converged"],
+                           "stop_reason": s["stop_reason"]}
                           for i, s in enumerate(summary.get("local_starts", [])))
     return {"method": result["optimizer"], "training_welfare": result["welfare"],
+            "training_benchmarks": result["benchmarks"],
+            "time_limit_seconds": result["search_options"]["time_limit"],
             "seconds": result["seconds"], "starts": starts,
             "num_tried": len(result["trajectory"])}
 
@@ -441,12 +473,24 @@ def _checks(combination, config, prepared, threshold, evaluation, first_order, s
     # Different starts of the search.
     if search_summary is not None:
         finals = [s["welfare"] for s in search_summary["starts"] if s["welfare"] is not None]
+        benchmarks = search_summary["training_benchmarks"]
+        gain = benchmarks["first_best"] - benchmarks["vcg"]
         if len(finals) > 1:
             best = max(finals)
-            spread = (best - min(finals)) / max(abs(best), 1e-300)
-            checks.append(_check(path, "search_starts_spread", spread, 1e-6, "info",
-                                 "relative welfare spread of the final points of the starts; "
-                                 "large = local optima (the best start is kept)"))
+            spread = (best - min(finals)) / (gain if gain > 0 else max(abs(best), 1e-300))
+            checks.append(_check(path, "search_starts_spread", spread, 1e-4, "info",
+                                 "welfare spread of the final points of the starts, in units of "
+                                 "the first-best gain FB − W_VCG (training); large = local optima "
+                                 "(the best start is kept)"))
+        reasons = [s["stop_reason"] for s in search_summary["starts"]]
+        timed = sum("time" in reason for reason in reasons)
+        capped = sum(reason in ("max_iterations", "max_generations", "max_evaluations")
+                     for reason in reasons)
+        checks.append(_check(path, "search_stop", timed + capped, 0,
+                             "fail" if timed else "info" if capped else "pass",
+                             f"{timed} stages stopped or skipped by the time limit, {capped} at "
+                             f"an iteration cap, of {len(reasons)}; pass = every stage stopped "
+                             f"by a convergence rule"))
 
     # Ex ante relaxation: IVCG-PA for τ* attains max{β_{n,k}, 1 − 1/e} of the first best
     # (paper Thm 8.9 [thm:k-goods]); checked on the training distribution, where τ* is set.
@@ -621,7 +665,8 @@ def compute_combination(combination, config, run_folder, warm_start=None):
         "ivcg_design": "training half" if ivcg_rule is not None else "same distribution",
         "ironing_binds": ironing_binds,
         "search": None if search_summary is None else {
-            **search_summary, "trace": _trace(search_result)},
+            **search_summary, "trace": _trace(search_result),
+            "history": _history(search_result)},
         "first_order_error": first_order_error,
         "checks": checks,
         "seconds": timing,

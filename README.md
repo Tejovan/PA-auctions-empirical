@@ -120,7 +120,7 @@ runs/2026-10-19_1400_optimize_standard-test/
           tau.json   tau.csv   results.json   first-order.csv   data.npz
           1_types-tau-penalties.pdf   2_expected-outcomes.pdf   3_outcome-distributions.pdf
           4_gain-scatter.pdf   5_ironing.pdf   6_marginal-contribution.pdf
-          search/tried-taus.pdf   search/convergence.pdf
+          search/tried-taus.pdf   search/convergence.pdf   search/iterations.pdf
           README.md   previews of the combination's figures, each linked to its PDF
           thumbs/*.webp   search/thumbs/*.webp   previews (also in every compare/ folder)
   tweets/compare/welfare-vs-zeta_n8-k2_vcgpa_knots4_br.pdf   (distributions with several ζ)
@@ -159,7 +159,8 @@ NAMES (comma separated): `types`, `outcomes`, `distributions`, `scatter`, `ironi
 | `monte_carlo_vs_exact` | largest \|z\| of a simulated mean against the exact value (welfare, revenue, four mechanisms) | pass if < 4 |
 | `grid_refinement` | largest relative change of a gain over VCG on a 2× finer grid, τ fixed | pass if < 1% |
 | `first_order` | max \|M(e, τ(e))\| / v̄ at interior thresholds | pass if < 10⁻⁴ for the `nodes` form; info for restricted forms and given τ, where it measures the distance from the per-node optimum |
-| `search_starts_spread` | relative welfare spread of the final points of the starts | info: a large value means local optima, and the best start is kept |
+| `search_starts_spread` | welfare spread of the final points of the starts, in units of the first-best gain FB − W_VCG (training) | info: a large value means local optima, and the best start is kept |
+| `search_stop` | number of search stages stopped by the time limit or an iteration cap | pass if every stage stopped by a convergence rule; info if some hit an iteration cap; fail if the time limit stopped any |
 | `bandwidth_sensitivity` | spread of the gain over VCG across smoothing bandwidths | pass if ≤ the width of its bootstrap interval |
 | `ex_ante_guarantee` | W*(τ*)/FB for the ex ante cutoff τ* (`cutoff = "ex_ante"`), on the training distribution | pass if ≥ max{β_{n,k}, 1 − 1/e} (paper Thm 8.9 [thm:k-goods]); info for atomic training data |
 

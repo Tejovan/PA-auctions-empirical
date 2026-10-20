@@ -64,6 +64,7 @@ GENETIC_DEFAULTS = {
     "range_multiplier": 3.0,
     "local_refinement": "nelder_mead",  # or "none"
     "stall_generations": 60,
+    "stall_tolerance": 1e-4,  # in units of the first-best gain FB − W_VCG (training)
     "num_local_starts": 5,
     "local_max_evaluations": 2000,
     "num_restarts": 1,
@@ -78,6 +79,7 @@ BEST_RESPONSE_DEFAULTS = {
 OPTIMIZER_OTHER_DEFAULTS = {
     "genetic_form": None,  # genetic+best_response: form of the genetic stage
     "warm_start_across_zeta": False,  # best response: also start from the previous ζ's optimum
+    "time_limit_minutes": 60,  # per combination's search; 0 = no limit
 }
 SECTION_DEFAULTS = {
     "markets": {"num_bidders": [8], "num_goods": [1]},

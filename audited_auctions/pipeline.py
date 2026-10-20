@@ -26,6 +26,7 @@ designed τ and IVCG-PA scoring rule are evaluated on it; the bootstrap
 resamples the test rows.
 """
 
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -44,7 +45,8 @@ from .empirical import (
 )
 from .best_response_ascent import run_best_response_ascent
 from .genetic_search import run_genetic_search
-from .threshold_evaluation import AUDITED_MECHANISMS, MECHANISMS, ivcg_scoring_rule_for
+from .threshold_evaluation import (AUDITED_MECHANISMS, MECHANISMS, expected_welfare,
+                                   ivcg_scoring_rule_for)
 from .threshold_forms import BEST_RESPONSE_FORMS, GENETIC_FORMS, build_threshold_form
 from .type_distributions import SYNTHETIC_FAMILIES, TypeDistribution, synthetic_distribution
 
@@ -150,7 +152,8 @@ def resolve_optimizer(optimizer, form_kind):
 def optimize_threshold(training, threshold_form, num_bidders, num_goods,
                        objective_mechanism="vcg_pa", optimizer="auto", ga_options=None,
                        ga_seed=None, num_restarts=1, initial_solution=None, genetic_form=None,
-                       best_response_options=None, warm_starts=(), verbose=True):
+                       best_response_options=None, warm_starts=(), verbose=True,
+                       time_limit=None):
     """Search for τ in threshold_form on the training distribution.
 
     threshold_form : label ("poly2", "knots6", "bins10", "nodes") or polynomial degree
@@ -162,7 +165,10 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
     warm_starts    : threshold functions used as extra best-response starts
     best_response_options : keyword options of run_best_response_ascent (starts,
                      max_iterations, relative_tolerance, short_genetic_generations)
-    Returns a dict: form, parameters, welfare, optimizer, search_summaries, and the
+    time_limit     : seconds for the whole search; past it, every stage stops gracefully
+                     and the best τ found so far is returned (None: no limit)
+    Returns a dict: form, parameters, welfare, optimizer, search_summaries,
+    benchmarks (training welfare of VCG and the first best), and the
     trajectory: candidate parameter vectors as (form index, parameters) pairs, with
     trajectory_forms the specs of the forms (genetic and best-response forms differ
     for genetic+best_response).
@@ -173,6 +179,11 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
     best_response_options = dict(best_response_options or {})
     trajectory, summaries, trajectory_forms = [], [], []
     warm_starts = list(warm_starts)
+    deadline = None if time_limit is None else time.time() + time_limit
+    benchmarks = {m: expected_welfare(training, lambda e: np.zeros(np.shape(e)), num_bidders,
+                                      num_goods, m) for m in ("vcg", "first_best")}
+    gain = benchmarks["first_best"] - benchmarks["vcg"]
+    scale = gain if gain > 1e-12 * max(abs(benchmarks["first_best"]), 1.0) else None
 
     def record_trajectory(search_form, candidates):
         trajectory_forms.append(search_form.spec([]))
@@ -187,19 +198,21 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
                 genetic_form or (form.label if form.kind in GENETIC_FORMS else "knots6"), training)
         best = (None, -np.inf)
         for restart in range(num_restarts):
+            if restart > 0 and deadline is not None and time.time() >= deadline:
+                break
             search = run_genetic_search(
                 training, None, num_bidders, num_goods, objective_mechanism=objective_mechanism,
                 threshold_form=search_form,
                 seed=None if ga_seed is None else ga_seed + restart,
                 initial_solution=initial_solution if restart == 0 else None,
-                verbose=verbose, **ga_options)
+                verbose=verbose, deadline=deadline, welfare_scale=scale, **ga_options)
             record_trajectory(search_form, search.trajectory)
             summaries.append(search.summary)
             if search.welfare > best[1]:
                 best = (search.coefficients, search.welfare)
         if optimizer == "genetic":
             return {"form": form, "parameters": list(best[0]), "welfare": best[1],
-                    "optimizer": optimizer, "trajectory": trajectory,
+                    "optimizer": optimizer, "trajectory": trajectory, "benchmarks": benchmarks,
                     "trajectory_forms": trajectory_forms, "search_summaries": summaries}
         genetic_threshold = search_form.threshold(best[0])
         genetic_threshold.start_name = f"genetic ({search_form.label})"
@@ -207,11 +220,12 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
 
     search = run_best_response_ascent(
         training, form, num_bidders, num_goods, objective_mechanism=objective_mechanism,
-        warm_starts=warm_starts, seed=ga_seed, verbose=verbose, **best_response_options)
+        warm_starts=warm_starts, seed=ga_seed, verbose=verbose, deadline=deadline, scale=scale,
+        **best_response_options)
     record_trajectory(form, search.trajectory)
     summaries.append(search.summary)
     return {"form": form, "parameters": list(search.coefficients), "welfare": search.welfare,
-            "optimizer": optimizer, "trajectory": trajectory,
+            "optimizer": optimizer, "trajectory": trajectory, "benchmarks": benchmarks,
             "trajectory_forms": trajectory_forms, "search_summaries": summaries}
 
 
