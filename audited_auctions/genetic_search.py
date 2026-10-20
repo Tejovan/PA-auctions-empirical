@@ -46,6 +46,7 @@ import numpy as np
 import pygad
 from scipy.optimize import minimize
 
+from .parallel import parallel_map
 from .threshold_evaluation import expected_welfare
 
 
@@ -173,6 +174,25 @@ def refine_with_nelder_mead(welfare_of, starts, lows, highs, max_evaluations, de
     return results
 
 
+class ExactWelfare:
+    """Exact expected welfare of a form's parameters (picklable objective)."""
+
+    def __init__(self, type_distribution, form, num_bidders, num_goods, mechanism):
+        self.arguments = (type_distribution, form, num_bidders, num_goods, mechanism)
+
+    def __call__(self, coefficients):
+        d, form, n, k, mechanism = self.arguments
+        return expected_welfare(d, form.threshold(coefficients), n, k, mechanism)
+
+
+def _nelder_mead_job(job):
+    """One Nelder–Mead start in a worker process (None if the deadline passed first)."""
+    results = refine_with_nelder_mead(ExactWelfare(*job["objective"]), [job["start"]],
+                                      job["lows"], job["highs"], job["max_evaluations"],
+                                      job["deadline"])
+    return results[0] if results else None
+
+
 def _best_distinct(population, fitness, count):
     """The `count` fittest rows of the population with distinct coefficients."""
     chosen, seen = [], set()
@@ -195,7 +215,7 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
                        stall_tolerance=DEFAULT_STALL_TOLERANCE,
                        num_local_starts=DEFAULT_NUM_LOCAL_STARTS,
                        local_max_evaluations=DEFAULT_LOCAL_MAX_EVALUATIONS, verbose=True,
-                       threshold_form=None, deadline=None, welfare_scale=None):
+                       threshold_form=None, deadline=None, welfare_scale=None, workers=1):
     """Maximize exact expected welfare of objective_mechanism over τ in a form.
 
     threshold_form        : a ThresholdForm or label ("poly2", "knots6", "bins10");
@@ -207,6 +227,7 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
                             this many generations (None: never early)
     welfare_scale         : welfare unit of the stall rule (pipeline: the first-best gain
                             FB − W_VCG); None: |best welfare|
+    workers               : processes for the Nelder–Mead starts (run simultaneously)
     deadline              : time.time() value after which the search stops gracefully
     num_local_starts      : Nelder–Mead starts (best distinct final candidates)
     local_max_evaluations : objective evaluations allowed per Nelder–Mead start
@@ -323,8 +344,22 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
         if not any(np.allclose(start, best_coefficients) for start in starts):
             starts = [best_coefficients] + starts[:-1]
         local_start = time.time()
-        local_results = refine_with_nelder_mead(welfare_of, starts, lows, highs,
-                                                local_max_evaluations, deadline)
+        if workers > 1 and len(starts) > 1:
+            jobs = [{"objective": (type_distribution, form, num_bidders, num_goods,
+                                   objective_mechanism), "start": start, "lows": lows,
+                     "highs": highs, "max_evaluations": local_max_evaluations,
+                     "deadline": deadline} for start in starts]
+            local_results = [r for r in parallel_map(_nelder_mead_job, jobs, workers) if r]
+            for result in local_results:  # convergence trace of the parallel starts
+                for point in result["history"]:
+                    if point["welfare"] > stage["best"]:
+                        stage["best"] = point["welfare"]
+                        trace.append({"stage": "nelder_mead", "evaluations": None,
+                                      "time": point["time"], "welfare": point["welfare"]})
+            trace.sort(key=lambda entry: entry["time"])
+        else:
+            local_results = refine_with_nelder_mead(welfare_of, starts, lows, highs,
+                                                    local_max_evaluations, deadline)
         summary["local_starts"] = local_results
         best_local = max(local_results, key=lambda result: result["welfare"],
                          default={"welfare": -np.inf})
@@ -336,7 +371,8 @@ def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_go
                   f"welfare {best_welfare:.8g} (genetic {summary['genetic_welfare']:.8g}); "
                   f"converged {sum(r['converged'] for r in local_results)}/{len(local_results)}")
 
-    summary["num_objective_evaluations"] = len(cache)
+    summary["num_objective_evaluations"] = len(cache) + (
+        sum(r["evaluations"] for r in summary["local_starts"]) if workers > 1 else 0)
     trace.append({"stage": "end", "evaluations": len(cache), "time": time.time(),
                   "welfare": float(best_welfare)})
     summary["trace"] = trace

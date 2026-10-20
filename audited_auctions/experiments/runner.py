@@ -31,6 +31,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from ..parallel import split_workers
 from ..threshold_evaluation import expected_welfare
 from .compute import (
     compute_combination,
@@ -73,7 +74,8 @@ class Log:
 
 
 def default_workers():
-    return max(1, min(8, (os.cpu_count() or 2) - 1))
+    """All cores but two (one for the system, one for the main process)."""
+    return max(1, (os.cpu_count() or 3) - 2)
 
 
 # ─── Tasks ──────────────────────────────────────────────────────────────────────
@@ -133,7 +135,9 @@ def _evaluations_per_search(optimizer):
            if genetic["local_refinement"] == "nelder_mead" else 0))
     best_response = optimizer["best_response"]
     iterations = min(best_response["max_iterations"], 15)
-    best_response_count = len(best_response["starts"]) * (
+    num_starts = len(best_response["starts"]) + best_response["num_random_starts"]
+    best_response_count = (30 * best_response["short_genetic_generations"]
+                           if "short_genetic" in best_response["starts"] else 0) + num_starts * (
         iterations * 4 * (1 + best_response["polish_rounds"]) + 40 * best_response["polish_rounds"])
     return {"genetic": genetic_count, "best_response": best_response_count,
             "genetic+best_response": genetic_count + best_response_count}[optimizer["method"]]
@@ -299,12 +303,16 @@ def run(config_path, workers=None, dry_run=False, assume_yes=False, report=None)
                 f"{objective}: {_format_share(row.get(f'share_{objective}'))}  "
                 f"({row['seconds']:.1f} s)")
 
-    if workers == 1:
+    # Workers beyond one per task go to the tasks' own parallel stages (search starts and
+    # restarts, Nelder–Mead starts, bootstrap): processes, inner = split_workers(...).
+    processes, inner = split_workers(workers, len(tasks))
+    task_config = {**config, "inner_workers": inner}
+    if processes == 1:
         for task in tasks:
-            collect(run_task(task, config, folder))
+            collect(run_task(task, task_config, folder))
     else:
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(run_task, task, config, folder) for task in tasks]
+        with ProcessPoolExecutor(max_workers=processes) as pool:
+            futures = [pool.submit(run_task, task, task_config, folder) for task in tasks]
             for future in as_completed(futures):
                 collect(future.result())
     compute_seconds = time.time() - compute_begin

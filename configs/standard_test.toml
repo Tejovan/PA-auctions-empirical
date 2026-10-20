@@ -36,11 +36,14 @@ num_parents_mating = 6
 stall_generations = 8
 num_local_starts = 2
 local_max_evaluations = 60
+num_restarts = 2                 # enough to exercise restarts (default 4)
 
 [[optimizers]]
 label = "br"                     # best-response ascent (knots4 only; poly1 is skipped)
 method = "best_response"
 max_iterations = 20
+num_random_starts = 1            # default 3
+short_genetic_generations = 5    # default 40
 
 [evaluation]
 num_simulated_auctions = 2000

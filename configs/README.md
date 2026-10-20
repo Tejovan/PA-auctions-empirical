@@ -67,8 +67,9 @@ Combinations of a method with a form it cannot search are skipped and listed in 
 | `stall_tolerance` | 1e-4 | genetic: the stall rule's gain, in units of the first-best gain FB − W_VCG on the training distribution |
 | `num_local_starts` | 5 | genetic: Nelder–Mead starts |
 | `local_max_evaluations` | 2000 | genetic: evaluations per Nelder–Mead start |
-| `num_restarts` | 1 | genetic: independent restarts (seeds `search`, `search + 1`, …) |
-| `starts` | `["zero", "zero_welfare"]` | best response: starts (`zero`: τ ≡ 0; `zero_welfare`: the zero-welfare threshold τ⁰(e) = max(0, −e); `short_genetic`) |
+| `num_restarts` | 4 | genetic: independent restarts (seeds `search`, `search + 1`, …), run simultaneously |
+| `starts` | `["zero", "zero_welfare", "short_genetic"]` | best response: starts (`zero`: τ ≡ 0; `zero_welfare`: the zero-welfare threshold τ⁰(e) = max(0, −e); `short_genetic`: a short genetic search in the same form) |
+| `num_random_starts` | 3 | best response: random starts in addition (τ piecewise linear through 6 externalities, values uniform on [0, 95% quantile of v]); all starts run simultaneously |
 | `max_iterations` | 100 | best response: iterations per start |
 | `relative_tolerance` | 1e-10 | best response: stop when relative welfare gains fall below this |
 | `polish_rounds` | 3 | best response: gradient polishes |
@@ -126,6 +127,6 @@ A τ value at or above v̄ excludes the externality (τ = v̄⁺ in the paper).
 | Key | Default | Meaning |
 |---|---|---|
 | `base` | `"runs"` | folder of the run folders (relative to the code folder) |
-| `workers` | 0 | parallel processes; 0: number of cores − 1, at most 8 (`--workers` overrides) |
+| `workers` | 0 | parallel processes; 0: number of cores − 2 (`--workers` overrides). One process per combination; workers beyond the number of combinations go to each combination's parallel stages (search starts and restarts, Nelder–Mead starts, bootstrap) |
 | `search_history_curves` | 400 | tried thresholds kept for `search/tried-taus.pdf` |
 | `report` | true | draw figures after computing (`--no-report` overrides) |

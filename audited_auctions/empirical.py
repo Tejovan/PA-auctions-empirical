@@ -38,6 +38,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 import pandas as pd
 
+from .parallel import parallel_map
 from .smoothing import kernel_density_distribution
 from .threshold_evaluation import (
     AUDITED_MECHANISMS,
@@ -173,47 +174,32 @@ class BootstrapResult:
         })
 
 
-def bootstrap_welfare(sample, threshold_function, num_bidders, num_goods, num_resamples=200,
-                      seed=0, smoothing="none", bandwidth_scale=1.0, confidence_level=0.95,
-                      ivcg_scoring_rule=None, all_outcomes=False, **grid_options):
-    """Bootstrap of exact expected welfare over resamples of the rows of `sample`.
-
-    smoothing: how each resample's distribution is built ("none": atomic, the
-    default evaluation; "kernel": re-smoothed). ivcg_scoring_rule: the IVCG-PA
-    design held fixed across resamples (None: iron each resample).
-    all_outcomes: also every metric of OUTCOME_METRICS (revenue, penalties,
-    welfare parts, bidder utility; about twice the time).
-
-    Columns of the result: welfare_<mechanism>, gain_<mechanism> (paired gain
-    over VCG on the same resample), share_<mechanism> (share of the first-best
-    gain over VCG); with all_outcomes, <metric>_<mechanism> for every metric.
-    """
-    threshold_function = as_threshold_function(threshold_function)
-    rng = np.random.default_rng(seed)
-    # VCG and first-best welfare of each resample do not depend on τ. The resamples
-    # are determined by the seed, so these values are computed once per (seed,
-    # distribution construction, n, k) and reused for every τ bootstrapped on this sample.
-    baseline_key = (seed, num_resamples, smoothing, bandwidth_scale,
-                    tuple(sorted(grid_options.items())), num_bidders, num_goods)
-    baselines = sample.cache.setdefault(baseline_key, {})
+def _bootstrap_rows(job):
+    """Rows of the resamples job["indices"] (module level, for worker processes)."""
+    sample, threshold_function = job["sample"], job["threshold"]
+    num_bidders, num_goods, all_outcomes = job["num_bidders"], job["num_goods"], job["all_outcomes"]
+    baselines = job["baselines"]
     rows = []
-    for index in range(num_resamples):
-        resample = sample.subset(rng.integers(0, sample.num_rows, sample.num_rows), "bootstrap")
-        distribution = sample_distribution(resample, smoothing, bandwidth_scale, **grid_options)
-        if index in baselines:
+    for index, rows_drawn in job["indices"]:
+        resample = sample.subset(rows_drawn, "bootstrap")
+        distribution = sample_distribution(resample, job["smoothing"], job["bandwidth_scale"],
+                                           **job["grid_options"])
+        if baselines is not None and index in baselines:
             distribution.cache.update(baselines[index])
         try:
             if all_outcomes:
                 outcomes = exact_outcomes(distribution, threshold_function, num_bidders,
-                                          num_goods, ivcg_scoring_rule)
+                                          num_goods, job["ivcg_scoring_rule"])
                 welfare = {m: outcomes[m]["welfare"] for m in MECHANISMS}
             else:
                 welfare = exact_welfare_by_mechanism(distribution, threshold_function,
-                                                     num_bidders, num_goods, ivcg_scoring_rule)
+                                                     num_bidders, num_goods,
+                                                     job["ivcg_scoring_rule"])
         except ValueError:  # nobody participates in this resample
             continue
-        baselines[index] = {key: value for key, value in distribution.cache.items()
-                            if key[-1] in ("welfare", "outcomes")}
+        if baselines is not None:
+            baselines[index] = {key: value for key, value in distribution.cache.items()
+                                if key[-1] in ("welfare", "outcomes")}
         row = {f"welfare_{m}": welfare[m] for m in MECHANISMS}
         if all_outcomes:
             row.update({f"{metric}_{m}": outcomes[m][metric]
@@ -224,4 +210,47 @@ def bootstrap_welfare(sample, threshold_function, num_bidders, num_goods, num_re
             row[f"gain_{mechanism}"] = gain
             row[f"share_{mechanism}"] = gain / first_best_gain if first_best_gain else np.nan
         rows.append(row)
+    return rows
+
+
+def bootstrap_welfare(sample, threshold_function, num_bidders, num_goods, num_resamples=200,
+                      seed=0, smoothing="none", bandwidth_scale=1.0, confidence_level=0.95,
+                      ivcg_scoring_rule=None, all_outcomes=False, workers=1, **grid_options):
+    """Bootstrap of exact expected welfare over resamples of the rows of `sample`.
+
+    smoothing: how each resample's distribution is built ("none": atomic, the
+    default evaluation; "kernel": re-smoothed). ivcg_scoring_rule: the IVCG-PA
+    design held fixed across resamples (None: iron each resample).
+    all_outcomes: also every metric of OUTCOME_METRICS (revenue, penalties,
+    welfare parts, bidder utility; about twice the time).
+    workers: processes; the resamples are split into one chunk per process (same
+    resamples and results as serial; serial runs reuse VCG and first-best welfare
+    across τ bootstrapped on the same sample).
+
+    Columns of the result: welfare_<mechanism>, gain_<mechanism> (paired gain
+    over VCG on the same resample), share_<mechanism> (share of the first-best
+    gain over VCG); with all_outcomes, <metric>_<mechanism> for every metric.
+    """
+    threshold_function = as_threshold_function(threshold_function)
+    rng = np.random.default_rng(seed)
+    drawn = [(index, rng.integers(0, sample.num_rows, sample.num_rows))
+             for index in range(num_resamples)]
+    job = {"sample": sample, "threshold": threshold_function, "num_bidders": num_bidders,
+           "num_goods": num_goods, "all_outcomes": all_outcomes, "smoothing": smoothing,
+           "bandwidth_scale": bandwidth_scale, "grid_options": grid_options,
+           "ivcg_scoring_rule": ivcg_scoring_rule}
+    if workers is None or workers <= 1:
+        # VCG and first-best welfare of each resample do not depend on τ. The resamples
+        # are determined by the seed, so these values are computed once per (seed,
+        # distribution construction, n, k) and reused for every τ bootstrapped on this sample.
+        baseline_key = (seed, num_resamples, smoothing, bandwidth_scale,
+                        tuple(sorted(grid_options.items())), num_bidders, num_goods)
+        rows = _bootstrap_rows({**job, "indices": drawn,
+                                "baselines": sample.cache.setdefault(baseline_key, {})})
+    else:
+        bounds = np.linspace(0, num_resamples, min(workers, num_resamples) + 1).astype(int)
+        chunks = [drawn[low:high] for low, high in zip(bounds[:-1], bounds[1:])]
+        parts = parallel_map(_bootstrap_rows, [{**job, "indices": chunk, "baselines": None}
+                                               for chunk in chunks], workers)
+        rows = [row for part in parts for row in part]  # contiguous chunks: serial order
     return BootstrapResult(pd.DataFrame(rows), confidence_level)

@@ -39,4 +39,4 @@ scc/scc.sh fetch                          # copy runs/ back (or: fetch <run fold
 
 `run.toml` of each run records host, job id and slots. Uncommitted local changes are not on the SCC: commit before `submit`.
 
-**Sizes.** `-pe omp` takes up to 28 slots on most nodes (more on some); jobs wait longer for more slots or hours. Default run time limit 12 h. Time per combination scales roughly with grid cells × iterations; take the local dry-run estimate × (8 / slots).
+**Sizes.** All slots are used even for a run with few combinations: slots beyond one per combination run each combination's starts, restarts and bootstrap in parallel. `-pe omp` takes up to 28 slots on most nodes (more on some); jobs wait longer for more slots or hours. Default run time limit 12 h. Time per combination scales roughly with grid cells × iterations; take the local dry-run estimate × (8 / slots).

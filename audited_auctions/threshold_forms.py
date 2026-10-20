@@ -165,16 +165,7 @@ class ThresholdForm:
 
     def threshold(self, parameters):
         """Vectorized threshold function τ(e); excluded externalities map to +inf."""
-        parameters = np.asarray(parameters, dtype=float).copy()
-        exclusion = self.exclusion_value
-
-        def threshold(externalities):
-            values = self.finite_values(parameters, externalities)
-            return np.where(values >= exclusion, np.inf, values)
-
-        threshold.description = f"{self.label} " + str(list(np.round(parameters, 6)))
-        threshold.form_spec = self.spec(parameters)
-        return threshold
+        return FormThreshold(self, parameters)
 
     # Search ranges and projections ----------------------------------------------
 
@@ -265,6 +256,21 @@ def build_threshold_form(label, type_distribution):
         locations, size = nodes.copy(), len(nodes)
     return ThresholdForm(kind, size, np.asarray(locations, dtype=float),
                          float(type_distribution.maximum_valuation), externality_range)
+
+
+class FormThreshold:
+    """τ(e) of a form with given parameters (a class, not a closure, so that it can be
+    sent to worker processes); excluded externalities map to +inf."""
+
+    def __init__(self, form, parameters):
+        self.form = form
+        self.parameters = np.asarray(parameters, dtype=float).copy()
+        self.description = f"{form.label} " + str(list(np.round(self.parameters, 6)))
+        self.form_spec = form.spec(self.parameters)
+
+    def __call__(self, externalities):
+        values = self.form.finite_values(self.parameters, externalities)
+        return np.where(values >= self.form.exclusion_value, np.inf, values)
 
 
 def threshold_from_spec(spec, parameters=None):

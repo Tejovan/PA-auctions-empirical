@@ -67,10 +67,11 @@ GENETIC_DEFAULTS = {
     "stall_tolerance": 1e-4,  # in units of the first-best gain FB − W_VCG (training)
     "num_local_starts": 5,
     "local_max_evaluations": 2000,
-    "num_restarts": 1,
+    "num_restarts": 4,
 }
 BEST_RESPONSE_DEFAULTS = {
-    "starts": ["zero", "zero_welfare"],  # also "short_genetic"
+    "starts": ["zero", "zero_welfare", "short_genetic"],
+    "num_random_starts": 3,
     "max_iterations": 100,
     "relative_tolerance": 1e-10,
     "polish_rounds": 3,

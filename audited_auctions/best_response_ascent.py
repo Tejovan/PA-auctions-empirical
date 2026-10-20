@@ -56,8 +56,12 @@ Each start is run to convergence and the best result is kept. Starts:
                     (§7.2 [sec:restrictions]; the first best without competition,
                     Prop. 7.10 [prop:no-competition]); alias "no_competition"
   "short_genetic"   a short genetic search in the same form (knots6 for nodes)
+  "random i"        num_random_starts random τ: piecewise linear through 6 externalities
+                    spread over the nodes, values uniform on [0, 95% quantile of v]
 plus any warm starts passed as threshold functions (for example the genetic
 search's result, or the optimum at the previous externality scale of a run).
+Default: zero, zero_welfare, short_genetic and 3 random starts. The starts are
+independent and run simultaneously in up to `workers` processes.
 
 Stopping. The ascent stops for one of the stop_reason values: "no_improving_step",
 "small_gain" (relative gain below relative_tolerance in two consecutive
@@ -95,10 +99,13 @@ from numpy.polynomial import chebyshev
 
 from .genetic_search import SearchResult, run_genetic_search
 from .marginal_contribution import valuation_functions
+from .parallel import parallel_map
 from .threshold_evaluation import build_mechanism_model, expected_welfare
+from .threshold_functions import constant_threshold, tabulated_threshold
 from .threshold_forms import BEST_RESPONSE_FORMS, build_threshold_form, externality_nodes
 
-DEFAULT_STARTS = ("zero", "zero_welfare")
+DEFAULT_STARTS = ("zero", "zero_welfare", "short_genetic")
+DEFAULT_RANDOM_STARTS = 3
 DEFAULT_POLISH_ROUNDS = 3
 STEP_SIZES = tuple(0.5 ** m for m in range(7))
 KNOT_GRID_SIZE = 48
@@ -358,32 +365,59 @@ def best_response(type_distribution, form, current_parameters, num_bidders, num_
 # ─── Ascent ───────────────────────────────────────────────────────────────────
 
 
-def _start_thresholds(starts, type_distribution, form, num_bidders, num_goods, mechanism,
-                      short_genetic_generations, seed, deadline=None):
-    maximum = type_distribution.maximum_valuation
+class ZeroWelfareThreshold:
+    """τ⁰(e) = max(0, −e), excluded (+inf) if −e > v̄."""
+
+    def __init__(self, maximum_valuation):
+        self.maximum = float(maximum_valuation)
+
+    def __call__(self, externalities):
+        e = np.asarray(externalities, dtype=float)
+        return np.where(-e > self.maximum, np.inf, np.maximum(-e, 0.0))
+
+
+def random_threshold(type_distribution, rng, num_knots=6):
+    """A random start: τ piecewise linear through num_knots externalities spread over the
+    externality nodes, with values uniform on [0, the 95% quantile of v]."""
+    nodes, _, _ = externality_nodes(type_distribution)
+    knots = np.linspace(nodes[0], nodes[-1], num_knots)
+    order = np.argsort(type_distribution.valuation_midpoints)
+    cumulative = np.cumsum(type_distribution.probabilities[order])
+    top = type_distribution.valuation_midpoints[order][np.searchsorted(cumulative, 0.95)]
+    return tabulated_threshold(knots, rng.uniform(0.0, top, num_knots))
+
+
+def _start_list(starts, num_random_starts, type_distribution, seed):
+    """(name, threshold function or "short_genetic") of each start."""
     thresholds = []
     for start in starts:
         if callable(start):
             thresholds.append((getattr(start, "start_name", "warm start"), start))
         elif start == "zero":
-            thresholds.append(("zero", lambda e: np.zeros(np.shape(e))))
+            thresholds.append(("zero", constant_threshold(0.0)))
         elif start in ("zero_welfare", "no_competition"):  # τ⁰; old name accepted
-            thresholds.append(("zero_welfare", lambda e: np.where(
-                -np.asarray(e) > maximum, np.inf, np.maximum(-np.asarray(e), 0.0))))
+            thresholds.append(("zero_welfare",
+                               ZeroWelfareThreshold(type_distribution.maximum_valuation)))
         elif start == "short_genetic":
-            genetic_form = form if form.kind != "nodes" else build_threshold_form(
-                "knots6", type_distribution)
-            search = run_genetic_search(type_distribution, None, num_bidders, num_goods,
-                                        objective_mechanism=mechanism,
-                                        threshold_form=genetic_form,
-                                        num_generations=short_genetic_generations,
-                                        sol_per_pop=30, num_parents_mating=10, seed=seed,
-                                        local_refinement="none", verbose=False,
-                                        deadline=deadline)
-            thresholds.append(("short_genetic", genetic_form.threshold(search.coefficients)))
+            thresholds.append(("short_genetic", "short_genetic"))
         else:
             raise ValueError(f"unknown start {start!r}")
+    rng = np.random.default_rng(None if seed is None else seed + 7919)
+    thresholds.extend((f"random {i + 1}", random_threshold(type_distribution, rng))
+                      for i in range(num_random_starts))
     return thresholds
+
+
+def _short_genetic(type_distribution, form, num_bidders, num_goods, mechanism, generations,
+                   seed, deadline):
+    genetic_form = form if form.kind != "nodes" else build_threshold_form("knots6",
+                                                                          type_distribution)
+    search = run_genetic_search(type_distribution, None, num_bidders, num_goods,
+                                objective_mechanism=mechanism, threshold_form=genetic_form,
+                                num_generations=generations, sol_per_pop=30,
+                                num_parents_mating=10, seed=seed, local_refinement="none",
+                                verbose=False, deadline=deadline)
+    return genetic_form.threshold(search.coefficients)
 
 
 def _past(deadline):
@@ -584,15 +618,79 @@ def _complete_measures(type_distribution, form, entry, num_bidders, num_goods, m
                  max_marginal=max_marginal)
 
 
+def _diagnostics(entries, stage):
+    return [{"iteration": e["iteration"], "stage": stage, "time": e["time"],
+             "welfare": float(e["welfare"]), "gap": e["gap"],
+             "stationarity": e["stationarity"], "max_marginal": e["max_marginal"]}
+            for e in entries]
+
+
+def _run_start(job):
+    """One start of the ascent (with its polishes): a summary dict with parameters,
+    trajectory and trace. Module level, so that starts can run in worker processes."""
+    d, form, name = job["distribution"], job["form"], job["name"]
+    n, k, mechanism, deadline, scale = (job["num_bidders"], job["num_goods"],
+                                        job["mechanism"], job["deadline"], job["scale"])
+    options = job["options"]
+    if _past(deadline) and not job["required"]:
+        return {"start": name, "start_welfare": None, "welfare": None, "iterations": 0,
+                "polish_gains": [], "final_gap": None, "seconds": 0.0, "parameters": None,
+                "stop_reason": "skipped (time limit)", "history": [], "trajectory": [],
+                "trace": []}
+    begin = time.time()
+    threshold = job["threshold"]
+    if isinstance(threshold, str):  # "short_genetic"
+        threshold = _short_genetic(d, form, n, k, mechanism,
+                                   options["short_genetic_generations"], job["seed"], deadline)
+    initial = form.project(threshold, d)
+    parameters, welfare, history, stop_reason = ascend(
+        d, form, initial, n, k, mechanism, options["max_iterations"],
+        options["relative_tolerance"], deadline=deadline, scale=scale)
+    start_welfare, iterations = history[0]["welfare"], len(history) - 1
+    trajectory = [entry["parameters"] for entry in history]
+    trace = [{"stage": name, "iteration": e["iteration"], "time": e["time"],
+              "welfare": float(e["welfare"])} for e in history]
+    records = _diagnostics(history, "ascent")
+    polish_gains = []
+    for _ in range(0 if d.is_atomic else options["polish_rounds"]):
+        if _past(deadline):
+            stop_reason = "time_limit"
+            break
+        polished, polished_welfare = polish(d, form, parameters, n, k, mechanism,
+                                            deadline=deadline)
+        gain = polished_welfare - welfare
+        if gain <= options["relative_tolerance"] * max(abs(welfare), 1e-300):
+            break
+        polish_gains.append(gain)
+        parameters, welfare, history, stop_reason = ascend(
+            d, form, polished, n, k, mechanism, options["max_iterations"],
+            options["relative_tolerance"], deadline=deadline, scale=scale,
+            first_iteration=records[-1]["iteration"] + 1)
+        iterations += len(history) - 1
+        trajectory.extend(entry["parameters"] for entry in history)
+        trace.extend({"stage": name, "iteration": e["iteration"], "time": e["time"],
+                      "welfare": float(e["welfare"])} for e in history)
+        records += _diagnostics(history[:1], "polish") + _diagnostics(history[1:], "ascent")
+    _complete_measures(d, form, history[-1], n, k, mechanism, scale)
+    records[-1].update({key: history[-1][key] for key in ("gap", "stationarity", "max_marginal")})
+    return {"start": name, "start_welfare": start_welfare, "welfare": welfare,
+            "iterations": iterations, "polish_gains": polish_gains,
+            "final_gap": history[-1]["gap"], "seconds": time.time() - begin,
+            "parameters": parameters.tolist(), "stop_reason": stop_reason, "history": records,
+            "trajectory": trajectory, "trace": trace}
+
+
 def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num_goods,
                              objective_mechanism="vcg_pa", starts=DEFAULT_STARTS,
                              warm_starts=(), max_iterations=100, relative_tolerance=1e-10,
                              short_genetic_generations=40, polish_rounds=DEFAULT_POLISH_ROUNDS,
-                             seed=None, verbose=True, deadline=None, scale=None):
+                             num_random_starts=DEFAULT_RANDOM_STARTS, seed=None, verbose=True,
+                             deadline=None, scale=None, workers=1):
     """Maximize the exact welfare of objective_mechanism over τ in threshold_form.
 
     threshold_form : a ThresholdForm or a label ("knots6", "bins10", "nodes")
     starts         : names among "zero", "zero_welfare", "short_genetic"
+    num_random_starts : additional random starts (random_threshold, seeds from seed)
     warm_starts    : threshold functions (callables) used as additional starts;
                      an attribute start_name labels them in the summary
     polish_rounds  : gradient polishes (each followed by more ascent); 0 = none;
@@ -600,86 +698,43 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
     deadline       : time.time() value after which the search stops gracefully
                      (starts not begun are listed with stop_reason "skipped (time limit)")
     scale          : welfare unit of the diagnostics (the first-best gain FB − W_VCG)
+    workers        : processes for the starts (independent, so they run simultaneously)
     Returns a genetic_search.SearchResult (coefficients = parameters of the form).
     """
     form = (threshold_form if not isinstance(threshold_form, str)
             else build_threshold_form(threshold_form, type_distribution))
     if form.kind not in BEST_RESPONSE_FORMS:
         raise ValueError(f"best-response ascent needs a form in {BEST_RESPONSE_FORMS}")
-    start_list = _start_thresholds(list(starts) + list(warm_starts), type_distribution, form,
-                                   num_bidders, num_goods, objective_mechanism,
-                                   short_genetic_generations, seed, deadline)
+    start_list = _start_list(list(starts) + list(warm_starts), num_random_starts,
+                             type_distribution, seed)
     if verbose:
         print(f"Best-response ascent ({objective_mechanism}, {form.label}, "
-              f"{form.num_parameters} parameters, {len(start_list)} starts)")
-    best, summaries, trajectory, trace = None, [], [], []
-
-    def record_trace(name, entries):
-        trace.extend({"stage": name, "iteration": entry["iteration"], "time": entry["time"],
-                      "welfare": float(entry["welfare"])} for entry in entries)
-
-    def diagnostics(entries, stage):
-        return [{"iteration": e["iteration"], "stage": stage, "time": e["time"],
-                 "welfare": float(e["welfare"]), "gap": e["gap"],
-                 "stationarity": e["stationarity"], "max_marginal": e["max_marginal"]}
-                for e in entries]
-
-    for name, threshold in start_list:
-        if _past(deadline) and best is not None:
-            summaries.append({"start": name, "start_welfare": None, "welfare": None,
-                              "iterations": 0, "polish_gains": [], "final_gap": None,
-                              "seconds": 0.0, "parameters": None,
-                              "stop_reason": "skipped (time limit)", "history": []})
-            continue
-        begin = time.time()
-        initial = form.project(threshold, type_distribution)
-        parameters, welfare, history, stop_reason = ascend(
-            type_distribution, form, initial, num_bidders, num_goods, objective_mechanism,
-            max_iterations, relative_tolerance, verbose=False, deadline=deadline, scale=scale)
-        start_welfare, iterations = history[0]["welfare"], len(history) - 1
-        trajectory.extend(entry["parameters"] for entry in history)
-        record_trace(name, history)
-        records = diagnostics(history, "ascent")
-        polish_gains = []
-        rounds = 0 if type_distribution.is_atomic else polish_rounds
-        for _ in range(rounds):
-            if _past(deadline):
-                stop_reason = "time_limit"
-                break
-            polished, polished_welfare = polish(type_distribution, form, parameters,
-                                                num_bidders, num_goods, objective_mechanism,
-                                                deadline=deadline)
-            gain = polished_welfare - welfare
-            if gain <= relative_tolerance * max(abs(welfare), 1e-300):
-                break
-            polish_gains.append(gain)
-            parameters, welfare, history, stop_reason = ascend(
-                type_distribution, form, polished, num_bidders, num_goods, objective_mechanism,
-                max_iterations, relative_tolerance, deadline=deadline, scale=scale,
-                first_iteration=records[-1]["iteration"] + 1)
-            iterations += len(history) - 1
-            trajectory.extend(entry["parameters"] for entry in history)
-            record_trace(name, history)
-            records += diagnostics(history[:1], "polish") + diagnostics(history[1:], "ascent")
-        _complete_measures(type_distribution, form, history[-1], num_bidders, num_goods,
-                           objective_mechanism, scale)
-        records[-1].update({key: history[-1][key]
-                            for key in ("gap", "stationarity", "max_marginal")})
-        summaries.append({"start": name, "start_welfare": start_welfare,
-                          "welfare": welfare, "iterations": iterations,
-                          "polish_gains": polish_gains,
-                          "final_gap": history[-1]["gap"], "seconds": time.time() - begin,
-                          "parameters": parameters.tolist(), "stop_reason": stop_reason,
-                          "history": records})
-        if verbose:
-            print(f"  start {name:15s}: welfare {start_welfare:.10g} -> {welfare:.10g} "
-                  f"in {iterations} iterations, {len(polish_gains)} polishes "
-                  f"({time.time() - begin:.1f}s, {stop_reason})")
-        if best is None or welfare > best[1]:
-            best = (parameters, welfare)
-    summary = {"optimizer": "best_response", "form": form.spec(best[0]), "starts": summaries,
-               "trace": trace}
-    return SearchResult([float(p) for p in best[0]], float(best[1]), trajectory, summary)
+              f"{form.num_parameters} parameters, {len(start_list)} starts, "
+              f"{min(workers, len(start_list))} processes)")
+    options = {"max_iterations": max_iterations, "relative_tolerance": relative_tolerance,
+               "polish_rounds": polish_rounds,
+               "short_genetic_generations": short_genetic_generations}
+    jobs = [{"distribution": type_distribution, "form": form, "name": name,
+             "threshold": threshold, "num_bidders": num_bidders, "num_goods": num_goods,
+             "mechanism": objective_mechanism, "deadline": deadline, "scale": scale,
+             "options": options, "seed": seed, "required": index == 0}
+            for index, (name, threshold) in enumerate(start_list)]
+    results = parallel_map(_run_start, jobs, workers)
+    trajectory, trace, summaries = [], [], []
+    for result in results:
+        trajectory.extend(result.pop("trajectory"))
+        trace.extend(result.pop("trace"))
+        summaries.append(result)
+        if verbose and result["welfare"] is not None:
+            print(f"  start {result['start']:15s}: welfare {result['start_welfare']:.10g} -> "
+                  f"{result['welfare']:.10g} in {result['iterations']} iterations, "
+                  f"{len(result['polish_gains'])} polishes ({result['seconds']:.1f}s, "
+                  f"{result['stop_reason']})")
+    best = max((r for r in summaries if r["welfare"] is not None), key=lambda r: r["welfare"])
+    summary = {"optimizer": "best_response", "form": form.spec(best["parameters"]),
+               "starts": summaries, "trace": trace}
+    return SearchResult([float(p) for p in best["parameters"]], float(best["welfare"]),
+                        trajectory, summary)
 
 
 # ─── First-order check ──────────────────────────────────────────────────────────

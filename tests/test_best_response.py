@@ -164,7 +164,8 @@ def test_time_limit_stops_gracefully():
     result = run_best_response_ascent(distribution, "nodes", 6, 2, verbose=False,
                                       deadline=time.time())
     reasons = [s["stop_reason"] for s in result.summary["starts"]]
-    assert reasons == ["time_limit", "skipped (time limit)"]
+    assert reasons[0] == "time_limit" and len(reasons) == 6  # 3 named + 3 random starts
+    assert set(reasons[1:]) == {"skipped (time limit)"}
     assert np.isfinite(result.welfare)
     search = optimize_threshold(distribution, "poly1", 6, 2, optimizer="genetic",
                                 ga_options={"num_generations": 50}, ga_seed=0, verbose=False,

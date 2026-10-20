@@ -37,11 +37,14 @@ num_parents_mating = 4
 stall_generations = 3
 num_local_starts = 1
 local_max_evaluations = 20
+num_restarts = 2                 # restarts and starts only to exercise them, not to optimize
 
 [[optimizers]]
 label = "br"
 method = "best_response"
 max_iterations = 5
+num_random_starts = 1
+short_genetic_generations = 3
 
 [evaluation]
 num_simulated_auctions = 300

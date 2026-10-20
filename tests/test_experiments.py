@@ -201,3 +201,28 @@ def test_ex_ante_cutoff_meets_the_paper_guarantee_and_gaps_are_reported(tmp_path
     assert set(gaps.threshold_class) == {"zero-welfare", "ex-ante"}
     assert (gaps.fb_minus_opt >= -1e-12).all() and (gaps.opt_vcg_minus_class >= -1e-12).all()
     assert "Decomposition of the welfare gap" in (folder / "README.md").read_text()
+
+
+def test_inner_parallelism_matches_serial(tmp_path):
+    """Search starts, genetic restarts and bootstrap resamples in 2 processes give the
+    serial results."""
+    rng = np.random.default_rng(3)
+    path = tmp_path / "population.csv"
+    pd.DataFrame({"e_score": rng.normal(-0.3, 0.6, 600),
+                  "v_score": rng.lognormal(0.0, 0.8, 600)}).to_csv(path, index=False)
+    config = resolve_config(optimize_config(
+        distributions=[{"source": str(path), "label": "toy", **SMALL}],
+        design={"threshold_forms": ["knots3"], "objectives": ["vcg_pa"]},
+        optimizers=[{"method": "genetic+best_response", "max_iterations": 3,
+                     "num_generations": 3, "population_size": 6, "num_parents_mating": 3,
+                     "num_restarts": 2, "num_local_starts": 2, "local_max_evaluations": 10,
+                     "num_random_starts": 1, "short_genetic_generations": 2}]))
+    combination = expand(config)[0][0]
+    rows = []
+    for workers in (1, 2):
+        row, _, _ = compute_combination(combination, {**config, "inner_workers": workers},
+                                        tmp_path / f"run{workers}")
+        rows.append(row)
+    for key in ("training_welfare", "welfare_vcg_pa", "welfare_vcg_pa_lower",
+                "welfare_vcg_pa_upper"):
+        assert rows[0][key] == pytest.approx(rows[1][key], rel=1e-12), key

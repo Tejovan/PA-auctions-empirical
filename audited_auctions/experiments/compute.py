@@ -227,11 +227,9 @@ def given_threshold(entry, training, num_bidders, num_goods):
 def rescaled_threshold(threshold, externality_ratio):
     """τ(e) = τ_prev(e · ζ_prev / ζ): the previous ζ's optimum as a warm start."""
 
-    def warm(externalities):
-        return threshold(np.asarray(externalities, dtype=float) * externality_ratio)
+    from ..threshold_functions import Rescaled
 
-    warm.start_name = "previous ζ"
-    return warm
+    return Rescaled(threshold, externality_ratio, start_name="previous ζ")
 
 
 # ─── One combination ────────────────────────────────────────────────────────────
@@ -251,7 +249,8 @@ def _search(combination, prepared, config, warm_start):
                           genetic_form=optimizer["genetic_form"],
                           best_response_options=dict(optimizer["best_response"]), verbose=False,
                           time_limit=(60.0 * optimizer["time_limit_minutes"]
-                                      if optimizer["time_limit_minutes"] else None))
+                                      if optimizer["time_limit_minutes"] else None),
+                          workers=config.get("inner_workers", 1))
     begin = time.time()
     result = optimize_threshold(prepared.training, combination.threshold_form,
                                 combination.num_bidders, combination.num_goods,
@@ -366,7 +365,8 @@ def _bootstrap(prepared, threshold, combination, config, ivcg_rule):
         confidence_level=evaluation["confidence_level"], ivcg_scoring_rule=ivcg_rule,
         all_outcomes=evaluation["bootstrap_all_outcomes"],
         num_externality_nodes=settings["num_externality_nodes"],
-        num_valuation_cells=settings["num_valuation_cells"])
+        num_valuation_cells=settings["num_valuation_cells"],
+        workers=config.get("inner_workers", 1))
     resamples = result.resamples
     tail = (1 - evaluation["confidence_level"]) / 2
 

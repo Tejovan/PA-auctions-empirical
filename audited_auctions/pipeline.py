@@ -45,6 +45,7 @@ from .empirical import (
 )
 from .best_response_ascent import run_best_response_ascent
 from .genetic_search import run_genetic_search
+from .parallel import split_workers, parallel_map
 from .threshold_evaluation import (AUDITED_MECHANISMS, MECHANISMS, expected_welfare,
                                    ivcg_scoring_rule_for)
 from .threshold_forms import BEST_RESPONSE_FORMS, GENETIC_FORMS, build_threshold_form
@@ -149,11 +150,16 @@ def resolve_optimizer(optimizer, form_kind):
     return optimizer
 
 
+def _genetic_restart(options):
+    """One genetic restart (module level, so that restarts can run in worker processes)."""
+    return run_genetic_search(**options)
+
+
 def optimize_threshold(training, threshold_form, num_bidders, num_goods,
                        objective_mechanism="vcg_pa", optimizer="auto", ga_options=None,
                        ga_seed=None, num_restarts=1, initial_solution=None, genetic_form=None,
                        best_response_options=None, warm_starts=(), verbose=True,
-                       time_limit=None):
+                       time_limit=None, workers=1):
     """Search for τ in threshold_form on the training distribution.
 
     threshold_form : label ("poly2", "knots6", "bins10", "nodes") or polynomial degree
@@ -167,6 +173,9 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
                      max_iterations, relative_tolerance, short_genetic_generations)
     time_limit     : seconds for the whole search; past it, every stage stops gracefully
                      and the best τ found so far is returned (None: no limit)
+    workers        : processes: the genetic restarts run simultaneously (the workers
+                     left per restart run its Nelder–Mead starts), then the
+                     best-response starts
     Returns a dict: form, parameters, welfare, optimizer, search_summaries,
     benchmarks (training welfare of VCG and the first best), and the
     trajectory: candidate parameter vectors as (form index, parameters) pairs, with
@@ -197,15 +206,16 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
             search_form = build_threshold_form(
                 genetic_form or (form.label if form.kind in GENETIC_FORMS else "knots6"), training)
         best = (None, -np.inf)
-        for restart in range(num_restarts):
-            if restart > 0 and deadline is not None and time.time() >= deadline:
-                break
-            search = run_genetic_search(
-                training, None, num_bidders, num_goods, objective_mechanism=objective_mechanism,
-                threshold_form=search_form,
-                seed=None if ga_seed is None else ga_seed + restart,
-                initial_solution=initial_solution if restart == 0 else None,
-                verbose=verbose, deadline=deadline, welfare_scale=scale, **ga_options)
+        processes, per_restart = split_workers(workers, num_restarts)
+        jobs = [dict(type_distribution=training, polynomial_degree=None,
+                     num_bidders=num_bidders, num_goods=num_goods,
+                     objective_mechanism=objective_mechanism, threshold_form=search_form,
+                     seed=None if ga_seed is None else ga_seed + restart,
+                     initial_solution=initial_solution if restart == 0 else None,
+                     verbose=verbose and processes == 1, deadline=deadline,
+                     welfare_scale=scale, workers=per_restart, **ga_options)
+                for restart in range(num_restarts)]
+        for search in parallel_map(_genetic_restart, jobs, processes):
             record_trajectory(search_form, search.trajectory)
             summaries.append(search.summary)
             if search.welfare > best[1]:
@@ -221,7 +231,7 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
     search = run_best_response_ascent(
         training, form, num_bidders, num_goods, objective_mechanism=objective_mechanism,
         warm_starts=warm_starts, seed=ga_seed, verbose=verbose, deadline=deadline, scale=scale,
-        **best_response_options)
+        workers=workers, **best_response_options)
     record_trajectory(form, search.trajectory)
     summaries.append(search.summary)
     return {"form": form, "parameters": list(search.coefficients), "welfare": search.welfare,

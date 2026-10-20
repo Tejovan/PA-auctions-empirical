@@ -17,20 +17,71 @@ values on a grid of externalities (any other source).
 import numpy as np
 
 
-def polynomial_threshold(coefficients):
-    """τ(e) = Σ_m coefficients[m] e^m (coefficients in increasing degree)."""
-    coefficients = np.asarray(coefficients, dtype=float)
+class _Threshold:
+    """Base of the threshold functions below: plain classes (not closures), so that
+    they can be sent to worker processes."""
 
-    def threshold(externalities):
+    description = "custom threshold function"
+
+
+class _Polynomial(_Threshold):
+    def __init__(self, coefficients):
+        self.coefficients = np.asarray(coefficients, dtype=float)
+        self.description = "polynomial " + str(list(np.round(self.coefficients, 6)))
+
+    def __call__(self, externalities):
         externalities = np.asarray(externalities, dtype=float)
         # Horner's rule, highest degree first.
         values = np.zeros_like(externalities)
-        for coefficient in coefficients[::-1]:
+        for coefficient in self.coefficients[::-1]:
             values = values * externalities + coefficient
         return values
 
-    threshold.description = "polynomial " + str(list(np.round(coefficients, 6)))
-    return threshold
+
+class _Tabulated(_Threshold):
+    def __init__(self, externality_knots, threshold_values):
+        knots = np.asarray(externality_knots, dtype=float)
+        values = np.asarray(threshold_values, dtype=float)
+        order = np.argsort(knots)
+        self.knots, self.values = knots[order], values[order]
+        self.finite = np.isfinite(self.values)
+        self.description = f"tabulated on {len(knots)} knots"
+
+    def __call__(self, externalities):
+        externalities = np.asarray(externalities, dtype=float)
+        knots, values, finite = self.knots, self.values, self.finite
+        if finite.all():
+            return np.interp(externalities, knots, values)
+        # Interpolate finite values; infinite knots govern their nearest region.
+        nearest = np.abs(externalities[..., None] - knots).argmin(axis=-1)
+        interpolated = np.interp(externalities, knots[finite], values[finite])
+        return np.where(finite[nearest], interpolated, values[nearest])
+
+
+class _Constant(_Threshold):
+    def __init__(self, value):
+        self.value = float(value)
+        self.description = f"constant {value}"
+
+    def __call__(self, externalities):
+        return np.full(np.shape(externalities), self.value)
+
+
+class Rescaled(_Threshold):
+    """τ(e) = base(e · ratio)."""
+
+    def __init__(self, base, ratio, start_name=None):
+        self.base, self.ratio = base, ratio
+        if start_name:
+            self.start_name = start_name
+
+    def __call__(self, externalities):
+        return self.base(np.asarray(externalities, dtype=float) * self.ratio)
+
+
+def polynomial_threshold(coefficients):
+    """τ(e) = Σ_m coefficients[m] e^m (coefficients in increasing degree)."""
+    return _Polynomial(coefficients)
 
 
 def tabulated_threshold(externality_knots, threshold_values):
@@ -40,33 +91,12 @@ def tabulated_threshold(externality_knots, threshold_values):
     threshold values are allowed at knots; between an infinite and a finite
     knot the threshold is infinite on the half interval nearer the infinite knot.
     """
-    knots = np.asarray(externality_knots, dtype=float)
-    values = np.asarray(threshold_values, dtype=float)
-    order = np.argsort(knots)
-    knots, values = knots[order], values[order]
-    finite = np.isfinite(values)
-
-    def threshold(externalities):
-        externalities = np.asarray(externalities, dtype=float)
-        if finite.all():
-            return np.interp(externalities, knots, values)
-        # Interpolate finite values; infinite knots govern their nearest region.
-        nearest = np.abs(externalities[..., None] - knots).argmin(axis=-1)
-        interpolated = np.interp(externalities, knots[finite], values[finite])
-        return np.where(finite[nearest], interpolated, values[nearest])
-
-    threshold.description = f"tabulated on {len(knots)} knots"
-    return threshold
+    return _Tabulated(externality_knots, threshold_values)
 
 
 def constant_threshold(value):
     """τ(e) = value for every externality (value = -inf admits everybody)."""
-
-    def threshold(externalities):
-        return np.full(np.shape(externalities), float(value))
-
-    threshold.description = f"constant {value}"
-    return threshold
+    return _Constant(value)
 
 
 def as_threshold_function(threshold_source):

@@ -81,7 +81,7 @@ objectives = ["vcg_pa"]
 method = "best_response"
 ```
 
-**Smoke test:** [configs/smoke_test.toml](configs/smoke_test.toml), 4 combinations through every stage in about 10 seconds; use it to check code changes. **Standard test run:** [configs/standard_test.toml](configs/standard_test.toml), every feature, about 2 minutes with 8 workers.
+**Smoke test:** [configs/smoke_test.toml](configs/smoke_test.toml), 4 combinations through every stage in about 10 seconds; use it to check code changes. **Standard test run:** [configs/standard_test.toml](configs/standard_test.toml), every feature, about 2 minutes with 12 workers.
 
 - Two distributions: `harmful_middle`, where ironing binds, and the tweet data at ζ ∈ {5, 50}.
 - n ∈ {4, 8} and k ∈ {1, 2}.

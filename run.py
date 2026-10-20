@@ -63,7 +63,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="plan and time estimate only")
     parser.add_argument("--yes", action="store_true", help="do not ask before running")
     parser.add_argument("--workers", type=int, default=None,
-                        help="worker processes (default: output.workers, else cores − 1, ≤ 8)")
+                        help="worker processes (default: output.workers, else cores − 2)")
     parser.add_argument("--no-report", action="store_true", help="skip the figures")
     parser.add_argument("--report", metavar="RUN_FOLDER", help="redraw figures of a run")
     parser.add_argument("--paper", nargs="?", const="", metavar="NAMES",
