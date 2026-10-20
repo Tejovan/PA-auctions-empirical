@@ -13,9 +13,9 @@ run.py — run experiments of the audited_auctions package from configuration fi
                                               draft and LaTeX snippet in paper/ folders
     python run.py --options                   list distributions, forms, optimizers, ...
 
-Configurations are TOML files; configs/README.md documents every key, and
+Configurations are TOML files; README.md §3 documents every key, and
 configs/*.toml are examples (configs/standard_test.toml is the standard test run).
-Outputs go to runs/<date>_<time>_<kind>_<name>/ (see audited_auctions/README.md).
+Outputs go to runs/<date>_<time>_<kind>_<name>/ (see README.md §4).
 """
 
 import argparse
