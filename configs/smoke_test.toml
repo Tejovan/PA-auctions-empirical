@@ -1,0 +1,48 @@
+# Smoke test: the smallest run through every stage (search, evaluation, bootstrap, checks,
+# figures); for checking code changes in seconds.
+#   python run.py configs/smoke_test.toml --yes
+# Two distributions (synthetic, tweets at one ζ) × one market × one form × both optimizers
+# = 4 combinations, very short searches, coarse grids. Results are not meaningful.
+# Full coverage of the run features: configs/standard_test.toml (96 combinations).
+
+kind = "optimize"
+name = "smoke-test"
+description = "Smoke test of the code: 4 combinations, every stage, coarse grids."
+
+[[distributions]]
+source = "harmful_middle"        # ironing binds
+num_externality_nodes = 21
+num_valuation_cells = 30
+
+[[distributions]]
+source = "tweets"
+externality_scales = [5.0]
+num_externality_nodes = 31
+num_valuation_cells = 50
+
+[markets]
+num_bidders = [4]
+num_goods = [1]
+
+[design]
+threshold_forms = ["knots4"]     # the one form both optimizers search
+objectives = ["vcg_pa"]
+
+[[optimizers]]
+label = "ga"
+method = "genetic"
+num_generations = 5
+population_size = 8
+num_parents_mating = 4
+stall_generations = 3
+num_local_starts = 1
+local_max_evaluations = 20
+
+[[optimizers]]
+label = "br"
+method = "best_response"
+max_iterations = 5
+
+[evaluation]
+num_simulated_auctions = 300
+num_bootstrap = 10

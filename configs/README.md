@@ -4,7 +4,8 @@ A run is described by one TOML file. `python run.py FILE.toml` prints the plan a
 
 | File | Purpose |
 |---|---|
-| [standard_test.toml](standard_test.toml) | standard test of the code: every feature on small grids, about 1.5 minutes |
+| [smoke_test.toml](smoke_test.toml) | smoke test for code changes: 4 combinations through every stage, about 10 seconds; results not meaningful |
+| [standard_test.toml](standard_test.toml) | standard test of the code: every feature on small grids, about 2 minutes |
 | [evaluate_example.toml](evaluate_example.toml) | evaluate run: given thresholds, and the optima of an earlier run |
 | [optimize_example.toml](optimize_example.toml) | research-size optimize run on the tweet data (several ζ, per-node τ) |
 
