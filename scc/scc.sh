@@ -5,10 +5,22 @@
 #   scc/scc.sh submit CONFIG [SLOTS] [HOURS]   sync, then submit CONFIG as a batch job
 #   scc/scc.sh status                 your queued and running jobs
 #   scc/scc.sh log [N]                last N lines (default 40) of the newest job log
-#   scc/scc.sh fetch [RUN]            copy run folders (or one run) from the SCC to runs/
+#   scc/scc.sh fetch [RUN]            copy run folders (or one run) from the SCC to runs/; the
+#                                     SCC's runs/index.csv lines are merged into the local one
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REMOTE=audited-auctions-empirical
+
+# Append to runs/index.csv the SCC's index lines of runs now in runs/ and not yet listed.
+merge_index() {
+    local remote=runs/.index-scc.csv
+    scp -q "scc:$REMOTE/runs/index.csv" "$remote" 2>/dev/null || return 0
+    [ -s runs/index.csv ] || head -n 1 "$remote" > runs/index.csv
+    awk -F, 'NR == FNR { listed[$1] = 1; next }
+             FNR > 1 && !($1 in listed) && system("test -d \"runs/" $1 "\"") == 0' \
+        runs/index.csv "$remote" >> runs/index.csv
+    rm -f "$remote"
+}
 
 case "${1:-}" in
     setup)
@@ -28,7 +40,12 @@ case "${1:-}" in
         ssh scc "bash -lc 'tail -n ${2:-40} \$(ls -t $REMOTE/scc/logs/* | head -1)'" ;;
     fetch)
         mkdir -p runs
-        rsync -avh "scc:$REMOTE/runs/${2:-}" "runs/" ;;
+        if [ -n "${2:-}" ]; then
+            rsync -avh "scc:$REMOTE/runs/$2" runs/
+        else
+            rsync -avh --exclude /index.csv "scc:$REMOTE/runs/" runs/
+        fi
+        merge_index ;;
     *)
-        sed -n '2,8p' "$0"; exit 1 ;;
+        sed -n '2,9p' "$0"; exit 1 ;;
 esac

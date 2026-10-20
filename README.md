@@ -310,29 +310,39 @@ Mechanisms: VCG, VCG-PA, IVCG-PA, first best. Metrics: welfare W, valuation welf
 
 ### 4.3 Figures
 
-Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves) are rasterized at 150 dpi. Each has a WebP preview in `thumbs/`, shown in the README files.
+Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves) are rasterized at 150 dpi. Each has a WebP preview `thumbs/<name>.webp` in its folder. The link name is the label used in the run README's results table and the name for `--paper`.
 
 **Per combination:**
 
-| File | Panels |
-|---|---|
-| `1_types-tau-penalties` | (a) types, τ(e), abstention region, excluded externalities, first-best boundary v = −e, bids pooled by IVCG-PA; (b) penalties r(e) of VCG-PA and IVCG-PA, recipient penalty −e |
-| `2_expected-outcomes` | (a) W split into bidder utility + revenue + penalties + externality welfare, with the share of the first-best gain; (b) change of each component over VCG, with bootstrap intervals |
-| `3_outcome-distributions` | rows W, Σvx, Σex, revenue, penalties; left: per-auction distribution per mechanism; right: paired difference from VCG in the same auction |
-| `4_gain-scatter` | per auction, for VCG-PA and IVCG-PA: captured gain vs achievable gain (first best − VCG); revenue change vs welfare change |
-| `5_ironing` | IVCG-PA design in quantile space: expected welfare contribution ŵ and ironed ω̄, Ψ and its convex hull, their gap, scores against bids, interim allocations |
-| `6_marginal-contribution` | maps of marginal contribution M(e, v) for VCG-PA and IVCG-PA; penalty r(e) vs Pigouvian charge; M at the threshold types |
-| `search/tried-taus` | tried thresholds behind the best one |
-| `search/convergence` | training objective against seconds, per start and stage |
-| `search/iterations` | per iteration: share of the first-best gain, distance to the best welfare, stationarity, first-order violation in M, best-response gap |
+| Link name | File | Panels | Drawn |
+|---|---|---|---|
+| `types` | `1_types-tau-penalties.pdf` | (a) types, τ(e), abstention region, excluded externalities, first-best boundary v = −e, bids pooled by IVCG-PA; (b) penalties r(e) of VCG-PA and IVCG-PA, recipient penalty −e | always |
+| `outcomes` | `2_expected-outcomes.pdf` | (a) W split into bidder net utility + revenue + penalties + externality welfare, with the share of the first-best gain; (b) change of each component over VCG, with bootstrap intervals | always |
+| `distributions` | `3_outcome-distributions.pdf` | rows W, Σvx, Σex, revenue, penalties; left: per-auction distribution per mechanism; right: paired difference from VCG in the same auction | always |
+| `scatter` | `4_gain-scatter.pdf` | per auction, for VCG-PA and IVCG-PA: captured gain vs achievable gain (first best − VCG); revenue change vs welfare change | always |
+| `ironing` | `5_ironing.pdf` | IVCG-PA design in quantile space: expected welfare contribution ŵ and ironed ω̄, Ψ and its convex hull, their gap, scores against bids, interim allocations | only when ironing binds |
+| `marginal` | `6_marginal-contribution.pdf` | maps of marginal contribution M(e, v) for VCG-PA and IVCG-PA; penalty r(e) vs Pigouvian charge; M at the threshold types | always |
+| `tried` | `search/tried-taus.pdf` | thresholds tried by the search, behind the best one | optimize runs |
+| `trace` | `search/convergence.pdf` | training objective against time, per start and stage | optimize runs |
+| `iterations` | `search/iterations.pdf` | per iteration: share of the first-best gain, distance to the best W, stationarity, first-order violation in M, best-response gap | optimize runs with a search history |
 
-**Comparisons:**
+**Comparisons** (in `compare/` folders):
 
-| File | Shows |
+| File | Shows | Drawn when |
+|---|---|---|
+| `tau-by-<input>_<fixed>.pdf` | τ of the combinations that differ in one input (`market`, `form`, `optimizer`, `objective`, `threshold`), others fixed | two or more such combinations |
+| `welfare-vs-zeta_<fixed>.pdf` | (a) W of the four mechanisms, (b) gains over VCG, against ζ | a distribution with several ζ |
+| `share-of-first-best-gain.pdf` | share of the first-best gain of every combination | always |
+
+**README files of a run** (Markdown; previews link to the PDFs):
+
+| File | Sections |
 |---|---|
-| `tau-by-<input>` | τ overlaid across one varied input (`market`, `form`, `optimizer`, `objective`, `threshold`), other inputs fixed |
-| `welfare-vs-zeta` | W and gain over VCG against ζ |
-| `share-of-first-best-gain` | share of the first-best gain of every combination |
+| `README.md` | run facts; inputs; check counts and failed checks; results table with links to every figure; gap decomposition; figure reference; comparison figures (share overview preview, links to `compare/` READMEs); files |
+| `<combination>/README.md` | link to the run and the market's comparison figures; results table (W, share of the first-best gain, revenue, penalties per mechanism); ironing flag; files; each figure under a heading with its description and preview; figures not drawn and why; links to `paper/` folders |
+| `.../compare/README.md` | each comparison figure with its description and preview; links to `paper/` folders |
+
+`python run.py --report RUN` rewrites every README; `--paper` rewrites them with links to the exported panels.
 
 ### 4.4 Checks
 
@@ -414,7 +424,7 @@ scc/scc.sh fetch                         # 5. copy the results back to runs/
 | `submit CONFIG [SLOTS] [HOURS]` | `sync`, then dry run and `qsub` on the SCC |
 | `status` | your queued and running jobs (`qstat`) |
 | `log [N]` | last N lines (default 40) of the newest job log |
-| `fetch [RUN]` | copy every run folder, or the run folder `RUN`, from the SCC into `runs/` |
+| `fetch [RUN]` | copy every run folder, or the run folder `RUN`, from the SCC into `runs/`; merge the SCC's index lines of those runs into `runs/index.csv` |
 
 ### 5.4 Moving files between your machine and the SCC
 
@@ -430,7 +440,7 @@ The SCC clone is `~/audited-auctions-empirical`; its `runs/` links to project st
 | cancel a job | `ssh scc 'bash -lc "qdel JOB_ID"'` (job id from `status`) |
 | shell on the SCC | `ssh scc`, then `cd audited-auctions-empirical` |
 
-`fetch` without `RUN` also copies the SCC's `runs/index.csv` over the local one, so local runs' lines in `runs/index.csv` are replaced; fetch single runs to keep them.
+`fetch` keeps the local `runs/index.csv` and appends the SCC's lines for the fetched runs not yet listed.
 
 Login nodes are for light work only (e.g. the smoke test, `--report`); submit everything else as a job.
 

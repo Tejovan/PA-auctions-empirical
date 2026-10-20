@@ -18,9 +18,15 @@ saved in the compare/ folder of the deepest level above every varied input:
                                      input ∈ market, form, optimizer, objective, threshold
   <distribution>/compare/welfare-vs-zeta_<fixed inputs>.pdf
   compare/share-of-first-best-gain.pdf
-Every figure has a WebP preview thumbs/<name>.webp next to it. README files: the
-run's README.md (inputs, checks, results, the share overview), one README.md per
-combination and per compare/ folder with the previews, each linked to its PDF.
+Every figure has a WebP preview thumbs/<name>.webp next to it. README files (FIGURE_INFO and
+COMPARE_INFO hold the descriptions):
+  README.md                   inputs, checks, results with links to every figure, gap
+                              decomposition, figure reference, comparison figures, files
+  <combination>/README.md     results table, files, each figure under a heading with its
+                              description and preview (linked to the PDF), figures not drawn
+                              and why, links to paper/ folders
+  .../compare/README.md       each comparison figure with its description and preview
+write_readme rewrites them from the figures present (also after a paper export).
 
 Paper mode (python run.py --report RUN --paper [NAMES]): one PDF per panel, legend
 and colorbar PDFs, <figure>.caption.txt and <figure>.tex in a paper/ folder next to
@@ -55,6 +61,57 @@ LEAF_FIGURES = {
 }
 
 PAPER_FIGURES = (*LEAF_FIGURES, "tau-by", "welfare-vs-zeta")
+
+# Title, contents and condition of every figure, for the README files.
+FIGURE_INFO = {
+    "types": ("Types, τ and penalties",
+              "(a) type distribution, τ(e), abstention region, excluded externalities, "
+              "first-best boundary v = −e, bids pooled by IVCG-PA; (b) penalties r(e) of "
+              "VCG-PA and IVCG-PA, recipient penalty −e.", "always"),
+    "outcomes": ("Expected outcomes",
+                 "(a) expected welfare W = bidder net utility + revenue + penalties + "
+                 "externality welfare, per mechanism, with the share of the first-best gain; "
+                 "(b) change of each component over VCG, with bootstrap intervals (empirical "
+                 "data).", "always"),
+    "distributions": ("Per-auction distributions",
+                      "Rows: W, valuation welfare Σvx, externality welfare Σex, revenue, "
+                      "penalties. Left: distribution over the simulated auctions, per "
+                      "mechanism. Right: paired difference from VCG in the same auction, with "
+                      "the share of exact zeros.", "always"),
+    "scatter": ("Per-auction gain scatter",
+                "Per simulated auction, for VCG-PA and IVCG-PA: captured gain (mechanism − "
+                "VCG) against achievable gain (first best − VCG); revenue change against "
+                "welfare change.", "always"),
+    "ironing": ("IVCG-PA ironing",
+                "In quantile space: expected welfare contribution ŵ and ironed welfare "
+                "contribution ω̄, Ψ and its convex hull, their gap; scores against bids; "
+                "interim allocations.", "only when ironing binds"),
+    "marginal": ("Marginal contribution",
+                 "(a, b) maps of the marginal contribution M(e, v) for VCG-PA and IVCG-PA, "
+                 "with the zero contour and τ; (c) penalty r(e) against the Pigouvian charge; "
+                 "(d) M at the threshold types.", "always"),
+    "tried": ("Tried thresholds", "Thresholds tried by the search, behind the best one found.",
+              "optimize runs"),
+    "trace": ("Convergence", "Training objective against time, per start and stage.",
+              "optimize runs"),
+    "iterations": ("Search iterations",
+                   "Per iteration: (a) share of the first-best gain; (b) distance to the best "
+                   "welfare found; (c) stationarity in the form's parameters; (d) violation of "
+                   "zero marginal contribution; (e) gain of one bidder deviating alone.",
+                   "optimize runs with a recorded search history"),
+}
+COMPARE_INFO = {
+    "tau-by": ("τ across one varied input",
+               "τ of the combinations that differ in one input (market, form, optimizer, "
+               "objective or threshold), other inputs fixed; the legend gives each τ's welfare "
+               "and share of the first-best gain.", "two or more such combinations"),
+    "welfare-vs-zeta": ("Welfare against ζ",
+                        "(a) expected welfare of the four mechanisms and (b) gains over VCG, "
+                        "against the externality scale ζ.", "a distribution with several ζ"),
+    "share-of-first-best-gain": ("Share of the first-best gain",
+                                 "Share of the first-best gain of VCG-PA and IVCG-PA for every "
+                                 "combination of the run.", "always"),
+}
 
 # Inputs that comparison figures vary; "market" stands for (n, k).
 OVERLAY_INPUTS = {"optimize": ("market", "threshold_form", "optimizer", "objective"),
@@ -377,8 +434,8 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
               "| combination | share VCG-PA | share IVCG-PA | Δrevenue VCG-PA | figures |",
               "|---|---|---|---|---|"]
     for row in summary.sort_values("path").to_dict("records"):
-        links = " ".join(f"[{Path(file).name.split('_')[0] if '/search/' not in file else Path(file).stem}]"
-                         f"({file})" for file in leaf_files.get(row["path"], []))
+        links = " ".join(f"[{_figure_key(file)}]({file})"
+                         for file in leaf_files.get(row["path"], []))
         _leaf_readme(folder, row, leaf_files.get(row["path"], []))
         lines.append(f"| [{row['path']}]({row['path']}/README.md) | {_share_label(row, 'vcg_pa')} | "
                      f"{_share_label(row, 'ivcg_pa')} | "
@@ -400,19 +457,24 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
                          f"{figures._percent(row['fb_minus_opt_share'])} | "
                          f"{figures._percent(row['opt_minus_opt_vcg_share'])} | "
                          f"{figures._percent(row['opt_vcg_minus_class_share'])} |")
-    lines += ["", "Figure numbers: 1 types, τ, penalties · 2 expected outcomes · 3 per-auction "
-              "distributions · 4 per-auction gain scatter · 5 IVCG-PA ironing · 6 marginal "
-              "contribution and Pigouvian check · tried-taus, convergence: the search.", ""]
-    lines += ["## Comparison figures", ""]
+    lines += ["", "## Figures of each combination", "",
+              "Previews and descriptions: the README.md of each combination. Panels for a paper "
+              "(`python run.py --report RUN --paper`): `paper/` folders next to the figures.", "",
+              "| link | file | shows | drawn |", "|---|---|---|---|"]
+    lines += [f"| {key} | `{name}` | {FIGURE_INFO[key][1]} | {FIGURE_INFO[key][2]} |"
+              for key, name in LEAF_FIGURES.items()]
+    lines += ["", "## Comparison figures", ""]
+    lines += ["| figure | shows | drawn when |", "|---|---|---|"]
+    lines += [f"| `{key}` | {text} | {condition} |"
+              for key, (_, text, condition) in COMPARE_INFO.items()]
+    lines.append("")
     by_folder = {}
     for file in sorted(compare_files):
         by_folder.setdefault(str(Path(file).parent), []).append(file)
     lines += _gallery(by_folder.pop("compare", []), ".")
     for compare, files in by_folder.items():
         _compare_readme(folder, compare, files)
-        lines.append(f"- [{compare}]({compare}/README.md): {len(files)} figures")
-    if not compare_files:
-        lines.append("(none)")
+        lines.append(f"- [{compare}]({compare}/README.md): {_count(len(files), 'figure')}")
     lines += ["", "## Files", "",
               "- `run.toml`: resolved configuration, code version, software, host, seeds, timing",
               "- `summary.csv`: one row per combination; `checks.csv`: every check with verdict",
@@ -422,19 +484,49 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
               "- per combination: `tau.json` (τ; reusable in evaluate runs), `tau.csv` (τ and "
               "penalties at the externality nodes), `results.json` (all statistics), "
               "`first-order.csv`, `data.npz` (arrays behind the figures)",
-              "- `log.txt`: progress messages", ""]
+              "- `log.txt`: progress messages",
+              "- `thumbs/*.webp` next to every figure: the previews shown in the README files", ""]
     (folder / "README.md").write_text("\n".join(lines))
 
 
-def _gallery(files, base):
+def _count(number, noun):
+    return f"{number} {noun}{'' if number == 1 else 's'}"
+
+
+def _figure_key(file):
+    """Key of LEAF_FIGURES or COMPARE_INFO for a figure path."""
+    name = str(Path(file).name)
+    for key, leaf in LEAF_FIGURES.items():
+        if file.endswith(leaf):
+            return key
+    return next((key for key in COMPARE_INFO if name.startswith(key)), Path(file).stem)
+
+
+def _gallery(files, base, info=None):
     """Markdown lines showing the preview of each figure (paths relative to the run
-    folder), linked to the PDF, for a README in folder base (relative to the run)."""
+    folder), linked to the PDF, for a README in folder base (relative to the run); with
+    info (key → title, text, condition), a heading and description above each preview."""
     lines = []
     for file in files:
         relative = Path(os.path.relpath(file, base))
-        lines += [f"**[{relative}]({relative})**  ",
-                  f"[![{relative.stem}]({figures.thumbnail_path(relative)})]({relative})", ""]
+        if info is not None and _figure_key(file) in info:
+            title, text, _ = info[_figure_key(file)]
+            lines += [f"### {title}: [{relative}]({relative})", "", text, ""]
+        else:
+            lines += [f"**[{relative}]({relative})**  "]
+        lines += [f"[![{relative.stem}]({figures.thumbnail_path(relative)})]({relative})", ""]
     return lines
+
+
+def _paper_folders(folder, base):
+    """Links to the paper/ folders under folder/base (paper mode output)."""
+    found = sorted(p for p in (folder / base).glob("**/paper") if p.is_dir())
+    if not found:
+        return []
+    links = ", ".join(f"[{p.relative_to(folder / base)}/]({p.relative_to(folder / base)})"
+                      for p in found)
+    return ["## Panels for a paper", "", f"Exported by `run.py --report RUN --paper`: {links}.",
+            ""]
 
 
 def _leaf_readme(folder, row, files):
@@ -442,18 +534,50 @@ def _leaf_readme(folder, row, files):
     if not (folder / path).is_dir():
         return
     up = os.path.relpath(".", path)
-    lines = [f"# {path}", "", f"Run: [README.md]({up}/README.md)", "",
-             f"Share of the first-best welfare gain over VCG: VCG-PA {_share_label(row, 'vcg_pa')}, "
-             f"IVCG-PA {_share_label(row, 'ivcg_pa')}; change of expected revenue over VCG "
-             f"(VCG-PA) {figures.compact(row['revenue_change_vcg_pa'])}. Files: tau.json (τ), "
-             f"tau.csv, results.json, first-order.csv, data.npz.", ""]
-    (folder / path / "README.md").write_text("\n".join(lines + _gallery(files, path)))
+    lines = [f"# {path}", "", f"Run: [README.md]({up}/README.md)", ""]
+    compare = Path(path).parent.parent / "compare"
+    if (folder / compare).is_dir():
+        lines[-2:] = [f"Run: [README.md]({up}/README.md) · comparison figures of this market "
+                      f"family: [{compare}/README.md]({os.path.relpath(compare, path)}/README.md)",
+                      ""]
+    lines += ["## Results", "",
+              "Exact expected values on the evaluation distribution. Share: (W − W_VCG)/"
+              "(W_FB − W_VCG).", "",
+              "| mechanism | welfare W | share of first-best gain | revenue | penalties paid |",
+              "|---|---|---|---|---|"]
+    for mechanism in figures.MECHANISMS:
+        share = _share_label(row, mechanism) if mechanism != "vcg" else "0%"
+        lines.append(f"| {figures.SHORT[mechanism]} | {figures.compact(row[f'welfare_{mechanism}'])}"
+                     f" | {share} | {figures.compact(row[f'revenue_{mechanism}'])} | "
+                     f"{figures.compact(row[f'penalty_paid_{mechanism}'])} |")
+    binds = row.get("ironing_binds")
+    lines += ["", f"Ironing binds: {'yes' if binds else 'no'}. All statistics: results.json.", "",
+              "## Files", "",
+              "- `tau.json`: τ; reusable in evaluate runs (`tau_file`)",
+              "- `tau.csv`: per externality node: mass, τ, exclusion, penalties of VCG-PA and "
+              "IVCG-PA",
+              "- `first-order.csv`: per node and mechanism: marginal contribution M, its terms, "
+              "best-response gap, Pigouvian charge",
+              "- `results.json`: every statistic; `data.npz`: arrays behind the figures", "",
+              "## Figures", ""]
+    lines += _gallery(files, path, FIGURE_INFO)
+    drawn = {_figure_key(file) for file in files}
+    optimized = isinstance(row.get("optimizer"), str)
+    missing = [key for key in FIGURE_INFO if key not in drawn
+               and (optimized or not FIGURE_INFO[key][2].startswith("optimize runs"))]
+    if missing:
+        lines += ["Not drawn: " + "; ".join(f"{FIGURE_INFO[key][0]} ({FIGURE_INFO[key][2]})"
+                                            for key in missing) + ".", ""]
+    lines += _paper_folders(folder, path)
+    (folder / path / "README.md").write_text("\n".join(lines))
 
 
 def _compare_readme(folder, compare, files):
     up = os.path.relpath(".", compare)
     lines = [f"# Comparison figures in {compare}", "", f"Run: [README.md]({up}/README.md)", ""]
-    (folder / compare / "README.md").write_text("\n".join(lines + _gallery(files, compare)))
+    lines += _gallery(files, compare, COMPARE_INFO)
+    lines += _paper_folders(folder, compare)
+    (folder / compare / "README.md").write_text("\n".join(lines))
 
 
 def make_report(folder, workers=None, log=print):
@@ -511,16 +635,27 @@ def make_paper_figures(folder, select=None, workers=None, log=print):
     else:
         outputs = [_run_job(job, paper) for job, paper in zip(jobs, papers)]
     count = sum(len(files) for files in outputs)
+    write_readme(folder)  # links to the paper/ folders
     log(f"Paper figures: {count} figures exported as panels into paper/ folders")
     return [file for files in outputs for file in files]
 
 
-def write_readme(folder, files):
-    """README.md of a run from run.toml, summary.csv, checks.csv and the figure lists."""
+def _existing_figures(folder, summary):
+    """The figure lists of make_report, from the figures present in the run folder."""
+    leaf = {path: [f"{path}/{name}" for name in LEAF_FIGURES.values()
+                   if (folder / path / name).exists()] for path in summary.path}
+    compare = sorted(str(p.relative_to(folder)) for p in folder.glob("**/compare/*.pdf"))
+    return {"leaf": leaf, "compare": compare}
+
+
+def write_readme(folder, files=None):
+    """README.md of a run from run.toml, summary.csv, checks.csv and the figure lists
+    (default: the figures present in the folder)."""
     folder = Path(folder)
     with open(folder / "run.toml", "rb") as file:
         record = tomllib.load(file)
     summary = pd.read_csv(folder / "summary.csv")
     checks_file = folder / "checks.csv"
     checks = pd.read_csv(checks_file) if checks_file.exists() else pd.DataFrame()
+    files = files or _existing_figures(folder, summary)
     _readme(folder, record, summary, checks, files["leaf"], files["compare"])
