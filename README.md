@@ -233,7 +233,7 @@ threshold_forms = ["nodes"]
 | `genetic_form` | same form, or `knots6` for `nodes` | `genetic+best_response` only: form of the genetic stage |
 | `warm_start_across_zeta` | false | also start from the optimum at the previous ζ, rescaled: τ(e) = τ_prev(e ζ_prev / ζ); the ζ values of a distribution then run in sequence |
 
-<a id="symmetric-relaxation"></a>**Symmetric relaxation** (`relaxation`). A linear program (`symmetric_relaxation.py`, about 5 s per distribution, n, k) finds the best symmetric participation rule for VCG-PA: each type participates with some probability, the same for all bidders. Its value J bounds the VCG-PA welfare of every common τ from above (midpoint estimate, error of order (interval width)²). The method reads τ off it (each node's threshold is the first valuation at which at least half of the node participates), projects it on the form, and runs best-response ascent from that single start with the [best-response keys](#best-response-ascent) (`starts` and `num_random_starts` are ignored).
+<a id="symmetric-relaxation"></a>**Symmetric relaxation** (`relaxation`). A linear program (`symmetric_relaxation.py`, about 5 s per distribution, n, k) finds the best symmetric participation rule for VCG-PA: each type participates with some probability, the same for all bidders. Its value J bounds the VCG-PA welfare of every common τ from above (midpoint estimate, error of order (interval width)²). The method reads τ off it (each node's threshold is the first valuation at which at least half of the node participates; 0 if that is the node's lowest valuation), projects it on the form, and runs best-response ascent from that single start with the [best-response keys](#best-response-ascent) (`starts` and `num_random_starts` are ignored).
 
 - **Record:** `results.json` → `search.relaxation`: `value` (J), `threshold_rule` (true: the best symmetric rule is a threshold rule, and the τ read off it is a best common τ for VCG-PA up to the discretization, paper v3), `largest_drop`, `seconds`.
 - **As a start:** the same τ is a default `starts` entry of `best_response`, where the best start is kept; the separate method shows what the relaxation gives alone.
@@ -590,4 +590,4 @@ The set has 11,811 tweets created between 2022-12-16 and 2025-01-18, each with a
 | `data/samples/`, `full_tweets.csv` | the tweet data |
 | [legacy/](legacy/) | superseded scripts, notebooks and outputs of the EC 2025 / EAAMO 2026 workflow ([legacy/README.md](legacy/README.md)) |
 
-**Tests:** `python -m pytest tests -q` (76 tests). After a code change, run the smallest config covering the change, starting with `configs/smoke_test.toml`; `configs/standard_test.toml` exercises every feature.
+**Tests:** `python -m pytest tests -q` (77 tests). After a code change, run the smallest config covering the change, starting with `configs/smoke_test.toml`; `configs/standard_test.toml` exercises every feature.

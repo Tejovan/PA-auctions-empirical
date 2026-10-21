@@ -194,3 +194,22 @@ def test_participation_gap_and_relaxation():
     assert gap < 1e-9
     zero_welfare, _, _ = participation_gap(distribution, polynomial_threshold([0.0, -1.0]), 2, 1)
     assert zero_welfare > 1e-3
+
+
+def test_nodes_thresholds_take_the_smallest_equivalent_value():
+    """A node whose whole support participates gets τ = 0 (same welfare, smallest
+    penalty), whether the search ends there or the relaxation start puts τ there."""
+    distribution = synthetic_distribution("harmful_middle", **SMALL_GRID)
+    nodes, _, node_of_cell = externality_nodes(distribution)
+    positive = distribution.probabilities > 0
+    lowest = np.full(len(nodes), np.inf)
+    np.minimum.at(lowest, node_of_cell[positive], distribution.valuation_lower[positive])
+    for optimizer in ("best_response", "relaxation"):
+        result = optimize_threshold(distribution, "nodes", 4, 1, optimizer=optimizer,
+                                    best_response_options={"max_iterations": 20},
+                                    verbose=False)
+        parameters = np.asarray(result["parameters"])
+        assert not np.any((parameters > 0) & (parameters <= lowest)), optimizer
+        form = build_threshold_form("nodes", distribution)
+        assert expected_welfare(distribution, form.threshold(parameters), 4, 1, "vcg_pa") == (
+            pytest.approx(result["welfare"], rel=1e-12))

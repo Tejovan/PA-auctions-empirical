@@ -782,10 +782,25 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
                   f"{len(result['polish_gains'])} polishes ({result['seconds']:.1f}s, "
                   f"{result['stop_reason']})")
     best = max((r for r in summaries if r["welfare"] is not None), key=lambda r: r["welfare"])
-    summary = {"optimizer": "best_response", "form": form.spec(best["parameters"]),
+    parameters = _lowest_equivalent_thresholds(type_distribution, form, best["parameters"])
+    summary = {"optimizer": "best_response", "form": form.spec(parameters),
                "starts": summaries, "trace": trace}
-    return SearchResult([float(p) for p in best["parameters"]], float(best["welfare"]),
+    return SearchResult([float(p) for p in parameters], float(best["welfare"]),
                         trajectory, summary)
+
+
+def _lowest_equivalent_thresholds(type_distribution, form, parameters):
+    """nodes form: τ(e) = 0 where 0 < τ(e) <= the node's lowest valuation. Every type of the
+    node participates either way, so welfare is unchanged, and τ = 0 has the smallest
+    penalty r(e) = ∫_0^τ X^τ. Other forms are returned unchanged."""
+    parameters = np.asarray(parameters, dtype=float)
+    if form.kind != "nodes":
+        return parameters
+    nodes, _, node_of_cell = externality_nodes(type_distribution)
+    positive = type_distribution.probabilities > 0
+    lowest = np.full(len(nodes), np.inf)
+    np.minimum.at(lowest, node_of_cell[positive], type_distribution.valuation_lower[positive])
+    return np.where((parameters > 0) & (parameters <= lowest), 0.0, parameters)
 
 
 # ─── First-order check ──────────────────────────────────────────────────────────

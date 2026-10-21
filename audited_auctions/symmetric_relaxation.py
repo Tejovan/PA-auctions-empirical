@@ -188,7 +188,10 @@ def symmetric_relaxation(distribution, num_bidders, num_goods, num_intervals=600
     for node in range(len(nodes)):
         admitted = np.flatnonzero(present[:, node] & (fraction[:, node] >= 0.5))
         if len(admitted):
-            thresholds[node] = edges[admitted[0]]
+            # Admitted from the node's lowest valuation on: τ = 0 gives the same participants
+            # with the smallest penalty (the edge would put τ at the bottom of the support).
+            lowest = np.flatnonzero(present[:, node])[0]
+            thresholds[node] = 0.0 if admitted[0] == lowest else edges[admitted[0]]
     return RelaxationResult(
         value=float(-solution.fun), nodes=nodes, valuation_edges=edges, participation=fraction,
         thresholds=thresholds, largest_drop=float(max(drops)), status=solution.message,
