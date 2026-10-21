@@ -377,6 +377,9 @@ class ZeroWelfareThreshold:
         e = np.asarray(externalities, dtype=float)
         return np.where(-e > self.maximum, np.inf, np.maximum(-e, 0.0))
 
+    def kinks(self):
+        return np.array([0.0, -self.maximum])
+
 
 def random_threshold(type_distribution, rng, num_knots=6):
     """A random start: τ piecewise linear through num_knots externalities spread over the
@@ -814,10 +817,14 @@ def participation_gap(type_distribution, threshold_function, num_bidders, num_go
     all common τ (paper v3 Thm [thm:vcg-sufficient]). For IVCG-PA the scores of τ
     are held fixed and no such theorem applies.
 
+    Continuous versions (TypeDistribution.continuous_version): M^τ from the continuous
+    model, integrated over the discrete approximation refined_version().
+
     Returns (total G, per-node gains, mass with the wrong sign of M^τ).
     """
     model = build_mechanism_model(mechanism, type_distribution, threshold_function, num_bidders,
                                   num_goods)
+    type_distribution = type_distribution.refined_version()
     nodes, _, node_of_cell = externality_nodes(type_distribution)
     maximum = float(type_distribution.maximum_valuation)
     thresholds = np.asarray(threshold_function(nodes), dtype=float)

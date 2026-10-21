@@ -28,13 +28,27 @@ On each segment the expected welfare contribution
 is linear in q (b + const for valuation bids, b for the first best), and so is
 the expected valuation; the expected externality is constant.
 
-Scores: VCG, VCG-PA and the first best score a bid by itself. IVCG-PA scores a
-participant by the ironed welfare contribution ω̄^τ, the nondecreasing L2
-projection of ŵ^τ in quantile space; equivalently, ω̄^τ is the derivative of
-the lower convex hull of Ψ(q) = ∫_0^q ŵ^τ (the paper's Ψ of §6 [thm:ironing], with the unnormalized quantile q).
-`iron_quantile_function` computes it exactly (pool-adjacent-violators for
-functions that are linear on each segment; the pool levels are roots of a
-monotone equation solved to machine precision).
+Continuous versions (TypeDistribution.continuous_version: each cell has a
+density uniform on an externality interval and piecewise linear in the
+valuation), VCG, VCG-PA and IVCG-PA (continuous_bid_segments). τ is evaluated at
+the ends and midpoint of each cell's externality interval and at its kinks and
+jumps inside the interval (threshold_functions.threshold_kinks), and taken as
+linear in between: exact for the piecewise-linear forms (nodes, knots, cutoff,
+bins). Then the participants of a cell with valuation b are the externalities
+of an interval whose ends are piecewise linear in b, so the participating
+density is piecewise quadratic in b and E[e | bid = b] is a ratio of
+polynomials. The bid line is cut at the cell edges and midpoints, at τ at the
+interval points, and (transition_points − 1) more points inside each range
+where τ crosses a cell's interval. Each piece gets its exact participating mass
+(Simpson's rule, exact for quadratics) with a constant bid density (bid linear
+in q), and E[e | bid] is evaluated exactly at the piece ends and interpolated
+linearly in between. So ŵ^τ is continuous in the bid: types enter gradually as
+b rises, the mix of externalities changes continuously with b, and IVCG-PA
+irons only where ŵ^τ decreases, not at every externality node and cell edge.
+Accuracy: second order in the piece widths, instead of exact. ŵ^τ can now
+decrease within a segment; iron_quantile_function pools such a segment to its
+mean first, which leaves the projection unchanged. The first best (bids
+w = v + e) uses the discrete approximation refined_version, also second order.
 
 Interim allocation
 ------------------
@@ -71,6 +85,7 @@ from scipy.optimize import brentq
 from scipy.stats import binom
 
 from .scoring_rules import IdentityScore, PiecewiseLinearScore
+from .threshold_functions import threshold_kinks
 
 VALUATION_BIDS = "valuation"
 WELFARE_CONTRIBUTION_BIDS = "welfare_contribution"
@@ -170,10 +185,11 @@ def _crossing(q_start, q_end, value_start, value_end, level):
 
 
 def iron_quantile_function(quantile_start, quantile_end, value_start, value_end):
-    """Nondecreasing L2 projection of a function linear and nondecreasing on each segment.
+    """Nondecreasing L2 projection of a function linear on each segment.
 
-    Input segments are contiguous in q; on segment i the function rises
-    linearly from value_start[i] to value_end[i] (constant for atoms). Returns
+    Input segments are contiguous in q; on segment i the function is linear
+    from value_start[i] to value_end[i] (constant for atoms; decreasing only with
+    continuous externalities). Returns
     pieces (quantile_start, quantile_end, value_start, value_end) of the
     projection ω̄: each piece is a restriction of an input segment (not
     ironed) or a constant pool level (ironed). ω̄ is the derivative of the lower
@@ -210,6 +226,10 @@ def iron_quantile_function(quantile_start, quantile_end, value_start, value_end)
         q_a, q_b, v_a, v_b = (float(x) for x in segment)
         if q_b <= q_a:
             continue
+        if v_b < v_a:
+            # Decreasing on the segment (continuous externalities): the projection is
+            # constant there, so pooling the segment to its mean first leaves it unchanged.
+            v_a = v_b = (v_a + v_b) / 2
         if not stack or v_a >= stack[-1][3]:
             stack.append([q_a, q_b, v_a, v_b])
             continue
@@ -369,6 +389,9 @@ class ScoreAuctionModel:
       quantile_start/end, bid_start/end, score_start/end,
       welfare_start/end (ŵ^τ), valuation_start/end (E[v | bid]), externality (E[e | bid]).
     cell_participation_mass: per cell of the distribution, Pr[cell, participate].
+    participation_points: (externalities, masses) of the participating types, for
+      expected penalties: the cells (point externalities), or the participating
+      pieces of the cells with their mean externality (continuous externalities).
     """
 
     mechanism: str
@@ -379,6 +402,7 @@ class ScoreAuctionModel:
     scoring_rule: object
     cell_participation_mass: np.ndarray
     maximum_bid: float
+    participation_points: tuple = None
     _allocation_integral: object = field(default=None, repr=False)
 
     # Interim allocation and its integral -------------------------------------
@@ -443,7 +467,7 @@ class ScoreAuctionModel:
         weights, at, allocation = self._segment_quadrature()
         allocated_weight = weights * allocation
         valuation_welfare = n * np.sum(allocated_weight * at("valuation"))
-        externality_welfare = n * np.sum(allocated_weight * self.segments["externality"][:, None])
+        externality_welfare = n * np.sum(allocated_weight * at("externality"))
         bid_times_allocation = np.sum(allocated_weight * np.maximum(at("bid"), 0.0))
         return {
             "welfare": float(valuation_welfare + externality_welfare),
@@ -524,9 +548,8 @@ def _refine(segments, piece_start, piece_end, piece_score_start, piece_score_end
                          len(segments["quantile_end"]) - 1)
     piece = np.minimum(np.searchsorted(piece_end, midpoints), len(piece_end) - 1)
 
-    refined = {"quantile_start": starts, "quantile_end": ends,
-               "externality": segments["externality"][segment]}
-    for name in ("bid", "welfare", "valuation"):
+    refined = {"quantile_start": starts, "quantile_end": ends}
+    for name in ("bid", "welfare", "valuation", "externality"):
         for label, points in (("start", starts), ("end", ends)):
             refined[f"{name}_{label}"] = _interpolate_rows(
                 segments[f"{name}_start"], segments[f"{name}_end"], segments["quantile_start"],
@@ -609,46 +632,266 @@ def _bid_space_score(segments):
 NEVER_ALLOCATED_SCORE = -1e300
 
 
+# Continuous versions: points of τ per externality interval (ends and midpoint), and
+# pieces per range where τ crosses an interval (see the module notes).
+CONTINUOUS_SUBINTERVALS = 2
+CONTINUOUS_TRANSITION_POINTS = 2
+
+
+def _threshold_pieces(distribution, threshold_function, subintervals):
+    """Pieces of the cells' externality intervals on which τ is taken as linear.
+
+    Returns (cell, e0, e1, t0, t1): for each piece its cell, its externality ends
+    and τ at them (finite; +inf replaced by the exclusion value, −inf by −1).
+    Points of an interval: subintervals + 1 equally spaced points, plus the kinks
+    and jumps of τ inside it, each as a pair of points 1e-9 of the interval apart.
+    A point externality is one piece with e0 = e1.
+    """
+    d = distribution
+    maximum = float(d.maximum_valuation)
+    exclusion = maximum * (1 + 1e-9) + 1e-12
+    low_e, high_e = d.cell_externality_intervals()
+    intervals, column = np.unique(np.column_stack([low_e, high_e]), axis=0,
+                                  return_inverse=True)
+    column = column.ravel()
+    kinks = np.empty(0) if threshold_function is None else threshold_kinks(threshold_function)
+    starts, ends = [], []
+    for low, high in intervals:
+        if high <= low:
+            starts.append([low]), ends.append([high])
+            continue
+        inside = kinks[(kinks > low) & (kinks < high)]
+        gap = 1e-9 * (high - low)
+        points = np.unique(np.concatenate([low + (high - low) * np.arange(subintervals + 1)
+                                           / subintervals,
+                                           np.clip(inside - gap, low, high),
+                                           np.clip(inside + gap, low, high)]))
+        starts.append(points[:-1]), ends.append(points[1:])
+    counts_per_column = np.array([len(x) for x in starts])
+    piece_start, piece_end = np.concatenate(starts), np.concatenate(ends)
+    if threshold_function is None:
+        t_start = t_end = np.full(len(piece_start), -1.0)
+    else:
+        evaluate = getattr(threshold_function, "finite_threshold", threshold_function)
+        unique, inverse = np.unique(np.concatenate([piece_start, piece_end]),
+                                    return_inverse=True)
+        values = np.asarray(evaluate(unique), dtype=float)[inverse.ravel()]
+        values = np.where(np.isposinf(values), exclusion,
+                          np.where(np.isneginf(values), -1.0, values))
+        t_start, t_end = values[:len(piece_start)], values[len(piece_start):]
+    first_piece = np.concatenate([[0], np.cumsum(counts_per_column)[:-1]])
+    counts = counts_per_column[column]
+    cell = np.repeat(np.arange(d.num_cells), counts)
+    offsets = np.concatenate([[0], np.cumsum(counts)[:-1]])
+    piece = first_piece[column][cell] + (np.arange(counts.sum()) - offsets[cell])
+    return cell, piece_start[piece], piece_end[piece], t_start[piece], t_end[piece]
+
+
+def continuous_bid_segments(distribution, threshold_function, extra_breakpoints=(),
+                            subintervals=CONTINUOUS_SUBINTERVALS,
+                            transition_points=CONTINUOUS_TRANSITION_POINTS):
+    """Participating valuation bids of a continuous version (TypeDistribution.continuous_version).
+
+    threshold_function: τ (None: everyone participates). Returns a dict with the
+    bid segments (bid_start, bid_end, mass, externality_start, externality_end:
+    E[e | bid] at the segment ends), the participating mass per cell
+    (cell_mass) and participation_points (mean externality, mass) of the
+    participating pieces. See the module notes.
+
+    Sub-cells: a piece [e0, e1] of a cell's externality interval × one half of
+    its valuation interval, on which the density is ρ(v) per unit of
+    externality, linear in v (a point externality has weight 1 instead of
+    e1 − e0). At bid b the participating externalities of a sub-cell are an
+    interval [lo(b), hi(b)]: all of [e0, e1] above max(t0, t1), none below
+    min(t0, t1), and in between the part where the linear τ is <= b.
+    """
+    d = distribution
+    maximum = float(d.maximum_valuation)
+    exclusion = maximum * (1 + 1e-9) + 1e-12
+    scale = max(maximum, 1.0)
+    cell, e0, e1, t0, t1 = _threshold_pieces(d, threshold_function, subintervals)
+
+    # Valuation halves of each cell, with the density per unit externality at their ends.
+    low_e, high_e = d.cell_externality_intervals()
+    shape_lower, shape_upper = d.cell_valuation_shapes()
+    widths_e = np.where(high_e > low_e, high_e - low_e, 1.0)
+    midpoint_density = d.probabilities / (widths_e * (d.valuation_upper - d.valuation_lower)
+                                          * (shape_lower + 2 + shape_upper) / 4)
+    middle = (d.valuation_lower + d.valuation_upper) / 2
+    cell = np.repeat(cell, 2)
+    half = np.tile([0, 1], len(e0))
+    e0, e1, t0, t1 = (np.repeat(x, 2) for x in (e0, e1, t0, t1))
+    low_v = np.where(half == 0, d.valuation_lower[cell], middle[cell])
+    high_v = np.where(half == 0, middle[cell], d.valuation_upper[cell])
+    density_low = midpoint_density[cell] * np.where(half == 0, shape_lower[cell], 1.0)
+    density_high = midpoint_density[cell] * np.where(half == 0, 1.0, shape_upper[cell])
+    density_slope = (density_high - density_low) / (high_v - low_v)
+    weight = np.where(e1 > e0, e1 - e0, 1.0)
+
+    def rho(indices, b):
+        return density_low[indices] + density_slope[indices] * (b - low_v[indices])
+
+    t_low, t_high = np.minimum(t0, t1), np.maximum(t0, t1)
+    sloped = (t_high - t_low) > 1e-12 * scale
+    excluded = t_low >= exclusion
+    full_start = np.maximum(low_v, np.where(sloped, t_high, t_low))
+    has_full = (full_start < high_v) & ~excluded
+    trans_start = np.maximum(low_v, t_low)
+    trans_end = np.minimum(high_v, t_high)
+    has_trans = sloped & (trans_start < trans_end) & ~excluded
+    full, trans = np.flatnonzero(has_full), np.flatnonzero(has_trans)
+
+    # Breakpoints of the bid line.
+    inner = (trans_start[trans][:, None] + (trans_end - trans_start)[trans][:, None]
+             * (np.arange(1, transition_points) / transition_points)).ravel()
+    points = np.unique(np.concatenate([low_v, high_v, full_start[full], trans_start[trans],
+                                       trans_end[trans], inner,
+                                       np.asarray(extra_breakpoints, dtype=float)]))
+    tolerance = 1e-12 * scale
+    points = points[np.concatenate([[True], np.diff(points) > tolerance])]
+    num_intervals = len(points) - 1
+    width = np.diff(points)
+
+    def index_of(values):
+        return np.searchsorted(points, values - tolerance / 2)
+
+    # Full pieces: density ρ(b) w and externality moment ρ(b) w (e0 + e1)/2, linear in b;
+    # accumulated as intercept and slope.
+    mean_e = (e0[full] + e1[full]) / 2
+    slope = density_slope[full] * weight[full]
+    intercept = (density_low[full] - density_slope[full] * low_v[full]) * weight[full]
+    start_index, end_index = index_of(full_start[full]), index_of(high_v[full])
+    coefficients = np.zeros((4, num_intervals + 1))
+    for row, values in enumerate((intercept, slope, intercept * mean_e, slope * mean_e)):
+        coefficients[row] += np.bincount(start_index, values, num_intervals + 1)
+        coefficients[row] -= np.bincount(end_index, values, num_intervals + 1)
+    coefficients = np.cumsum(coefficients, axis=1)[:, :num_intervals]
+    left, right, center = points[:-1], points[1:], (points[:-1] + points[1:]) / 2
+    density = [coefficients[0] + coefficients[1] * b for b in (left, center, right)]
+    moment = [coefficients[2] + coefficients[3] * b for b in (left, center, right)]
+    rate = [np.zeros(num_intervals), np.zeros(num_intervals)]
+    rate_moment = [np.zeros(num_intervals), np.zeros(num_intervals)]
+
+    # Transition pieces: participating externalities [e*(b), e1] (τ decreasing) or
+    # [e0, e*(b)] (τ increasing), e*(b) = e0 + (b − t0)(e1 − e0)/(t1 − t0).
+    first, last = index_of(trans_start[trans]), index_of(trans_end[trans])
+    counts = last - first
+    piece = np.repeat(np.arange(len(trans)), counts)
+    offsets = np.concatenate([[0], np.cumsum(counts)[:-1]])
+    interval = first[piece] + (np.arange(counts.sum()) - offsets[piece])
+    sub = trans[piece]
+    e_slope = (e1[sub] - e0[sub]) / (t1[sub] - t0[sub])
+    decreasing = t1[sub] < t0[sub]
+    for position, b in enumerate((points[interval], (points[interval] + points[interval + 1]) / 2,
+                                  points[interval + 1])):
+        entering = np.clip(e0[sub] + (b - t0[sub]) * e_slope, e0[sub], e1[sub])
+        low = np.where(decreasing, entering, e0[sub])
+        high = np.where(decreasing, e1[sub], entering)
+        local = rho(sub, b)
+        density[position] += np.bincount(interval, local * (high - low), num_intervals)
+        moment[position] += np.bincount(interval, local * (high - low) * (high + low) / 2,
+                                        num_intervals)
+        if position != 1:
+            side = position // 2
+            rate[side] += np.bincount(interval, local * np.abs(e_slope), num_intervals)
+            rate_moment[side] += np.bincount(interval, local * np.abs(e_slope) * entering,
+                                             num_intervals)
+    mass = width * (density[0] + 4 * density[1] + density[2]) / 6   # Simpson: exact (quadratic)
+
+    def mean_externality(position, side):
+        # Where no type participates at an end, the limit from inside the interval: the
+        # mean of the entering externalities, weighted by their entry rates.
+        value = density[position]
+        small = value <= 1e-12 * max(float(np.max(value, initial=0.0)), 1e-300)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            limit = np.where(rate[side] > 0, rate_moment[side] / rate[side], np.nan)
+            return np.where(small, limit, moment[position] / np.where(small, 1.0, value))
+
+    externality_start, externality_end = mean_externality(0, 0), mean_externality(2, 1)
+    externality_start = np.where(np.isfinite(externality_start), externality_start,
+                                 externality_end)
+    externality_end = np.where(np.isfinite(externality_end), externality_end, externality_start)
+    positive = mass > 1e-14 * max(float(mass.max(initial=0.0)), 1e-300)
+
+    # Participation points (expected penalties) and participating mass per cell.
+    full_mass = weight[full] * (high_v[full] - full_start[full]) * (
+        rho(full, full_start[full]) + rho(full, high_v[full])) / 2
+    span = (trans_start[trans], (trans_start[trans] + trans_end[trans]) / 2, trans_end[trans])
+    lengths, centers = [], None
+    for position, b in enumerate(span):
+        s_ = (e1[trans] - e0[trans]) / (t1[trans] - t0[trans])
+        entering = np.clip(e0[trans] + (b - t0[trans]) * s_, e0[trans], e1[trans])
+        dec = t1[trans] < t0[trans]
+        low, high = np.where(dec, entering, e0[trans]), np.where(dec, e1[trans], entering)
+        lengths.append(rho(trans, b) * (high - low))
+        if position == 1:
+            centers = (low + high) / 2
+    trans_mass = (trans_end[trans] - trans_start[trans]) * (lengths[0] + 4 * lengths[1]
+                                                           + lengths[2]) / 6
+    point_externality = np.concatenate([mean_e, centers])
+    point_mass = np.concatenate([full_mass, trans_mass])
+    cell_mass = np.bincount(np.concatenate([cell[full], cell[trans]]), point_mass, d.num_cells)
+    return {"bid_start": points[:-1][positive], "bid_end": points[1:][positive],
+            "mass": mass[positive], "externality_start": externality_start[positive],
+            "externality_end": externality_end[positive], "cell_mass": cell_mass,
+            "participation_points": (point_externality, point_mass)}
+
+
 def build_score_auction_model(mechanism, distribution, cell_thresholds, bid_kind, ironed,
                               num_bidders, num_goods, fixed_scoring_rule=None):
     """Build the exact model of one score-based auction.
 
     mechanism       : label stored in the model
     distribution    : TypeDistribution
-    cell_thresholds : (num_cells,) τ(e_j) of each cell (−inf: everyone participates)
+    cell_thresholds : (num_cells,) τ(e_j) of each cell (−inf: everyone participates);
+                      for a continuous version, the threshold function τ itself
+                      (None: everyone participates; valuation bids only)
     bid_kind        : VALUATION_BIDS (bid v) or WELFARE_CONTRIBUTION_BIDS (bid w = v + e)
     ironed          : False -> score = bid; True -> score = ironed welfare contribution
     fixed_scoring_rule : optional PiecewiseLinearScore used instead of ironing this
                       distribution (an IVCG-PA designed on another distribution, e.g.
                       the training data, evaluated on this one)
     """
-    participating_lower, mass = participating_cells(distribution, cell_thresholds)
-    participates = mass > 0
-    if not participates.any():
-        raise ValueError(f"{mechanism}: no type participates under this threshold")
-    externalities = distribution.externalities[participates]
-    shift = externalities if bid_kind == WELFARE_CONTRIBUTION_BIDS else 0.0
-    bid_lower = participating_lower[participates] + shift
-    bid_upper = distribution.valuation_upper[participates] + shift
     extra_breakpoints = [0.0] if bid_kind == WELFARE_CONTRIBUTION_BIDS else []
     if fixed_scoring_rule is not None:
         # Cut at the knots of the scoring rule so the score is linear on each segment.
         extra_breakpoints = list(extra_breakpoints) + list(fixed_scoring_rule.knots)
-    bid_start, bid_end, segment_mass, mean_externality = _bid_segments(
-        bid_lower, bid_upper, mass[participates], externalities, distribution.is_atomic,
-        extra_breakpoints)
+    if distribution.is_continuous:
+        if bid_kind != VALUATION_BIDS:
+            raise ValueError("continuous version: valuation bids only (the first best "
+                             "uses refined_version)")
+        pieces = continuous_bid_segments(distribution, cell_thresholds, extra_breakpoints)
+        if len(pieces["mass"]) == 0:
+            raise ValueError(f"{mechanism}: no type participates under this threshold")
+        bid_start, bid_end, segment_mass = pieces["bid_start"], pieces["bid_end"], pieces["mass"]
+        externality_start, externality_end = pieces["externality_start"], pieces["externality_end"]
+        mass, participation_points = pieces["cell_mass"], pieces["participation_points"]
+    else:
+        participating_lower, mass = participating_cells(distribution, cell_thresholds)
+        participates = mass > 0
+        if not participates.any():
+            raise ValueError(f"{mechanism}: no type participates under this threshold")
+        externalities = distribution.externalities[participates]
+        shift = externalities if bid_kind == WELFARE_CONTRIBUTION_BIDS else 0.0
+        bid_lower = participating_lower[participates] + shift
+        bid_upper = distribution.valuation_upper[participates] + shift
+        bid_start, bid_end, segment_mass, externality_start = _bid_segments(
+            bid_lower, bid_upper, mass[participates], externalities, distribution.is_atomic,
+            extra_breakpoints)
+        externality_end = externality_start
+        participation_points = (externalities, mass[participates])
 
     quantile_end = np.cumsum(segment_mass)
     quantile_start = np.concatenate([[0.0], quantile_end[:-1]])
-    welfare_offset = mean_externality if bid_kind == VALUATION_BIDS else 0.0
-    valuation_offset = 0.0 if bid_kind == VALUATION_BIDS else -mean_externality
+    valuation_bids = bid_kind == VALUATION_BIDS
     segments = {
         "quantile_start": quantile_start, "quantile_end": quantile_end,
         "bid_start": bid_start, "bid_end": bid_end,
-        "welfare_start": bid_start + welfare_offset, "welfare_end": bid_end + welfare_offset,
-        "valuation_start": bid_start + valuation_offset,
-        "valuation_end": bid_end + valuation_offset,
-        "externality": mean_externality,
+        "welfare_start": bid_start + (externality_start if valuation_bids else 0.0),
+        "welfare_end": bid_end + (externality_end if valuation_bids else 0.0),
+        "valuation_start": bid_start - (0.0 if valuation_bids else externality_start),
+        "valuation_end": bid_end - (0.0 if valuation_bids else externality_end),
+        "externality_start": externality_start, "externality_end": externality_end,
     }
 
     if fixed_scoring_rule is not None:
@@ -677,4 +920,5 @@ def build_score_auction_model(mechanism, distribution, cell_thresholds, bid_kind
         mechanism=mechanism, num_bidders=num_bidders, num_goods=num_goods, segments=segments,
         participation_probability=float(segment_mass.sum()), scoring_rule=scoring_rule,
         cell_participation_mass=mass, maximum_bid=float(np.max(bid_end)),
+        participation_points=participation_points,
     )

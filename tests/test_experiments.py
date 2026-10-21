@@ -18,17 +18,18 @@ from audited_auctions.experiments.provenance import to_toml
 from audited_auctions.experiments.runner import run
 
 SMALL = {"num_externality_nodes": 31, "num_valuation_cells": 40}
-SHORT_GENETIC = {"label": "ga", "method": "genetic", "num_generations": 6, "population_size": 8,
-                 "num_parents_mating": 4, "stall_generations": 4, "num_local_starts": 1,
-                 "local_max_evaluations": 30}
+SHORT_GENETIC = {"label": "ga", "method": "genetic", "threshold_forms": ["poly1", "knots3"],
+                 "num_generations": 6, "population_size": 8, "num_parents_mating": 4,
+                 "stall_generations": 4, "num_local_starts": 1, "local_max_evaluations": 30}
 
 
 def optimize_config(**sections):
     raw = {"kind": "optimize", "name": "test",
            "distributions": [{"source": "harmful_middle", **SMALL}],
            "markets": {"num_bidders": [4], "num_goods": [1]},
-           "design": {"threshold_forms": ["poly1", "knots3"], "objectives": ["vcg_pa"]},
-           "optimizers": [SHORT_GENETIC, {"method": "best_response", "max_iterations": 10}],
+           "design": {"objectives": ["vcg_pa"]},
+           "optimizers": [SHORT_GENETIC, {"method": "best_response", "threshold_forms": ["knots3"],
+                                          "max_iterations": 10}],
            "evaluation": {"num_simulated_auctions": 300, "num_bootstrap": 4}}
     raw.update(sections)
     return raw
@@ -43,16 +44,26 @@ def test_configuration_errors_name_the_problem():
         resolve_config(optimize_config(distributions=[{"source": "no_such_family"}]))
     with pytest.raises(ConfigError, match="thresholds"):
         resolve_config({"kind": "evaluate", "distributions": [{"source": "harmful_middle"}]})
+    with pytest.raises(ConfigError, match="cannot search form 'poly1'"):
+        resolve_config(optimize_config(optimizers=[{"method": "best_response",
+                                                    "threshold_forms": ["poly1"]}]))
+    with pytest.raises(ConfigError, match="per optimizer"):
+        resolve_config(optimize_config(design={"threshold_forms": ["knots3"]}))
 
 
 def test_expansion_runs_every_valid_combination():
-    config = resolve_config(optimize_config(markets={"num_bidders": [4, 6], "num_goods": [1, 2]}))
+    config = resolve_config(optimize_config(
+        markets={"num_bidders": [2, 4], "num_goods": [1, 2]},
+        optimizers=[SHORT_GENETIC, {"method": "best_response", "threshold_forms": ["knots3"]},
+                    {"method": "relaxation"}]))
     combinations, skipped = expand(config)
-    # 4 markets × (poly1 with ga, knots3 with ga, knots3 with br); poly1 with br is skipped.
-    assert len(combinations) == 12
-    assert any("cannot search poly1" in reason for _, reason in skipped)
+    # 4 markets × (ga: poly1, knots3; br: knots3; relax: nodes), relax skipped for n2-k2.
+    assert len(combinations) == 15
+    assert any("k < n" in reason for _, reason in skipped)
     paths = {c.path for c in combinations}
-    assert "harmful-middle/z1/n6-k2/vcgpa_knots3_br" in paths
+    assert {"harmful-middle/z1/n4-k2/vcgpa_knots3_br",
+            "harmful-middle/z1/n4-k2/vcgpa_nodes_relax"} <= paths
+    assert "harmful-middle/z1/n2-k2/vcgpa_nodes_relax" not in paths
     assert len(paths) == len(combinations)
 
 
@@ -96,8 +107,8 @@ def test_empirical_combination_bootstrap_and_sensitivity(tmp_path):
                   "v_score": rng.lognormal(0.0, 0.8, 1500)}).to_csv(path, index=False)
     config = resolve_config(optimize_config(
         distributions=[{"source": str(path), "label": "toy", **SMALL}],
-        design={"threshold_forms": ["knots3"], "objectives": ["vcg_pa"]},
-        optimizers=[{"method": "best_response", "max_iterations": 10}],
+        optimizers=[{"method": "best_response", "threshold_forms": ["knots3"],
+                     "max_iterations": 10}],
         checks={"bandwidth_sensitivity": [0.5, 2.0]}))
     combination = expand(config)[0][0]
     row, checks, _ = compute_combination(combination, config, tmp_path / "run")
@@ -212,8 +223,8 @@ def test_inner_parallelism_matches_serial(tmp_path):
                   "v_score": rng.lognormal(0.0, 0.8, 600)}).to_csv(path, index=False)
     config = resolve_config(optimize_config(
         distributions=[{"source": str(path), "label": "toy", **SMALL}],
-        design={"threshold_forms": ["knots3"], "objectives": ["vcg_pa"]},
-        optimizers=[{"method": "genetic+best_response", "max_iterations": 3,
+        optimizers=[{"method": "genetic+best_response", "threshold_forms": ["knots3"],
+                     "max_iterations": 3,
                      "num_generations": 3, "population_size": 6, "num_parents_mating": 3,
                      "num_restarts": 2, "num_local_starts": 2, "local_max_evaluations": 10,
                      "num_random_starts": 1, "short_genetic_generations": 2}]))

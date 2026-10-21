@@ -26,12 +26,12 @@ num_bidders = [6]
 num_goods = [1, 3]
 
 [design]
-threshold_forms = ["knots8"]   # cutoff: common welfare cutoff (genetic only)
 objectives = ["vcg_pa", "ivcg_pa"]
 
 [[optimizers]]
 label = "ga"                     # genetic stage + Nelder–Mead, short
 method = "genetic"
+threshold_forms = ["knots8"]
 num_generations = 15
 population_size = 16
 num_parents_mating = 6
@@ -41,8 +41,9 @@ local_max_evaluations = 60
 num_restarts = 2                 # enough to exercise restarts (default 4)
 
 [[optimizers]]
-label = "br"                     # best-response ascent (knots4 only; poly1 is skipped)
+label = "br"                     # best-response ascent
 method = "best_response"
+threshold_forms = ["knots8"]
 max_iterations = 100
 num_random_starts = 2            # default 3
 short_genetic_generations = 10    # default 40

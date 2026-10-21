@@ -1,7 +1,8 @@
 # Standard test run: exercises every part of the code on small grids in about a minute.
 #   python run.py configs/standard_test.toml --yes
 # Two distributions (a synthetic one where ironing binds, and the tweet data at two ζ),
-# two bidder counts, two good counts, three threshold forms, both objectives, both methods.
+# two bidder counts, two good counts, both objectives, three optimizers with their own forms
+# (genetic: poly1, knots4, cutoff; best response: knots4; relaxation: nodes).
 # Short searches and coarse grids: thresholds are good, not fully optimal.
 
 kind = "optimize"
@@ -24,12 +25,12 @@ num_bidders = [4, 8]
 num_goods = [1, 2]
 
 [design]
-threshold_forms = ["poly1", "knots4", "cutoff"]   # cutoff: common welfare cutoff (genetic only)
 objectives = ["vcg_pa", "ivcg_pa"]
 
 [[optimizers]]
 label = "ga"                     # genetic stage + Nelder–Mead, short
 method = "genetic"
+threshold_forms = ["poly1", "knots4", "cutoff"]   # cutoff: common welfare cutoff
 num_generations = 15
 population_size = 16
 num_parents_mating = 6
@@ -39,11 +40,18 @@ local_max_evaluations = 60
 num_restarts = 2                 # enough to exercise restarts (default 4)
 
 [[optimizers]]
-label = "br"                     # best-response ascent (knots4 only; poly1 is skipped)
+label = "br"                     # best-response ascent
 method = "best_response"
+threshold_forms = ["knots4"]
 max_iterations = 20
 num_random_starts = 1            # default 3
 short_genetic_generations = 5    # default 40
+
+[[optimizers]]
+label = "relax"                  # symmetric relaxation, then best-response ascent from it
+method = "relaxation"
+threshold_forms = ["nodes"]
+max_iterations = 20
 
 [evaluation]
 num_simulated_auctions = 2000

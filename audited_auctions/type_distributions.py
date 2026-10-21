@@ -21,6 +21,36 @@ given cell j, the valuation is uniform on [lower_j, upper_j]. Two kinds:
 
 Mixed distributions (some atoms, some intervals) are not supported.
 
+Continuous version. A piecewise-uniform distribution on a grid of externality
+nodes is a discretization of a continuous density: the externality takes the
+node values, and the valuation density jumps at the cell edges. Under a
+continuous τ, a whole node then enters the participants at its threshold, and
+E[e | v] jumps at every cell edge where the mix of externalities changes, so
+the expected welfare contribution ŵ^τ has small drops at every node threshold
+and every cell edge, and IVCG-PA irons in many small bands (a discretization
+effect of order (spacing)²). continuous_version removes both jumps:
+
+  * externalities: the mass of each node is spread uniformly over its
+    externality interval (from the midpoint to the previous node to the
+    midpoint to the next; the end nodes get half a spacing on the outside);
+  * valuations: within each node's column of cells, the density is the
+    piecewise-linear interpolation of the cell densities between the cell
+    midpoints (constant from the outer midpoints to the ends of a run of
+    adjacent cells); cell masses are renormalized to sum to one.
+
+Each cell is then a rectangle [externality_lower_j, externality_upper_j] ×
+[lower_j, upper_j] with a density uniform in e and piecewise linear in v (its
+values at lower_j, the midpoint and upper_j are proportional to
+valuation_shape_lower_j, 1 and valuation_shape_upper_j). The distribution
+differs from the gridded one by a discretization error of the same order as
+the grid's own. Evaluation: exact_computation.continuous_bid_segments.
+Distributions with genuinely finitely many externality values
+(discrete_externality_distribution, metadata externality_support = "discrete")
+keep their externality values (only valuations become piecewise linear).
+refined_version gives a discrete approximation of the continuous version
+(point externalities and uniform valuation pieces on a finer grid; used for
+the first best).
+
 Model assumptions enforced here: valuations are non-negative and bounded, with
 upper bound v̄ = max_j upper_j (TypeDistribution.maximum_valuation).
 
@@ -62,6 +92,12 @@ class TypeDistribution:
                       "externality_grid", "valuation_grid", "density"
                       (density has shape (len(valuation_grid), len(externality_grid)))
     metadata        : free-form provenance (family parameters, smoothing settings)
+    externality_lower, externality_upper : optional (num_cells,) externality interval
+                      of each cell (continuous version, see the module notes);
+                      None: the externality of a cell is the point externalities_j
+    valuation_shape_lower, valuation_shape_upper : optional (num_cells,) valuation
+                      density at the cell's ends relative to its midpoint value
+                      (continuous version); None: uniform valuations
     cache           : results that depend only on this distribution (not on τ),
                       e.g. VCG and first-best outcomes; filled by
                       threshold_evaluation.tau_independent_outcomes. Not copied
@@ -75,6 +111,10 @@ class TypeDistribution:
     name: str = ""
     density_grid: Optional[dict] = field(default=None, repr=False)
     metadata: dict = field(default_factory=dict, repr=False)
+    externality_lower: Optional[np.ndarray] = field(default=None, repr=False)
+    externality_upper: Optional[np.ndarray] = field(default=None, repr=False)
+    valuation_shape_lower: Optional[np.ndarray] = field(default=None, repr=False)
+    valuation_shape_upper: Optional[np.ndarray] = field(default=None, repr=False)
     cache: dict = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def __post_init__(self):
@@ -107,6 +147,10 @@ class TypeDistribution:
         self.externalities = self.externalities[keep]
         self.valuation_lower = self.valuation_lower[keep]
         self.valuation_upper = self.valuation_upper[keep]
+        for name in ("externality_lower", "externality_upper", "valuation_shape_lower",
+                     "valuation_shape_upper"):
+            if getattr(self, name) is not None:
+                setattr(self, name, np.asarray(getattr(self, name), dtype=float).ravel()[keep])
         self.probabilities = self.probabilities[keep] / self.probabilities[keep].sum()
         point_cells = self.valuation_upper == self.valuation_lower
         if point_cells.all():
@@ -115,6 +159,8 @@ class TypeDistribution:
             self.kind = PIECEWISE_UNIFORM
         else:
             raise ValueError("mixed distributions (atoms and intervals) are not supported")
+        if self.is_continuous and self.kind == ATOMIC:
+            raise ValueError("a continuous version needs piecewise-uniform cells")
 
     # Basic properties ----------------------------------------------------------
 
@@ -125,6 +171,29 @@ class TypeDistribution:
     @property
     def is_atomic(self) -> bool:
         return self.kind == ATOMIC
+
+    @property
+    def is_continuous(self) -> bool:
+        """A continuous version (continuous_version): density continuous in v, and in e
+        unless the externality takes finitely many values."""
+        return self.valuation_shape_lower is not None
+
+    @property
+    def has_externality_intervals(self) -> bool:
+        return self.externality_lower is not None
+
+    def cell_externality_intervals(self):
+        """(lower, upper) externality of each cell; equal for point externalities."""
+        if self.has_externality_intervals:
+            return self.externality_lower, self.externality_upper
+        return self.externalities, self.externalities
+
+    def cell_valuation_shapes(self):
+        """(lower, upper) valuation density at the cell ends relative to the midpoint."""
+        if self.valuation_shape_lower is not None:
+            return self.valuation_shape_lower, self.valuation_shape_upper
+        ones = np.ones(self.num_cells)
+        return ones, ones
 
     @property
     def valuation_midpoints(self) -> np.ndarray:
@@ -157,7 +226,16 @@ class TypeDistribution:
         """Draw (externalities, valuations), each of shape (num_draws, num_bidders)."""
         cells = rng.choice(self.num_cells, size=(num_draws, num_bidders), p=self.probabilities)
         lower, upper = self.valuation_lower[cells], self.valuation_upper[cells]
-        valuations = lower + rng.random(cells.shape) * (upper - lower)
+        uniform = rng.random(cells.shape)
+        if self.is_continuous:
+            valuations = _sample_hat(lower, upper, self.valuation_shape_lower[cells],
+                                     self.valuation_shape_upper[cells], uniform,
+                                     rng.random(cells.shape))
+        else:
+            valuations = lower + uniform * (upper - lower)
+        if self.has_externality_intervals:
+            low, high = self.externality_lower[cells], self.externality_upper[cells]
+            return low + rng.random(cells.shape) * (high - low), valuations
         return self.externalities[cells], valuations
 
     def sample_type_points(self, num_points, rng):
@@ -186,13 +264,124 @@ class TypeDistribution:
                 "valuation_grid": self.density_grid["valuation_grid"],
                 "density": self.density_grid["density"] / externality_scale,
             }
+        intervals = {}
+        if self.has_externality_intervals:
+            intervals = {"externality_lower": self.externality_lower * externality_scale,
+                         "externality_upper": self.externality_upper * externality_scale}
         return replace(
             self,
             externalities=self.externalities * externality_scale,
             name=name or f"{self.name} (ζ = {externality_scale:g})",
             density_grid=grid,
             metadata={**self.metadata, "externality_scale": externality_scale},
+            **intervals,
         )
+
+    def continuous_version(self):
+        """The continuous version of a piecewise-uniform distribution (module notes);
+        self for atomic distributions and continuous versions."""
+        if self.is_atomic or self.is_continuous:
+            return self
+        intervals = {}
+        nodes, node_of_cell = np.unique(self.externalities, return_inverse=True)
+        node_of_cell = node_of_cell.ravel()
+        spread = (self.metadata.get("externality_support") != "discrete" and len(nodes) > 1)
+        if spread:
+            edges = np.concatenate([[nodes[0] - (nodes[1] - nodes[0]) / 2],
+                                    (nodes[:-1] + nodes[1:]) / 2,
+                                    [nodes[-1] + (nodes[-1] - nodes[-2]) / 2]])
+            intervals = {"externality_lower": edges[node_of_cell],
+                         "externality_upper": edges[node_of_cell + 1]}
+        shape_lower, shape_upper = _interpolated_shapes(
+            node_of_cell, self.valuation_lower, self.valuation_upper,
+            self.probabilities / (self.valuation_upper - self.valuation_lower))
+        probabilities = self.probabilities * (shape_lower + 2 + shape_upper) / 4
+        externalities = (self.externalities if not spread
+                         else (intervals["externality_lower"] + intervals["externality_upper"]) / 2)
+        return replace(self, externalities=externalities, probabilities=probabilities,
+                       valuation_shape_lower=shape_lower, valuation_shape_upper=shape_upper,
+                       metadata={**self.metadata, "version": "continuous"}, **intervals)
+
+    def refined_version(self, externality_points=4, valuation_pieces=2):
+        """Discrete approximation of a continuous version: each cell split into
+        externality_points equally spaced point externalities × valuation_pieces
+        uniform valuation pieces, with the cell's mass on each piece. self if not
+        continuous."""
+        if not self.is_continuous:
+            return self
+        m, r = (int(externality_points) if self.has_externality_intervals else 1,
+                int(valuation_pieces))
+        low_e, high_e = self.cell_externality_intervals()
+        e = low_e[:, None] + (high_e - low_e)[:, None] * ((np.arange(m) + 0.5) / m)  # (C, m)
+        # Valuation pieces and their masses under the piecewise-linear density.
+        cuts = self.valuation_lower[:, None] + (self.valuation_upper - self.valuation_lower)[
+            :, None] * (np.arange(r + 1) / r)                                            # (C, r+1)
+        density = _hat_density(self.valuation_lower[:, None], self.valuation_upper[:, None],
+                               self.valuation_shape_lower[:, None],
+                               self.valuation_shape_upper[:, None], cuts)
+        middle = _hat_density(self.valuation_lower[:, None], self.valuation_upper[:, None],
+                              self.valuation_shape_lower[:, None],
+                              self.valuation_shape_upper[:, None], (cuts[:, 1:] + cuts[:, :-1]) / 2)
+        piece_mass = (density[:, :-1] + 4 * middle + density[:, 1:]) / 6   # Simpson; exact
+        piece_mass = piece_mass / piece_mass.sum(axis=1, keepdims=True)
+        cells = self.num_cells
+        mass = (self.probabilities[:, None, None] * piece_mass[:, None, :] / m) * np.ones((1, m, 1))
+        return TypeDistribution(
+            np.broadcast_to(e[:, :, None], (cells, m, r)).ravel(),
+            np.broadcast_to(cuts[:, None, :-1], (cells, m, r)).ravel(),
+            np.broadcast_to(cuts[:, None, 1:], (cells, m, r)).ravel(), mass.ravel(),
+            name=self.name, density_grid=self.density_grid,
+            metadata={**self.metadata, "version": f"refined ({m} × {r} per cell)"})
+
+
+def _interpolated_shapes(column, lower, upper, density):
+    """Valuation density at the ends of each cell, relative to the cell's density, of the
+    piecewise-linear interpolation between cell midpoints within each column (runs of
+    adjacent cells); constant from the outer midpoints of a run to its ends."""
+    order = np.lexsort((lower, column))
+    col, low, high, dens = column[order], lower[order], upper[order], density[order]
+    middle = (low + high) / 2
+    scale = max(float(np.max(high)), 1.0)
+    adjacent = (col[1:] == col[:-1]) & (np.abs(low[1:] - high[:-1]) <= 1e-12 * scale)
+    edge = dens[:-1] + (dens[1:] - dens[:-1]) * (high[:-1] - middle[:-1]) / (middle[1:]
+                                                                                 - middle[:-1])
+    upper_value = dens.copy()
+    lower_value = dens.copy()
+    upper_value[:-1] = np.where(adjacent, edge, dens[:-1])
+    lower_value[1:] = np.where(adjacent, edge, dens[1:])
+    shape_lower, shape_upper = np.empty(len(order)), np.empty(len(order))
+    shape_lower[order] = lower_value / dens
+    shape_upper[order] = upper_value / dens
+    return shape_lower, shape_upper
+
+
+def _hat_density(lower, upper, shape_lower, shape_upper, valuations):
+    """Unnormalized valuation density of a cell: linear from shape_lower at lower to 1 at
+    the midpoint to shape_upper at upper."""
+    middle = (lower + upper) / 2
+    half = (upper - lower) / 2
+    left = shape_lower + (1 - shape_lower) * (valuations - lower) / half
+    right = 1 + (shape_upper - 1) * (valuations - middle) / half
+    return np.where(valuations <= middle, left, right)
+
+
+def _sample_linear(start, end, uniform):
+    """t in [0, 1] with density proportional to start + (end − start) t."""
+    slope = end - start
+    total = (start + end) / 2
+    with np.errstate(invalid="ignore", divide="ignore"):
+        root = (-start + np.sqrt(np.maximum(start ** 2 + 2 * slope * uniform * total, 0.0))) / slope
+    return np.where(np.abs(slope) > 1e-12 * np.maximum(total, 1e-300), root, uniform)
+
+
+def _sample_hat(lower, upper, shape_lower, shape_upper, uniform, choice):
+    """Valuations from the piecewise-linear density of each cell (see _hat_density)."""
+    left_mass, right_mass = shape_lower + 1, 1 + shape_upper
+    left = choice * (left_mass + right_mass) < left_mass
+    half = (upper - lower) / 2
+    t = np.where(left, _sample_linear(shape_lower, np.ones_like(shape_lower), uniform),
+                 _sample_linear(np.ones_like(shape_upper), shape_upper, uniform))
+    return np.where(left, lower, lower + half) + half * t
 
 
 # ─── Populations (atomic) ─────────────────────────────────────────────────────
@@ -309,7 +498,7 @@ def discrete_externality_distribution(externality_levels, level_probabilities,
     upper_mesh = np.broadcast_to(valuation_edges[1:][:, None], cell_mass.shape)
     return TypeDistribution(
         level_mesh.ravel(), lower_mesh.ravel(), upper_mesh.ravel(), cell_mass.ravel(),
-        name=name, metadata=metadata or {},
+        name=name, metadata={**(metadata or {}), "externality_support": "discrete"},
     )
 
 

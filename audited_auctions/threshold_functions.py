@@ -12,6 +12,12 @@ paper; -inf admits every valuation.
 The helpers below build threshold functions from the sources used in the code
 base: polynomial coefficients (the genetic algorithm output) and tabulated
 values on a grid of externalities (any other source).
+
+Optional methods used by the evaluation with continuous externalities
+(exact_computation.continuous_bid_segments), which takes τ as linear between
+points of each externality interval: kinks() returns the externalities where τ
+has a kink or a jump (threshold_kinks reads it), and finite_threshold(e) returns
+finite values (values >= v̄ exclude) where the callable returns +inf.
 """
 
 import numpy as np
@@ -57,6 +63,10 @@ class _Tabulated(_Threshold):
         interpolated = np.interp(externalities, knots[finite], values[finite])
         return np.where(finite[nearest], interpolated, values[nearest])
 
+    def kinks(self):
+        jumps = self.finite[1:] != self.finite[:-1]
+        return np.concatenate([self.knots, (self.knots[:-1][jumps] + self.knots[1:][jumps]) / 2])
+
 
 class _Constant(_Threshold):
     def __init__(self, value):
@@ -77,6 +87,9 @@ class Rescaled(_Threshold):
 
     def __call__(self, externalities):
         return self.base(np.asarray(externalities, dtype=float) * self.ratio)
+
+    def kinks(self):
+        return threshold_kinks(self.base) / self.ratio
 
 
 def polynomial_threshold(coefficients):
@@ -110,3 +123,9 @@ def as_threshold_function(threshold_source):
 
 def describe_threshold(threshold_function) -> str:
     return getattr(threshold_function, "description", "custom threshold function")
+
+
+def threshold_kinks(threshold_function):
+    """Externalities where τ has a kink or a jump (empty if τ does not say)."""
+    kinks = getattr(threshold_function, "kinks", None)
+    return np.empty(0) if kinks is None else np.asarray(kinks(), dtype=float).ravel()

@@ -1,13 +1,14 @@
 # Smoke test: the smallest run through every stage (search, evaluation, bootstrap, checks,
 # figures); for checking code changes in seconds.
 #   python run.py configs/smoke_test.toml --yes
-# Two distributions (synthetic, tweets at one ζ) × one market × one form × both optimizers
-# = 4 combinations, very short searches, coarse grids. Results are not meaningful.
+# Two distributions (synthetic, tweets at one ζ) × one market × three optimizers (genetic and
+# best response on knots4, relaxation on nodes) = 6 combinations, very short searches, coarse
+# grids, continuous evaluation. Results are not meaningful.
 # Full coverage of the run features: configs/standard_test.toml (96 combinations).
 
 kind = "optimize"
 name = "smoke-test"
-description = "Smoke test of the code: 4 combinations, every stage, coarse grids."
+description = "Smoke test of the code: 6 combinations, every stage, coarse grids."
 
 [[distributions]]
 source = "harmful_middle"        # ironing binds
@@ -25,12 +26,12 @@ num_bidders = [4]
 num_goods = [1]
 
 [design]
-threshold_forms = ["knots4"]     # the one form both optimizers search
 objectives = ["vcg_pa"]
 
 [[optimizers]]
 label = "ga"
 method = "genetic"
+threshold_forms = ["knots4"]
 num_generations = 5
 population_size = 8
 num_parents_mating = 4
@@ -42,9 +43,16 @@ num_restarts = 2                 # restarts and starts only to exercise them, no
 [[optimizers]]
 label = "br"
 method = "best_response"
+threshold_forms = ["knots4"]
 max_iterations = 5
 num_random_starts = 1
 short_genetic_generations = 3
+
+[[optimizers]]
+label = "relax"                  # symmetric relaxation, then best-response ascent from it
+method = "relaxation"
+threshold_forms = ["nodes"]
+max_iterations = 5
 
 [evaluation]
 num_simulated_auctions = 300

@@ -4,12 +4,13 @@ config.py
 Run configurations: a TOML file (configs/*.toml) is read, completed with the
 defaults below, validated, and expanded into combinations. Every list in
 [markets], [design], the distribution tables ([[distributions]]: externality
-scales) and the method tables ([[optimizers]]) is a set of values; a run
-computes every combination of them.
+scales) and the method tables ([[optimizers]]: threshold forms) is a set of
+values; a run computes every combination of them.
 
 Two kinds of run:
-  optimize  for each combination of distribution, ζ, n, k, objective, threshold
-            form and optimizer: search for the best τ, then evaluate it
+  optimize  for each combination of distribution, ζ, n, k, objective, optimizer
+            and one of that optimizer's threshold forms: search for the best τ,
+            then evaluate it
   evaluate  for each combination of distribution, ζ, n, k and given threshold
             function ([[thresholds]]): evaluate it
 
@@ -36,7 +37,12 @@ DATA_SETS = {"tweets": "data/samples/g_full_tweets.csv"}
 RUN_KINDS = ("optimize", "evaluate")
 OBJECTIVES = ("vcg_pa", "ivcg_pa")
 OBJECTIVE_SHORT = {"vcg_pa": "vcgpa", "ivcg_pa": "ivcgpa"}
-METHODS = ("genetic", "best_response", "genetic+best_response")
+METHODS = ("genetic", "best_response", "genetic+best_response", "relaxation")
+METHOD_LABELS = {"genetic": "ga", "best_response": "br", "genetic+best_response": "ga-br",
+                 "relaxation": "relax"}
+# Threshold forms of an [[optimizers]] table without threshold_forms.
+DEFAULT_FORMS = {"genetic": ["knots6"], "best_response": ["knots6"],
+                 "genetic+best_response": ["knots6"], "relaxation": ["nodes"]}
 
 SYNTHETIC_DEFAULTS = {
     "externality_scales": [1.0],
@@ -84,9 +90,10 @@ OPTIMIZER_OTHER_DEFAULTS = {
 }
 SECTION_DEFAULTS = {
     "markets": {"num_bidders": [8], "num_goods": [1]},
-    "design": {"threshold_forms": ["knots6"], "objectives": ["vcg_pa"]},
+    "design": {"objectives": ["vcg_pa"]},
     "evaluation": {"num_simulated_auctions": 2000, "num_bootstrap": 200,
-                   "confidence_level": 0.95, "bootstrap_all_outcomes": True},
+                   "confidence_level": 0.95, "bootstrap_all_outcomes": True,
+                   "continuous": True},
     "checks": {"grid_refinement": False, "refinement_factor": 2,
                "bandwidth_sensitivity": [], "grid_relative_tolerance": 0.01,
                "first_order_tolerance": 1e-4, "monte_carlo_z": 4.0,
@@ -151,30 +158,36 @@ def resolve_distribution(table):
 # ─── Optimizers and thresholds ──────────────────────────────────────────────────
 
 
+def method_accepts_form(method, form_label):
+    kind, _ = parse_form_label(form_label)
+    if method == "genetic":
+        return kind in GENETIC_FORMS
+    return kind in BEST_RESPONSE_FORMS
+
+
 def resolve_optimizer(table):
-    """An [[optimizers]] table: label, method and the method's parameters."""
+    """An [[optimizers]] table: label, method, threshold forms and the method's parameters."""
     table = dict(table)
     for group in ("genetic", "best_response"):  # nested in a resolved configuration
         table.update(table.pop(group, {}))
     method = table.pop("method", None)
     if method not in METHODS:
         raise ConfigError(f"[[optimizers]] method must be one of {METHODS}, got {method!r}")
-    label = table.pop("label", {"genetic": "ga", "best_response": "br",
-                                "genetic+best_response": "ga-br"}[method])
+    label = table.pop("label", METHOD_LABELS[method])
+    forms = _as_list(table.pop("threshold_forms", DEFAULT_FORMS[method]))
+    for form in forms:
+        parse_form_label(form)  # raises on an unknown label
+        if not method_accepts_form(method, form):
+            accepted = GENETIC_FORMS if method == "genetic" else BEST_RESPONSE_FORMS
+            raise ConfigError(f"optimizer {label}: method {method} cannot search form {form!r} "
+                              f"(form kinds: {', '.join(accepted)})")
     allowed = {**GENETIC_DEFAULTS, **BEST_RESPONSE_DEFAULTS, **OPTIMIZER_OTHER_DEFAULTS}
     _check_keys(table, allowed, f"optimizer {label}")
     genetic = {key: table.get(key, value) for key, value in GENETIC_DEFAULTS.items()}
     best_response = {key: table.get(key, value) for key, value in BEST_RESPONSE_DEFAULTS.items()}
     other = {key: table.get(key, value) for key, value in OPTIMIZER_OTHER_DEFAULTS.items()}
-    return {"label": label, "method": method, "genetic": genetic,
+    return {"label": label, "method": method, "threshold_forms": forms, "genetic": genetic,
             "best_response": best_response, **other}
-
-
-def method_accepts_form(method, form_label):
-    kind, _ = parse_form_label(form_label)
-    if method == "genetic":
-        return kind in GENETIC_FORMS
-    return kind in BEST_RESPONSE_FORMS
 
 
 THRESHOLD_SOURCES = ("polynomial", "constant", "tabulated", "cutoff", "tau_file", "from_run")
@@ -210,17 +223,17 @@ def resolve_config(raw):
         raise ConfigError(f"kind must be one of {RUN_KINDS}")
     config = {"kind": kind, "name": raw.get("name", kind),
               "description": raw.get("description", "")}
+    if "threshold_forms" in raw.get("design", {}):
+        raise ConfigError("[design] threshold_forms: the forms are now set per optimizer; move "
+                          "them to threshold_forms = [...] in each [[optimizers]] table")
     for section, defaults in SECTION_DEFAULTS.items():
         config[section] = _merge(defaults, raw.get(section, {}), f"[{section}]")
     for key in ("num_bidders", "num_goods"):
         config["markets"][key] = [int(v) for v in _as_list(config["markets"][key])]
-    config["design"]["threshold_forms"] = _as_list(config["design"]["threshold_forms"])
     config["design"]["objectives"] = _as_list(config["design"]["objectives"])
     for objective in config["design"]["objectives"]:
         if objective not in OBJECTIVES:
             raise ConfigError(f"objectives must be in {OBJECTIVES}, got {objective!r}")
-    for form in config["design"]["threshold_forms"]:
-        parse_form_label(form)  # raises on an unknown label
     config["checks"]["bandwidth_sensitivity"] = [
         float(s) for s in _as_list(config["checks"]["bandwidth_sensitivity"])]
 
@@ -313,8 +326,9 @@ def _thresholds_from_run(run_folder, distribution_label, zeta, n, k):
 def expand(config):
     """(combinations, skipped): every combination of the configuration's sets.
 
-    skipped lists (description, reason) for combinations that cannot run, e.g.
-    a polynomial form with best-response ascent.
+    skipped lists (description, reason) for combinations that cannot run: the
+    relaxation method with k >= n or an atomic training distribution, and
+    from_run thresholds without a match.
     """
     combinations, skipped = [], []
     markets = list(itertools.product(config["markets"]["num_bidders"],
@@ -325,16 +339,21 @@ def expand(config):
                 base = dict(distribution=distribution, externality_scale=zeta,
                             num_bidders=n, num_goods=k)
                 if config["kind"] == "optimize":
-                    for objective, form, optimizer in itertools.product(
-                            config["design"]["objectives"], config["design"]["threshold_forms"],
-                            config["optimizers"]):
-                        if not method_accepts_form(optimizer["method"], form):
-                            skipped.append((f"{form} with {optimizer['label']}",
-                                            f"{optimizer['method']} cannot search {form}"))
-                            continue
-                        combinations.append(Combination(**base, objective=objective,
-                                                        threshold_form=form,
-                                                        optimizer=optimizer))
+                    for objective, optimizer in itertools.product(
+                            config["design"]["objectives"], config["optimizers"]):
+                        if optimizer["method"] == "relaxation":
+                            atomic = (distribution["kind"] == "empirical"
+                                      and distribution["smoothing"] == "none")
+                            if k >= n or atomic:
+                                skipped.append((f"{optimizer['label']} for {distribution['label']} "
+                                                f"n{n}-k{k}",
+                                                "the relaxation needs k < n and a piecewise-"
+                                                "uniform training distribution"))
+                                continue
+                        for form in optimizer["threshold_forms"]:
+                            combinations.append(Combination(**base, objective=objective,
+                                                            threshold_form=form,
+                                                            optimizer=optimizer))
                 else:
                     for entry in config["thresholds"]:
                         entries = ([entry] if entry["source"] != "from_run" else

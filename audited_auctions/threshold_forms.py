@@ -272,6 +272,19 @@ class FormThreshold:
         values = self.form.finite_values(self.parameters, externalities)
         return np.where(values >= self.form.exclusion_value, np.inf, values)
 
+    def finite_threshold(self, externalities):
+        return self.form.finite_values(self.parameters, externalities)
+
+    def kinks(self):
+        """Externalities where τ has a kink or a jump."""
+        kind, p = self.form.kind, self.parameters
+        if kind in ("knots", "nodes", "bins"):
+            extra = [p[-1]] if kind == "knots" else []  # exclusion cutoff
+            return np.concatenate([self.form.locations, extra])
+        if kind == "cutoff":  # τ = 0 from w on; excluded below w − v̄
+            return np.array([p[0], p[0] - self.form.maximum_valuation])
+        return np.empty(0)
+
 
 def threshold_from_spec(spec, parameters=None):
     """Threshold function of a stored spec (ThresholdForm.spec), optionally with other parameters."""

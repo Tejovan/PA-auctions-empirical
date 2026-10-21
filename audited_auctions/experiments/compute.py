@@ -6,8 +6,14 @@ plots: figures are drawn afterwards from the saved files (report.py), so they
 can be redrawn without recomputing.
 
 Steps for one combination (distribution at ζ, market n, k, design):
-  1. distributions: training (τ and the IVCG-PA scores are designed on it) and
-     evaluation (outcomes are reported on it); identical for synthetic families
+  1. distributions: training (τ is searched on it), design (the IVCG-PA scores,
+     ironing, marginal-contribution maps and participation gap are computed on
+     it) and evaluation (outcomes are reported on it). Synthetic families:
+     training = the gridded family; design = evaluation = its continuous version
+     ([evaluation] continuous = true, the default; else the gridded family).
+     Empirical data: design = the continuous version of the smoothed training
+     half; evaluation = the test half (atomic, or the continuous version of
+     its smoothing)
   2. τ: searched (optimize runs) or given (evaluate runs)
   3. exact expected outcomes of VCG, VCG-PA, IVCG-PA and the first best on the
      evaluation distribution; per-auction outcomes of simulated auctions
@@ -79,16 +85,18 @@ _PREPARED = {}  # process-local cache: (distribution label, ζ) -> PreparedDistr
 # ─── Distributions and plotting geometry ────────────────────────────────────────
 
 
-def prepared_distributions(distribution, zeta, split_seed):
-    """Training and evaluation distributions of a resolved distribution entry at ζ."""
-    key = (distribution["label"], zeta, split_seed)
+def prepared_distributions(distribution, zeta, split_seed, continuous=True):
+    """Training, design and evaluation distributions of a resolved distribution entry at ζ
+    (continuous: continuous versions after the search, pipeline.prepare_distributions)."""
+    key = (distribution["label"], zeta, split_seed, continuous)
     if key in _PREPARED:
         return _PREPARED[key]
     grid = {"num_externality_nodes": distribution["num_externality_nodes"],
             "num_valuation_cells": distribution["num_valuation_cells"]}
     if distribution["kind"] == "synthetic":
         prepared = prepare_distributions(distribution["source"], externality_scale=zeta,
-                                         family_options=distribution["options"], **grid)
+                                         family_options=distribution["options"],
+                                         continuous=continuous, **grid)
     else:
         path = Path(distribution["path"])
         path = path if path.is_absolute() or path.exists() else CODE_ROOT / path
@@ -99,9 +107,14 @@ def prepared_distributions(distribution, zeta, split_seed):
             evaluation_truncation_quantile=distribution["evaluation_truncation_quantile"],
             train_fraction=distribution["train_fraction"], split_seed=split_seed,
             smoothing=distribution["smoothing"], bandwidth_scale=distribution["bandwidth_scale"],
-            evaluation=distribution["evaluation"], **grid)
+            evaluation=distribution["evaluation"], continuous=continuous, **grid)
     _PREPARED[key] = prepared
     return prepared
+
+
+def continuous_evaluation(config):
+    """[evaluation] continuous (absent in runs made before the option: False)."""
+    return bool(config["evaluation"].get("continuous", False))
 
 
 def plot_geometry(prepared):
@@ -160,6 +173,8 @@ def type_background(prepared, geometry):
     else:
         description = (f"types: {prepared.source} on a {len(nodes)} × "
                        f"{prepared.settings['grid'].get('num_valuation_cells')} grid")
+    if prepared.settings.get("continuous"):
+        description += "; τ searched on the grid, outcomes on its continuous version"
     return {**geometry, "background_e": np.asarray(e_axis), "background_v": np.asarray(v_axis),
             "background_density": np.asarray(density), "shading": shading,
             "description": description, "externality_nodes": nodes, "node_masses": masses,
@@ -321,7 +336,10 @@ def _search_summary(result):
                            "evaluations": s["evaluations"], "converged": s["converged"],
                            "stop_reason": s["stop_reason"]}
                           for i, s in enumerate(summary.get("local_starts", [])))
+    relaxation = next((summary["relaxation"] for summary in result["search_summaries"]
+                       if "relaxation" in summary), None)
     return {"method": result["optimizer"], "training_welfare": result["welfare"],
+            "relaxation": relaxation,
             "training_benchmarks": result["benchmarks"],
             "time_limit_seconds": result["search_options"]["time_limit"],
             "seconds": result["seconds"], "starts": starts,
@@ -366,6 +384,7 @@ def _bootstrap(prepared, threshold, combination, config, ivcg_rule):
         smoothing=settings["evaluation_smoothing"], bandwidth_scale=settings["bandwidth_scale"],
         confidence_level=evaluation["confidence_level"], ivcg_scoring_rule=ivcg_rule,
         all_outcomes=evaluation["bootstrap_all_outcomes"],
+        continuous=settings.get("continuous", False),
         num_externality_nodes=settings["num_externality_nodes"],
         num_valuation_cells=settings["num_valuation_cells"],
         workers=config.get("inner_workers", 1))
@@ -424,9 +443,10 @@ def _ironing(training, threshold, combination):
     return {f"iron_{key}": np.asarray(value) for key, value in curves.items()}, binds
 
 
-def _sufficiency(training, threshold, combination, relaxation_wanted):
+def _sufficiency(prepared, threshold, combination, relaxation_wanted):
     """Distance of τ from the sufficient condition for VCG-PA (paper v3 Thm
-    [thm:vcg-sufficient]), on the training distribution.
+    [thm:vcg-sufficient]): the participation gap on the design distribution, the
+    relaxation on the (piecewise-uniform) training distribution.
 
     participation_gap: G(τ) = E[M^- 1{participate} + M^+ 1{abstain}], the largest welfare
       gain from one bidder changing its participation set (best_response_ascent.
@@ -434,15 +454,17 @@ def _sufficiency(training, threshold, combination, relaxation_wanted):
       maximizes VCG-PA welfare over all symmetric participation rules.
     relaxation: best symmetric participation rule for VCG-PA (symmetric_relaxation), an
       estimate of an upper bound on VCG-PA welfare over all common τ; share_attained =
-      (W^VCG(τ) − W_VCG) / (relaxation − W_VCG). Piecewise-uniform distributions only.
+      (W^VCG(τ) − W_VCG) / (relaxation − W_VCG), all on the training distribution.
+      Piecewise-uniform distributions only.
     """
+    training, design = prepared.training, prepared.design
     n, k = combination.num_bidders, combination.num_goods
-    vcg = tau_independent_outcomes(training, "vcg", n, k, welfare_only=True)
-    gain = tau_independent_outcomes(training, "first_best", n, k, welfare_only=True) - vcg
+    vcg = tau_independent_outcomes(design, "vcg", n, k, welfare_only=True)
+    gain = tau_independent_outcomes(design, "first_best", n, k, welfare_only=True) - vcg
     out = {}
     for mechanism in PARTICIPANT_AUDIT_MECHANISMS:
         try:
-            total, _, wrong_mass = participation_gap(training, threshold, n, k, mechanism)
+            total, _, wrong_mass = participation_gap(design, threshold, n, k, mechanism)
         except (ValueError, IndexError):
             continue
         out[f"participation_gap_{mechanism}"] = total
@@ -453,6 +475,7 @@ def _sufficiency(training, threshold, combination, relaxation_wanted):
         if key not in training.cache:
             training.cache[key] = symmetric_relaxation(training, n, k)
         relaxation = training.cache[key]
+        vcg = tau_independent_outcomes(training, "vcg", n, k, welfare_only=True)
         welfare = exact_outcomes(training, threshold, n, k)["vcg_pa"]["welfare"]
         out.update({
             "relaxation_value": relaxation.value,
@@ -597,7 +620,7 @@ def compute_combination(combination, config, run_folder, warm_start=None):
     folder.mkdir(parents=True, exist_ok=True)
     n, k = combination.num_bidders, combination.num_goods
     prepared = prepared_distributions(combination.distribution, combination.externality_scale,
-                                      config["seeds"]["split"])
+                                      config["seeds"]["split"], continuous_evaluation(config))
     geometry = plot_geometry(prepared)
     arrays, timing = {}, {}
 
@@ -622,7 +645,7 @@ def compute_combination(combination, config, run_folder, warm_start=None):
 
     # Exact outcomes and simulation ----------------------------------------------
     stage = time.time()
-    ivcg_rule = designed_ivcg_rule(prepared, prepared.training, threshold, n, k)
+    ivcg_rule = designed_ivcg_rule(prepared, prepared.design, threshold, n, k)
     evaluation = evaluate_threshold(
         prepared.evaluation, threshold, n, k,
         num_simulated_draws=config["evaluation"]["num_simulated_auctions"],
@@ -654,17 +677,17 @@ def compute_combination(combination, config, run_folder, warm_start=None):
         first_order_error = str(error)
     else:
         first_order_error = None
-    sufficiency = _sufficiency(prepared.training, threshold, combination,
+    sufficiency = _sufficiency(prepared, threshold, combination,
                                config["checks"]["symmetric_relaxation"])
     # The relaxation is solved on the training distribution; it bounds the evaluation
-    # welfare only where the two coincide (synthetic data).
-    sufficiency["relaxation_on_evaluation"] = not prepared.is_empirical
+    # welfare only where the two coincide (synthetic data without continuous evaluation).
+    sufficiency["relaxation_on_evaluation"] = prepared.evaluation is prepared.training
     try:
-        arrays.update(_marginal_contribution_map(prepared.training, threshold, combination,
+        arrays.update(_marginal_contribution_map(prepared.design, threshold, combination,
                                                  geometry))
     except (ValueError, IndexError):
         pass
-    ironing_arrays, ironing_binds = _ironing(prepared.training, threshold, combination)
+    ironing_arrays, ironing_binds = _ironing(prepared.design, threshold, combination)
     arrays.update(ironing_arrays)
     allocation_bids = np.linspace(0.0, prepared.evaluation.maximum_valuation, 300)
     arrays["alloc_bids"] = allocation_bids
@@ -677,7 +700,8 @@ def compute_combination(combination, config, run_folder, warm_start=None):
         settings = prepared.settings
         refinement = grid_refinement_check(
             settings["family"], threshold, n, k, externality_scale=settings["externality_scale"],
-            refinement_factor=config["checks"]["refinement_factor"], **settings["grid"],
+            refinement_factor=config["checks"]["refinement_factor"],
+            continuous=settings.get("continuous", False), **settings["grid"],
             **settings["family_options"])
         refinement.to_csv(folder / "grid-refinement.csv")
     sensitivity = None
@@ -768,9 +792,12 @@ def summary_row(results):
     sufficiency = results.get("sufficiency") or {}
     row.update({key: value for key, value in sufficiency.items()
                 if key in ("participation_gap_share_vcg_pa", "participation_gap_share_ivcg_pa",
-                           "relaxation_share_attained", "relaxation_threshold_rule")})
-    if sufficiency.get("relaxation_on_evaluation") and "relaxation_value" in sufficiency:
-        row["relaxation_value"] = sufficiency["relaxation_value"]
+                           "relaxation_share_attained", "relaxation_threshold_rule",
+                           "training_welfare_vcg_pa")})
+    if "relaxation_value" in sufficiency:
+        row["relaxation_value_training"] = sufficiency["relaxation_value"]
+        if sufficiency.get("relaxation_on_evaluation"):
+            row["relaxation_value"] = sufficiency["relaxation_value"]
     row["seconds"] = results["seconds"]["total"]
     return row
 

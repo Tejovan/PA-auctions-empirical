@@ -36,6 +36,7 @@ from ..threshold_evaluation import expected_welfare
 from .compute import (
     compute_combination,
     plot_geometry,
+    continuous_evaluation,
     prepared_distributions,
     rescaled_threshold,
     type_background,
@@ -139,8 +140,14 @@ def _evaluations_per_search(optimizer):
     best_response_count = (30 * best_response["short_genetic_generations"]
                            if "short_genetic" in best_response["starts"] else 0) + num_starts * (
         iterations * 4 * (1 + best_response["polish_rounds"]) + 40 * best_response["polish_rounds"])
+    relaxation_count = iterations * 4 * (1 + best_response["polish_rounds"]) + 40 * best_response[
+        "polish_rounds"]  # one start (the linear program is timed as RELAXATION_SECONDS)
     return {"genetic": genetic_count, "best_response": best_response_count,
-            "genetic+best_response": genetic_count + best_response_count}[optimizer["method"]]
+            "genetic+best_response": genetic_count + best_response_count,
+            "relaxation": relaxation_count}[optimizer["method"]]
+
+
+RELAXATION_SECONDS = 5.0  # one symmetric relaxation (linear program), default size
 
 
 def estimate_seconds(config, combinations, workers):
@@ -152,7 +159,7 @@ def estimate_seconds(config, combinations, workers):
         if key in calibration:
             continue
         prepared = prepared_distributions(combination.distribution, combination.externality_scale,
-                                          config["seeds"]["split"])
+                                          config["seeds"]["split"], continuous_evaluation(config))
         threshold = lambda e: np.maximum(-np.asarray(e, dtype=float), 0.0)  # noqa: E731
         timings = {}
         for mechanism in ("vcg_pa", "ivcg_pa"):
@@ -177,6 +184,8 @@ def estimate_seconds(config, combinations, workers):
             searches = 1 + (len(config["checks"]["bandwidth_sensitivity"])
                             if combination.distribution["kind"] == "empirical" else 0)
             seconds += searches * per_evaluation * _evaluations_per_search(combination.optimizer)
+            if combination.optimizer["method"] == "relaxation":
+                seconds += RELAXATION_SECONDS
         seconds += 30 * timings["evaluation"]  # outcomes, first-order checks, maps
         seconds += evaluation["num_simulated_auctions"] * combination.num_bidders * 2e-6 * 4
         if combination.distribution["kind"] == "empirical":
@@ -201,9 +210,8 @@ def describe_plan(config, combinations, skipped):
                      f"{distribution['num_valuation_cells']}")
     lines.append(f"  n ∈ {config['markets']['num_bidders']}, k ∈ {config['markets']['num_goods']}")
     if config["kind"] == "optimize":
-        lines.append(f"  objectives {config['design']['objectives']}, forms "
-                     f"{config['design']['threshold_forms']}, optimizers "
-                     f"{[o['label'] + ' (' + o['method'] + ')' for o in config['optimizers']]}")
+        lines.append(f"  objectives {config['design']['objectives']}, optimizers "
+                     f"{[o['label'] + ' (' + o['method'] + ': ' + ', '.join(o['threshold_forms']) + ')' for o in config['optimizers']]}")
     else:
         lines.append(f"  thresholds {[t['label'] or t['value'] for t in config['thresholds']]}")
     for description, reason in skipped:
@@ -275,7 +283,8 @@ def run(config_path, workers=None, dry_run=False, assume_yes=False, report=None)
     # Type backgrounds, one per distribution and ζ ---------------------------------
     for distribution, zeta in {(c.distribution["label"], c.externality_scale): (
             c.distribution, c.externality_scale) for c in combinations}.values():
-        prepared = prepared_distributions(distribution, zeta, config["seeds"]["split"])
+        prepared = prepared_distributions(distribution, zeta, config["seeds"]["split"],
+                                          continuous_evaluation(config))
         background = type_background(prepared, plot_geometry(prepared))
         target = folder / distribution["label"] / f"z{zeta:g}"
         target.mkdir(parents=True, exist_ok=True)

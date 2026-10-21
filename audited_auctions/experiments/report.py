@@ -351,7 +351,10 @@ def gap_decomposition(summary, kind):
     With the symmetric relaxation (piecewise-uniform training data), relaxation_vcg is the
     welfare of the best symmetric participation rule for VCG-PA on the training distribution,
     an estimate of an upper bound on OPT^VCG over common τ, and relaxation_minus_opt_vcg its
-    gap to the best VCG-PA welfare found (synthetic data: training = evaluation).
+    gap to the best VCG-PA welfare found. relaxation_basis says where both are measured:
+    "evaluation" (training = evaluation: synthetic data without continuous evaluation), or
+    "training grid" (both on the gridded training distribution; relaxation_vcg is then not
+    comparable with the evaluation welfare in the other columns).
     """
     class_column = "threshold_form" if kind == "optimize" else "tau_label"
     market = ["distribution", "zeta", "num_bidders", "num_goods"]
@@ -371,9 +374,16 @@ def gap_decomposition(summary, kind):
                        **gaps)
             if "relaxation_value" in group and group.relaxation_value.notna().any():
                 relaxation = float(group.relaxation_value.max())
-                row["relaxation_vcg"] = relaxation
+                row.update(relaxation_vcg=relaxation, relaxation_basis="evaluation")
                 gaps["relaxation_minus_opt_vcg"] = relaxation - opt_vcg
-                row["relaxation_minus_opt_vcg"] = relaxation - opt_vcg
+            elif ("relaxation_value_training" in group
+                  and group.relaxation_value_training.notna().any()):
+                relaxation = float(group.relaxation_value_training.max())
+                row.update(relaxation_vcg=relaxation, relaxation_basis="training grid")
+                gaps["relaxation_minus_opt_vcg"] = relaxation - float(
+                    group.training_welfare_vcg_pa.max())
+            if "relaxation_minus_opt_vcg" in gaps:
+                row["relaxation_minus_opt_vcg"] = gaps["relaxation_minus_opt_vcg"]
             row.update({f"{name}_share": (value / gain if abs(gain) > 1e-15 else np.nan)
                         for name, value in gaps.items()})
             rows.append(row)
@@ -410,10 +420,12 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
     lines.append(f"- **markets:** n ∈ {config['markets']['num_bidders']}, "
                  f"k ∈ {config['markets']['num_goods']}")
     if run["kind"] == "optimize":
-        lines.append(f"- **objectives:** {', '.join(config['design']['objectives'])}; "
-                     f"**forms:** {', '.join(config['design']['threshold_forms'])}")
+        lines.append(f"- **objectives:** {', '.join(config['design']['objectives'])}")
         for optimizer in config["optimizers"]:
-            lines.append(f"- **optimizer {optimizer['label']}:** {optimizer['method']}")
+            # Runs before forms were set per optimizer list them under [design].
+            forms = optimizer.get("threshold_forms", config["design"].get("threshold_forms", []))
+            lines.append(f"- **optimizer {optimizer['label']}:** {optimizer['method']}, "
+                         f"forms {', '.join(forms)}")
     else:
         for threshold in config["thresholds"]:
             lines.append(f"- **threshold {threshold.get('label') or ''}:** "

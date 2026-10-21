@@ -7,7 +7,7 @@ For a type distribution and a participation threshold function τ(e) common to a
 - the expected outcomes of four mechanisms: VCG without audits, VCG-PA, IVCG-PA (ironed VCG auction with participant audits), and the first best;
 - the penalties r(e) that induce τ.
 
-It also simulates per-auction outcomes, computes bootstrap intervals for empirical data, and searches for the τ that maximizes exact expected welfare.
+It also simulates per-auction outcomes, computes bootstrap intervals for empirical data, and searches for the τ that maximizes exact expected welfare. The search runs on a gridded (piecewise-uniform) type distribution; by default, everything after the search is evaluated on its continuous version ([§6](#continuous-evaluation)).
 
 Further documentation:
 
@@ -36,7 +36,7 @@ python3 -m venv .venv
 .venv/bin/pip install numpy scipy pandas matplotlib pygad pytest
 ```
 
-**Run the smoke test** (4 combinations, about 10 s):
+**Run the smoke test** (6 combinations, about 15 s):
 
 ```bash
 .venv/bin/python run.py configs/smoke_test.toml
@@ -58,11 +58,11 @@ num_bidders = [4, 8, 16]
 num_goods = [1]
 
 [design]
-threshold_forms = ["knots6", "nodes"]
 objectives = ["vcg_pa"]
 
 [[optimizers]]
 method = "best_response"
+threshold_forms = ["knots6", "nodes"]
 ```
 
 ```bash
@@ -104,14 +104,14 @@ A run is described by one TOML file. Every list is a set of values. The run comp
 
 - the distributions and the ζ values of each;
 - the lists in `[markets]` and `[design]`;
-- the `[[optimizers]]` tables (optimize runs) or the `[[thresholds]]` tables (evaluate runs).
+- the `[[optimizers]]` tables and the threshold forms of each (optimize runs), or the `[[thresholds]]` tables (evaluate runs).
 
 Unknown keys are an error. Example files in [configs/](configs/):
 
 | File | Purpose |
 |---|---|
-| [smoke_test.toml](configs/smoke_test.toml) | smoke test for code changes: 4 combinations through every stage, about 10 s; results not meaningful |
-| [standard_test.toml](configs/standard_test.toml) | standard test: every feature on small grids, 96 combinations, about 2 min with 12 workers |
+| [smoke_test.toml](configs/smoke_test.toml) | smoke test for code changes: 6 combinations (three optimizers, two distributions) through every stage, about 15 s; results not meaningful |
+| [standard_test.toml](configs/standard_test.toml) | standard test: every feature on small grids, 120 combinations, about 3 min with 12 workers |
 | [evaluate_example.toml](configs/evaluate_example.toml) | evaluate run: the zero-welfare threshold τ⁰, the ex ante cutoff τ*, and the optima of an earlier run |
 | [optimize_example.toml](configs/optimize_example.toml) | research-size optimize run on the tweet data (several ζ, per-node τ) |
 
@@ -152,28 +152,42 @@ Unknown keys are an error. Example files in [configs/](configs/):
 
 | Key | Default | Meaning |
 |---|---|---|
-| `threshold_forms` | `["knots6"]` | forms of τ (table below) |
 | `objectives` | `["vcg_pa"]` | auction whose exact expected welfare τ maximizes: `vcg_pa`, `ivcg_pa` |
 
-| Form | τ(e) | Optimizers |
-|---|---|---|
-| `poly<d>` | polynomial of degree d | genetic |
-| `knots<K>` | continuous piecewise linear with K knots, plus an exclusion cutoff | genetic, best response |
-| `bins<K>` | constant on K bins | genetic, best response |
-| `cutoff` | common welfare cutoff w: τ(e) = max(0, w − e), excluded if w − e > v̄ | genetic |
-| `nodes` | free value at every externality node | best response |
+The forms of τ are set per optimizer (`threshold_forms` in `[[optimizers]]`, §3.5). A `threshold_forms` key in `[design]` is an error.
 
 ### 3.5 `[[optimizers]]` (optimize runs; default: one best-response optimizer)
 
-Combinations of a method with a form it cannot search are skipped and listed in the plan.
+Each table is one optimizer with its own forms of τ; the run computes every objective × optimizer × form of that optimizer.
 
 **Every method:**
 
 | Key | Default | Meaning |
 |---|---|---|
-| `method` | required | `genetic` (genetic stage + Nelder–Mead), `best_response` (best-response ascent + gradient polish), `genetic+best_response` (ascent also started from a genetic result) |
-| `label` | `ga`, `br`, `ga-br` | optimizer label in folder names |
+| `method` | required | `genetic` (genetic stage + Nelder–Mead), `best_response` (best-response ascent + gradient polish), `genetic+best_response` (ascent also started from a genetic result), `relaxation` (ascent from the symmetric relaxation only; below) |
+| `threshold_forms` | `["knots6"]`; `["nodes"]` for `relaxation` | forms of τ this optimizer searches (table below); a form the method cannot search is an error |
+| `label` | `ga`, `br`, `ga-br`, `relax` | optimizer label in folder names |
 | `time_limit_minutes` | 60 | search time per combination (all stages and starts); past it, each stage stops after its current iteration, later starts are skipped, the best τ so far is kept, and check `search_stop` fails; 0 = no limit |
+
+| Form | τ(e) | Methods |
+|---|---|---|
+| `poly<d>` | polynomial of degree d | genetic |
+| `knots<K>` | continuous piecewise linear with K knots, plus an exclusion cutoff | all |
+| `bins<K>` | constant on K bins | all |
+| `cutoff` | common welfare cutoff w: τ(e) = max(0, w − e), excluded if w − e > v̄ | genetic |
+| `nodes` | free value at every externality node | best response, genetic+best response, relaxation |
+
+Example: genetic search on a polynomial and a piecewise-linear τ, best-response ascent per node:
+
+```toml
+[[optimizers]]
+method = "genetic"
+threshold_forms = ["poly2", "knots6"]
+
+[[optimizers]]
+method = "best_response"
+threshold_forms = ["nodes"]
+```
 
 **Genetic search** (`genetic`, and the genetic stage of `genetic+best_response`):
 
@@ -204,6 +218,8 @@ Combinations of a method with a form it cannot search are skipped and listed in 
 | `genetic_form` | same form, or `knots6` for `nodes` | `genetic+best_response` only: form of the genetic stage |
 | `warm_start_across_zeta` | false | also start from the optimum at the previous ζ, rescaled: τ(e) = τ_prev(e ζ_prev / ζ); the ζ values of a distribution then run in sequence |
 
+**Symmetric relaxation** (`relaxation`). A linear program (`symmetric_relaxation.py`, about 5 s per distribution, n, k) finds the best symmetric participation rule for VCG-PA: each type participates with some probability, the same for all bidders. Its value bounds the VCG-PA welfare of every common τ from above (a midpoint estimate, error of order (interval width)²). τ is read off it (each node's threshold is the first valuation at which at least half of the node participates), projected on the form, and improved by best-response ascent from that single start, with the best-response keys above (`starts` and `num_random_starts` are ignored). `results.json` records the linear program under `search.relaxation`: `value`, `threshold_rule` (whether the best symmetric rule is a threshold rule; then the τ read off it is a best common τ for VCG-PA, up to the discretization, paper v3), `largest_drop`, `seconds`. The same τ is also one of the default `starts` of `best_response`, where the best start is kept; the separate method shows what the relaxation gives alone. With the objective `ivcg_pa` it is a start only (the relaxation is for VCG-PA). Needs k < n and a piecewise-uniform training distribution; other combinations are skipped and listed in the plan.
+
 ### 3.6 `[[thresholds]]` (evaluate runs; at least one)
 
 Each table has a `label` (folder name `tau-<label>`) and exactly one source:
@@ -227,18 +243,19 @@ A τ value at or above v̄ excludes the externality (τ = v̄⁺ in the paper).
 | `num_bootstrap` | 200 | empirical: bootstrap resamples of the test rows |
 | `confidence_level` | 0.95 | level of the bootstrap percentile intervals |
 | `bootstrap_all_outcomes` | true | bootstrap every metric (revenue, penalties, welfare parts), not only welfare |
+| `continuous` | true | evaluate on continuous versions of the gridded distributions ([§6](#continuous-evaluation)); the search stays on the grid. `false`: evaluate on the grid (runs made before this option) |
 
 ### 3.8 `[checks]`
 
 | Key | Default | Meaning |
 |---|---|---|
-| `grid_refinement` | false | synthetic: recompute on a finer grid with τ fixed |
+| `grid_refinement` | false | synthetic: recompute on a finer grid with τ fixed (continuous versions of both grids when `continuous`) |
 | `refinement_factor` | 2 | refinement of both grids |
 | `grid_relative_tolerance` | 0.01 | pass if every gain over VCG changes by less than this share |
 | `bandwidth_sensitivity` | `[]` | empirical, optimize runs: redesign τ with these bandwidth multipliers, e.g. `[0.5, 2.0]` |
 | `first_order_tolerance` | 1e-4 | `nodes` form: pass if max \|M(e, τ(e))\| / v̄ at interior thresholds is below this |
 | `monte_carlo_z` | 4.0 | pass if every simulated mean is within this many standard errors of the exact value |
-| `symmetric_relaxation` | true | piecewise-uniform training data: solve the best symmetric participation rule for VCG-PA (about 5 s per distribution, n, k; cached) and report the share of its gain that τ attains |
+| `symmetric_relaxation` | true | piecewise-uniform training data: solve the best symmetric participation rule for VCG-PA (about 5 s per distribution, n, k; cached; shared with the `relaxation` method) and report the share of its gain that τ attains on the training grid |
 
 ### 3.9 `[seeds]`
 
@@ -299,13 +316,13 @@ Mechanisms: VCG, VCG-PA, IVCG-PA, first best. Metrics: welfare W, valuation welf
 
 | File | Contents |
 |---|---|
-| `summary.csv` | per combination: inputs; exact expected value of each metric for each mechanism; welfare gain over VCG, share of the first-best gain and revenue change per mechanism; bootstrap bounds; training welfare; search and total seconds; whether ironing binds |
+| `summary.csv` | per combination: inputs; exact expected value of each metric for each mechanism; welfare gain over VCG, share of the first-best gain and revenue change per mechanism; bootstrap bounds; training welfare; search and total seconds; whether ironing binds; sufficiency and relaxation measures ([§4.4](#44-checks)) |
 | `checks.csv` | per check and combination: value, tolerance, verdict (pass / fail / info), meaning ([§4.4](#44-checks)) |
-| `gap-decomposition.csv` | per distribution, ζ, market and class T of thresholds: FB − OPT, OPT − OPT^VCG, OPT^VCG − OPT^VCG_T, also as shares of the first-best gain (paper §10). OPT and OPT^VCG are the best values found in the run, so they are lower bounds; include the `nodes` form for OPT^VCG close to the supremum |
+| `gap-decomposition.csv` | per distribution, ζ, market and class T of thresholds: FB − OPT, OPT − OPT^VCG, OPT^VCG − OPT^VCG_T, also as shares of the first-best gain (paper §10). OPT and OPT^VCG are the best values found in the run, so they are lower bounds; include the `nodes` form for OPT^VCG close to the supremum. With the relaxation: `relaxation_vcg`, `relaxation_minus_opt_vcg` and `relaxation_basis` ([§4.4](#44-checks)) |
 | `tau.json` | τ of the combination; reusable in evaluate runs (`tau_file`, `from_run`) |
 | `tau.csv` | per externality node: mass, τ, excluded flag, penalty for VCG-PA and IVCG-PA |
 | `first-order.csv` | per node and mechanism: threshold status, allocation, penalty, own-allocation charge, displaced term, marginal contribution M, best-response gap, Pigouvian charge |
-| `results.json` | every statistic of the combination: settings, exact outcomes, changes over VCG, shares, bootstrap intervals, search record, checks, timings |
+| `results.json` | every statistic of the combination: settings (`distribution_settings.continuous`), exact outcomes, changes over VCG, shares, bootstrap intervals, search record (with `relaxation` for the relaxation method), sufficiency measures, checks, timings |
 | `data.npz` | arrays behind the figures: simulated and bootstrap draws, ironing intervals, allocation curves, τ and penalty grids, tried τ curves |
 | `types.npz` | grids, density and nodes of the type distribution |
 
@@ -350,18 +367,18 @@ Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves
 | Check | Value | Verdict |
 |---|---|---|
 | `monte_carlo_vs_exact` | largest \|z\| of a simulated mean against the exact value (welfare, revenue, four mechanisms) | pass if < `monte_carlo_z` |
-| `first_order` | max \|M(e, τ(e))\| / v̄ at interior thresholds | pass if < `first_order_tolerance` for `nodes`; info for restricted forms and given τ |
+| `first_order` | max \|M(e, τ(e))\| / v̄ at interior thresholds, on the training grid (the search's distribution) | pass if < `first_order_tolerance` for `nodes`; info for restricted forms and given τ |
 | `search_starts_spread` | welfare spread of the final points of the starts, in units of FB − W_VCG (training) | info; large means local optima (the best start is kept) |
 | `search_stop` | number of search stages stopped by the time limit or an iteration cap | pass if all converged; info if an iteration cap was hit; fail if the time limit was hit |
 | `grid_refinement` | largest relative change of a gain over VCG on a finer grid, τ fixed | pass if < `grid_relative_tolerance` |
 | `bandwidth_sensitivity` | spread of the gain over VCG across bandwidths | pass if ≤ the width of its bootstrap interval |
 | `ex_ante_guarantee` | W*(τ*)/FB for the ex ante cutoff τ* on the training distribution | pass if ≥ max{β_{n,k}, 1 − 1/e} (paper Thm 8.9); info for atomic training data |
-| `sufficient_condition` | G(τ)/(FB − W_VCG) for VCG-PA, G(τ) = E[M^τ⁻ 1{participate} + M^τ⁺ 1{abstain}] = the largest welfare gain from one bidder changing its participation set (any set, rivals fixed) | info; 0 if and only if τ is best among all symmetric participation rules for VCG-PA, and then best among all common τ (paper v3, sufficiency theorem) |
-| `symmetric_relaxation` | (W^VCG(τ) − W_VCG)/(J − W_VCG), J = welfare of the best symmetric participation rule for VCG-PA (an upper bound on VCG-PA welfare over all common τ; midpoint estimate, error of order (interval width)²) | info; near 1 means no common τ does much better; the message says whether the best symmetric rule is a threshold rule |
+| `sufficient_condition` | G(τ)/(FB − W_VCG) for VCG-PA on the design distribution (the continuous version of the training data when `continuous`), G(τ) = E[M^τ⁻ 1{participate} + M^τ⁺ 1{abstain}] = the largest welfare gain from one bidder changing its participation set (any set, rivals fixed) | info; 0 if and only if τ is best among all symmetric participation rules for VCG-PA, and then best among all common τ (paper v3, sufficiency theorem) |
+| `symmetric_relaxation` | (W^VCG(τ) − W_VCG)/(J − W_VCG) on the training grid, J = welfare of the best symmetric participation rule for VCG-PA (an upper bound on VCG-PA welfare over all common τ; midpoint estimate, error of order (interval width)², so values slightly above 1 occur) | info; near 1 means no common τ does much better; the message says whether the best symmetric rule is a threshold rule |
 
-`results.json` stores these under `sufficiency` (also `wrong_sign_mass_*`, the probability of types whose marginal contribution has the wrong sign, and the gap for IVCG-PA with its scores held fixed, for which no sufficiency theorem holds); `summary.csv` has `participation_gap_share_*`, `relaxation_share_attained`, `relaxation_threshold_rule`, and, for synthetic data (training = evaluation distribution), `relaxation_value`, which `gap-decomposition.csv` reports as `relaxation_vcg` with the gap `relaxation_minus_opt_vcg` to the best VCG-PA welfare found.
+`results.json` stores these under `sufficiency` (also `wrong_sign_mass_*`, the probability of types whose marginal contribution has the wrong sign, and the gap for IVCG-PA with its scores held fixed, for which no sufficiency theorem holds). `summary.csv` has `participation_gap_share_*`, `relaxation_share_attained`, `relaxation_threshold_rule`, `relaxation_value_training` (J) and `training_welfare_vcg_pa` (W^VCG(τ) on the training grid). `gap-decomposition.csv` reports J as `relaxation_vcg` and its gap `relaxation_minus_opt_vcg` to the best VCG-PA welfare found. `relaxation_basis` says where both are measured: `evaluation` when the evaluation distribution is the training grid itself (synthetic data, `continuous = false`), else `training grid` (J and the best training welfare; J is then not comparable with the evaluation welfare in the other columns).
 
-**Why IVCG-PA irons in many small bands.** The externality of a piecewise-uniform distribution takes finitely many values (the grid nodes). At the threshold τ(e_j) of node j, all of node j enters at once, so the expected welfare contribution ŵ^τ(v) drops there, and IVCG-PA pools a small band around each threshold: the ironed score is a staircase over the range of valuations where thresholds are. With e independent of v, a continuous externality distribution with nonincreasing mean residual life (e.g. a log-concave density), and steep thresholds (τ(e) + e nonincreasing where τ > 0, as for every τ that meets the sufficient condition, paper v3), ŵ^τ is nondecreasing and nothing is pooled. The staircase is a discretization effect: the number of bands grows with the number of nodes, their total width stays about the same, and the welfare gain of IVCG-PA over VCG-PA it produces shrinks like the squared node spacing (`independent`, n = 8, k = 2, τ(e) = max(0, −2e): 1.7·10⁻⁴, 2.1·10⁻⁵, 2.3·10⁻⁶ at 51, 151, 451 nodes). Gains of IVCG-PA that do not shrink under `grid_refinement` come from the distribution, not the grid.
+**Ironing bands of the grid.** On a gridded distribution, the externality takes the node values and the valuation density jumps at cell edges. At the threshold τ(e_j) of node j, all of node j enters at once, and at every cell edge where the mix of externalities changes, E[e | v] jumps; the expected welfare contribution ŵ^τ(v) drops at these points, and IVCG-PA pools a small band around each: the ironed score is a staircase. These bands are a discretization effect: their number grows with the grid, their total width stays about the same, and the welfare gain of IVCG-PA over VCG-PA they produce shrinks like the squared spacing (`independent`, n = 8, k = 2, τ(e) = max(0, −2e): 1.7·10⁻⁴, 2.1·10⁻⁵, 2.3·10⁻⁶ at 51, 151, 451 nodes; `harm_rises`, 81 nodes, cutoff τ: 7.8·10⁻⁵, 1.2·10⁻⁶ at 50, 400 valuation cells). The continuous evaluation (default, [§6](#continuous-evaluation)) removes them: ŵ^τ is then continuous, and IVCG-PA irons only where ŵ^τ decreases. With e independent of v, an externality density with nonincreasing mean residual life (e.g. log-concave) and steep thresholds (τ(e) + e nonincreasing where τ > 0, as for every τ that meets the sufficient condition, paper v3), ŵ^τ is nondecreasing and nothing is pooled (`independent`, `harmful_middle`, `harm_rises`, `heavy_tail` with a welfare cutoff τ, n = 4, k = 1, 21–161 nodes: IVCG-PA − VCG-PA at most 3·10⁻⁷ on the continuous version, up to 1.2·10⁻³ on the grid).
 
 ### 4.5 Reusing results
 
@@ -466,12 +483,21 @@ Login nodes are for light work only (e.g. the smoke test, `--report`); submit ev
 
 Every family is a piecewise-uniform distribution on a grid: externalities on nodes, valuations uniform within cells. All quantities are exact for that distribution. Parameters and grid accuracy: [audited_auctions/README.md](audited_auctions/README.md#synthetic-families).
 
+<a id="continuous-evaluation"></a>**Continuous evaluation** (`[evaluation] continuous = true`, the default). The grid has jumps a continuous density does not have: each externality node is a point mass in e, and the valuation density jumps at cell edges. Under a continuous τ, a whole node enters at its threshold, which makes IVCG-PA iron in many small bands ([§4.4](#44-checks)). The run therefore uses two versions of each gridded distribution:
+
+| Stage | Distribution |
+|---|---|
+| search (genetic objective, best responses, gradient polish), `first_order` check, symmetric relaxation | the grid, where per-node best responses and gradients are exact |
+| exact outcomes, penalties, simulated auctions, bootstrap of smoothed resamples, IVCG-PA scoring rule, ironing figure, marginal-contribution maps, `sufficient_condition` check | the continuous version: each node's mass spread uniformly over its externality interval (midpoint to midpoint), and the valuation density piecewise linear between cell midpoints |
+
+The continuous version differs from the grid by an error of the same order as the grid's own (second order in the spacing); the exact computation on it is accurate to second order in the piece widths instead of exact, and takes about 5× as long per evaluation. τ is used between the nodes as its form defines it (the `nodes` form interpolates linearly). Atomic data (the test rows by default) and `example_n` (two externality values) keep their externalities. Methods: [audited_auctions/README.md](audited_auctions/README.md#continuous-versions).
+
 **Empirical data:** any CSV with columns `e_score`, `v_score`; e = ζ · e_score and v = `valuation_scale` · v_score. Processing:
 
 - rows are split ½/½ into training and test halves;
 - each half is truncated at a valuation quantile (v̄; default 0.995);
-- τ and the IVCG-PA scores are designed on the kernel-smoothed training half;
-- outcomes are evaluated exactly on the atomic test rows;
+- τ is searched on the kernel-smoothed training half, and the IVCG-PA scores are designed on its continuous version;
+- outcomes are evaluated exactly on the atomic test rows (or on the continuous version of the smoothed test half, `evaluation = "smoothed"`);
 - the bootstrap resamples the test rows.
 
 ### The tweet data set (`tweets` = `data/samples/g_full_tweets.csv`)
@@ -514,12 +540,15 @@ The set has 11,811 tweets created between 2022-12-16 and 2025-01-18, each with a
 | Function | Module | Does |
 |---|---|---|
 | `synthetic_distribution(name, externality_scale, **options)` | `type_distributions` | a synthetic family |
-| `prepare_distributions(source, ...)` | `pipeline` | training and evaluation distributions of a family or CSV |
+| `distribution.continuous_version()`, `distribution.refined_version()` | `type_distributions` | continuous version of a gridded distribution; its discrete approximation |
+| `prepare_distributions(source, ..., continuous=...)` | `pipeline` | training, design and evaluation distributions of a family or CSV |
 | `evaluate_threshold(distribution, τ, n, k, num_simulated_draws=...)` | `threshold_evaluation` | exact outcomes, penalties, simulated auctions |
 | `exact_outcomes(distribution, τ, n, k)` | `threshold_evaluation` | exact outcomes only (welfare and its parts, revenue, penalties, bidder utility) |
 | `expected_welfare(distribution, τ, n, k, mechanism)` | `threshold_evaluation` | the optimization objective |
-| `optimize_threshold(training, form, n, k, objective, optimizer)` | `pipeline` | search for τ |
-| `run_genetic_search`, `run_best_response_ascent` | `genetic_search`, `best_response_ascent` | the two optimizers |
+| `optimize_threshold(training, form, n, k, objective, optimizer)` | `pipeline` | search for τ (`optimizer`: `genetic`, `best_response`, `genetic+best_response`, `relaxation`) |
+| `run_genetic_search`, `run_best_response_ascent` | `genetic_search`, `best_response_ascent` | the two search algorithms |
+| `symmetric_relaxation(distribution, n, k)` | `symmetric_relaxation` | best symmetric participation rule for VCG-PA (bound and τ) |
+| `participation_gap(distribution, τ, n, k)` | `best_response_ascent` | G(τ) of the sufficient condition |
 | `first_order_check(distribution, τ, n, k, mechanism)` | `best_response_ascent` | marginal contribution and Pigouvian charge at each threshold |
 | `build_threshold_form(label, distribution)`, `threshold_from_spec(spec)` | `threshold_forms` | forms of τ |
 | `run(config_file)`, `make_report(run_folder)` | `experiments.runner`, `experiments.report` | a whole run; its figures |
@@ -538,4 +567,4 @@ The set has 11,811 tweets created between 2022-12-16 and 2025-01-18, each with a
 | `data/samples/`, `full_tweets.csv` | the tweet data |
 | [legacy/](legacy/) | superseded scripts, notebooks and outputs of the EC 2025 / EAAMO 2026 workflow ([legacy/README.md](legacy/README.md)) |
 
-**Tests:** `python -m pytest tests -q` (70 tests). After a code change, run the smallest config covering the change, starting with `configs/smoke_test.toml`; `configs/standard_test.toml` exercises every feature.
+**Tests:** `python -m pytest tests -q` (76 tests). After a code change, run the smallest config covering the change, starting with `configs/smoke_test.toml`; `configs/standard_test.toml` exercises every feature.

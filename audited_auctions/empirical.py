@@ -184,6 +184,8 @@ def _bootstrap_rows(job):
         resample = sample.subset(rows_drawn, "bootstrap")
         distribution = sample_distribution(resample, job["smoothing"], job["bandwidth_scale"],
                                            **job["grid_options"])
+        if job["continuous"]:
+            distribution = distribution.continuous_version()
         if baselines is not None and index in baselines:
             distribution.cache.update(baselines[index])
         try:
@@ -215,11 +217,13 @@ def _bootstrap_rows(job):
 
 def bootstrap_welfare(sample, threshold_function, num_bidders, num_goods, num_resamples=200,
                       seed=0, smoothing="none", bandwidth_scale=1.0, confidence_level=0.95,
-                      ivcg_scoring_rule=None, all_outcomes=False, workers=1, **grid_options):
+                      ivcg_scoring_rule=None, all_outcomes=False, workers=1, continuous=False,
+                      **grid_options):
     """Bootstrap of exact expected welfare over resamples of the rows of `sample`.
 
     smoothing: how each resample's distribution is built ("none": atomic, the
-    default evaluation; "kernel": re-smoothed). ivcg_scoring_rule: the IVCG-PA
+    default evaluation; "kernel": re-smoothed; continuous: then its continuous
+    version, TypeDistribution.continuous_version). ivcg_scoring_rule: the IVCG-PA
     design held fixed across resamples (None: iron each resample).
     all_outcomes: also every metric of OUTCOME_METRICS (revenue, penalties,
     welfare parts, bidder utility; about twice the time).
@@ -238,12 +242,12 @@ def bootstrap_welfare(sample, threshold_function, num_bidders, num_goods, num_re
     job = {"sample": sample, "threshold": threshold_function, "num_bidders": num_bidders,
            "num_goods": num_goods, "all_outcomes": all_outcomes, "smoothing": smoothing,
            "bandwidth_scale": bandwidth_scale, "grid_options": grid_options,
-           "ivcg_scoring_rule": ivcg_scoring_rule}
+           "ivcg_scoring_rule": ivcg_scoring_rule, "continuous": continuous}
     if workers is None or workers <= 1:
         # VCG and first-best welfare of each resample do not depend on τ. The resamples
         # are determined by the seed, so these values are computed once per (seed,
         # distribution construction, n, k) and reused for every τ bootstrapped on this sample.
-        baseline_key = (seed, num_resamples, smoothing, bandwidth_scale,
+        baseline_key = (seed, num_resamples, smoothing, bandwidth_scale, continuous,
                         tuple(sorted(grid_options.items())), num_bidders, num_goods)
         rows = _bootstrap_rows({**job, "indices": drawn,
                                 "baselines": sample.cache.setdefault(baseline_key, {})})

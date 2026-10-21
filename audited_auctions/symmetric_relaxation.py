@@ -28,6 +28,9 @@ and n v_mid Δy_t for the valuation part. This is a midpoint rule: the value is
 an estimate of the best symmetric welfare with error of order (interval
 width)², not a certified bound. Piecewise-uniform distributions only.
 
+Used by the "relaxation" start of best-response ascent, the "relaxation" optimizer
+method (pipeline.optimize_threshold) and the symmetric_relaxation check.
+
 Result: the value, the participating fraction of each externality node in each
 interval, and the threshold function read from it (the first valuation at which
 a node participates with fraction at least 1/2). If every fraction is

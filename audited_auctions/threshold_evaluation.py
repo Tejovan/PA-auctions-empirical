@@ -18,6 +18,10 @@ Exact computation and the welfare objective used for optimizing τ
 (expected_welfare) work on the type distribution itself; simulation is used
 only for per-auction welfare distributions and as a check.
 
+Continuous versions (TypeDistribution.continuous_version): VCG, VCG-PA and
+IVCG-PA use exact_computation.continuous_bid_segments; the first best uses the
+discrete approximation refined_version(*FIRST_BEST_REFINEMENT).
+
 The penalties are not inputs. For VCG-PA and IVCG-PA the module computes the
 penalty function r(e) = ∫_0^{τ(e)} X^τ(b) db that induces τ (X^τ is the interim
 allocation of the respective auction), and reports it for plotting.
@@ -167,6 +171,18 @@ MECHANISM_SPECIFICATIONS = {
 }
 
 
+# First best on a continuous version: point externalities per externality interval and
+# uniform valuation pieces per cell of the discrete approximation (refined_version).
+FIRST_BEST_REFINEMENT = (4, 2)
+
+
+def _refined(type_distribution):
+    key = ("refined_version", FIRST_BEST_REFINEMENT)
+    if key not in type_distribution.cache:
+        type_distribution.cache[key] = type_distribution.refined_version(*FIRST_BEST_REFINEMENT)
+    return type_distribution.cache[key]
+
+
 def build_mechanism_model(mechanism, type_distribution, threshold_function, num_bidders,
                           num_goods, ivcg_scoring_rule=None):
     """Exact ScoreAuctionModel of one mechanism.
@@ -176,7 +192,13 @@ def build_mechanism_model(mechanism, type_distribution, threshold_function, num_
     distribution.
     """
     participation, bid_kind, ironed = MECHANISM_SPECIFICATIONS[mechanism]
-    if participation == "everyone":
+    if type_distribution.is_continuous:
+        if bid_kind == WELFARE_CONTRIBUTION_BIDS:
+            type_distribution = _refined(type_distribution)
+            cell_thresholds = np.full(type_distribution.num_cells, -np.inf)
+        else:
+            cell_thresholds = None if participation == "everyone" else threshold_function
+    elif participation == "everyone":
         cell_thresholds = np.full(type_distribution.num_cells, -np.inf)
     else:
         cell_thresholds = threshold_function(type_distribution.externalities)
@@ -289,7 +311,6 @@ def _exact_outcomes_and_models(type_distribution, threshold_function, num_bidder
                                          num_bidders, num_goods, ivcg_scoring_rule)
         for mechanism in PARTICIPANT_AUDIT_MECHANISMS
     }
-    cell_participation_mass = models["vcg_pa"].cell_participation_mass
     penalty_tables = {
         mechanism: {"allocation_integral": models[mechanism].allocation_integral_function,
                     "maximum_valuation": type_distribution.maximum_valuation}
@@ -301,11 +322,10 @@ def _exact_outcomes_and_models(type_distribution, threshold_function, num_bidder
                                                        num_goods))
              for mechanism in MECHANISMS}
     exact["vcg"]["penalty_paid"] = 0.0
-    cell_thresholds = threshold_function(type_distribution.externalities)
     for mechanism in PARTICIPANT_AUDIT_MECHANISMS:
-        cell_penalties = penalty_from_table(penalty_tables[mechanism], cell_thresholds)
-        exact[mechanism]["penalty_paid"] = num_bidders * float(
-            np.sum(cell_participation_mass * cell_penalties))
+        externalities, masses = models[mechanism].participation_points
+        penalties = penalty_from_table(penalty_tables[mechanism], threshold_function(externalities))
+        exact[mechanism]["penalty_paid"] = num_bidders * float(np.sum(masses * penalties))
     # The recipient penalty −e is charged to winners: n E[x (−e)].
     exact["first_best"]["penalty_paid"] = -exact["first_best"]["externality_welfare"]
     for outcomes in exact.values():
@@ -445,14 +465,16 @@ def simulate_mechanisms(
 
 
 def grid_refinement_check(family, threshold_function, num_bidders, num_goods,
-                          externality_scale=1.0, refinement_factor=2, **options):
+                          externality_scale=1.0, refinement_factor=2, continuous=False,
+                          **options):
     """Exact welfare on the default grid and on a grid refined by refinement_factor.
 
     For a synthetic family, the gridded (piecewise-uniform) distribution
     approximates a continuous density; the change in welfare under refinement
-    measures the discretization error. Returns a DataFrame with one row per
-    mechanism: welfare on both grids, their difference, and the same for the
-    welfare gain over VCG.
+    measures the discretization error. continuous: evaluate the continuous
+    versions of both grids (TypeDistribution.continuous_version). Returns a DataFrame
+    with one row per mechanism: welfare on both grids, their difference, and the
+    same for the welfare gain over VCG.
     """
     from .type_distributions import synthetic_distribution
 
@@ -466,6 +488,8 @@ def grid_refinement_check(family, threshold_function, num_bidders, num_goods,
             grid.pop("num_externality_nodes")
         distribution = synthetic_distribution(family, externality_scale=externality_scale,
                                               **grid, **options)
+        if continuous:
+            distribution = distribution.continuous_version()
         models, _ = build_mechanism_models(distribution, threshold_function, num_bidders,
                                            num_goods)
         results[label] = {m: models[m].expected_welfare() for m in MECHANISMS}

@@ -1,6 +1,6 @@
 # Research-size optimize run on the tweet data:  python run.py configs/optimize_example.toml
-# Per-node and piecewise-linear τ by best-response ascent, a quadratic τ by genetic search,
-# six externality scales with warm starts, full grids, 200 bootstrap resamples.
+# Per-node and piecewise-linear τ by best-response ascent, quadratic and piecewise-linear τ by
+# genetic search, six externality scales with warm starts, full grids, 200 bootstrap resamples.
 # Run --dry-run first for the time estimate.
 
 kind = "optimize"
@@ -16,17 +16,18 @@ num_bidders = [8, 16]
 num_goods = [1, 2]
 
 [design]
-threshold_forms = ["poly2", "knots6", "nodes"]
 objectives = ["vcg_pa", "ivcg_pa"]
 
 [[optimizers]]
 label = "ga"
 method = "genetic"
+threshold_forms = ["poly2", "knots6"]
 num_restarts = 1
 
 [[optimizers]]
 label = "br"
 method = "best_response"
+threshold_forms = ["knots6", "nodes"]
 warm_start_across_zeta = true
 
 [evaluation]

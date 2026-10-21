@@ -7,13 +7,23 @@ Building blocks of one combination of a run (used by experiments/compute.py):
                           and the one it is evaluated on (evaluation)
   optimize_threshold      search for τ in a threshold form (threshold_forms.py)
                           with the exact objective: genetic search,
-                          best-response ascent, or both
+                          best-response ascent, both, or the symmetric
+                          relaxation followed by best-response ascent
   bandwidth_sensitivity   redesign τ on the training half smoothed with other
                           bandwidths and evaluate each design on the test half
 
 Synthetic families: training = evaluation = the family's piecewise-uniform
 distribution (H is known; no sampling uncertainty). Optional grid-refinement
 check of the discretization error.
+
+Continuous evaluation (continuous=True, the default of runs): the search uses
+the piecewise-uniform training distribution, where the best-response ascent's
+per-node best responses and gradients are exact. Everything after the search
+uses continuous versions (TypeDistribution.continuous_version): the evaluation
+distribution (unless atomic), and the design distribution on which the IVCG-PA
+scoring rule, the ironing figure, the marginal-contribution maps and the
+participation gap are computed. This removes the many small ironing bands of
+the grid (see type_distributions.py).
 
 Empirical CSV: all rows are split into training and test halves (the same
 split for every cell when the split seed is fixed); each half is truncated at
@@ -46,6 +56,7 @@ from .empirical import (
 from .best_response_ascent import run_best_response_ascent
 from .genetic_search import run_genetic_search
 from .parallel import split_workers, parallel_map
+from .symmetric_relaxation import symmetric_relaxation
 from .threshold_evaluation import (AUDITED_MECHANISMS, MECHANISMS, expected_welfare,
                                    ivcg_scoring_rule_for)
 from .threshold_forms import BEST_RESPONSE_FORMS, GENETIC_FORMS, build_threshold_form
@@ -54,7 +65,7 @@ from .type_distributions import SYNTHETIC_FAMILIES, TypeDistribution, synthetic_
 SYNTHETIC_GRID_DEFAULTS = {"num_externality_nodes": 151, "num_valuation_cells": 150}
 EMPIRICAL_GRID_DEFAULTS = {"num_externality_nodes": 241, "num_valuation_cells": 400}
 EVALUATION_CHOICES = ("atomic", "smoothed")
-OPTIMIZERS = ("auto", "genetic", "best_response", "genetic+best_response")
+OPTIMIZERS = ("auto", "genetic", "best_response", "genetic+best_response", "relaxation")
 
 
 def is_synthetic_source(source) -> bool:
@@ -71,6 +82,11 @@ class PreparedDistributions:
     test_sample: Optional[EmpiricalSample]
     training_sample: Optional[EmpiricalSample] = None
     settings: dict = field(default_factory=dict)
+    design: Optional[TypeDistribution] = None  # default: training
+
+    def __post_init__(self):
+        if self.design is None:
+            self.design = self.training
 
     @property
     def is_empirical(self) -> bool:
@@ -81,8 +97,11 @@ def prepare_distributions(source, externality_scale=1.0, valuation_scale=1.0,
                           truncation_quantile=0.995, evaluation_truncation_quantile=None,
                           train_fraction=0.5, split_seed=0, smoothing="kernel",
                           bandwidth_scale=1.0, evaluation="atomic", num_externality_nodes=None,
-                          num_valuation_cells=None, family_options=None):
-    """Distributions for one cell; `source` is a synthetic family name or a CSV path."""
+                          num_valuation_cells=None, family_options=None, continuous=False):
+    """Distributions for one cell; `source` is a synthetic family name or a CSV path.
+
+    continuous: evaluate on continuous versions (module notes); the training
+    distribution of the search stays piecewise uniform."""
     if is_synthetic_source(source):
         grid = {key: value for key, value in (("num_externality_nodes", num_externality_nodes),
                                               ("num_valuation_cells", num_valuation_cells))
@@ -92,10 +111,13 @@ def prepare_distributions(source, externality_scale=1.0, valuation_scale=1.0,
             grid.pop("num_externality_nodes")
         distribution = synthetic_distribution(source, externality_scale=externality_scale,
                                               **grid, **(family_options or {}))
+        design = distribution.continuous_version() if continuous else distribution
         return PreparedDistributions(
-            source=source, training=distribution, evaluation=distribution, test_sample=None,
+            source=source, training=distribution, evaluation=design, design=design,
+            test_sample=None,
             settings={"kind": "synthetic", "family": source, "externality_scale": externality_scale,
-                      "grid": grid, "family_options": dict(family_options or {})})
+                      "grid": grid, "family_options": dict(family_options or {}),
+                      "continuous": continuous})
 
     if evaluation not in EVALUATION_CHOICES:
         raise ValueError(f"evaluation must be one of {EVALUATION_CHOICES}")
@@ -112,10 +134,13 @@ def prepare_distributions(source, externality_scale=1.0, valuation_scale=1.0,
     smoothing_options = dict(smoothing=smoothing, bandwidth_scale=bandwidth_scale, **grid)
     evaluation_options = (dict(smoothing="none") if evaluation == "atomic"
                           else smoothing_options)
+    training = sample_distribution(train, **smoothing_options)
+    evaluated = sample_distribution(test, **evaluation_options)
     return PreparedDistributions(
         source=str(source),
-        training=sample_distribution(train, **smoothing_options),
-        evaluation=sample_distribution(test, **evaluation_options),
+        training=training,
+        evaluation=evaluated.continuous_version() if continuous else evaluated,
+        design=training.continuous_version() if continuous else training,
         test_sample=test, training_sample=train,
         settings={"kind": "empirical", "csv": str(source), "externality_scale": externality_scale,
                   "valuation_scale": valuation_scale, "truncation_quantile": truncation_quantile,
@@ -126,7 +151,7 @@ def prepare_distributions(source, externality_scale=1.0, valuation_scale=1.0,
                   "num_rows_loaded": full.settings["num_rows_loaded"],
                   "num_train_rows": train.num_rows, "num_test_rows": test.num_rows,
                   "evaluation": evaluation, "evaluation_smoothing": evaluation_options["smoothing"],
-                  **smoothing_options},
+                  "continuous": continuous, **smoothing_options},
     )
 
 
@@ -145,7 +170,7 @@ def resolve_optimizer(optimizer, form_kind):
         return "genetic" if form_kind == "polynomial" else "best_response"
     if optimizer == "genetic" and form_kind not in GENETIC_FORMS:
         raise ValueError(f"the genetic search needs a form in {GENETIC_FORMS}")
-    if optimizer != "genetic" and form_kind not in BEST_RESPONSE_FORMS:
+    if optimizer != "genetic" and form_kind not in BEST_RESPONSE_FORMS:  # incl. relaxation
         raise ValueError(f"best-response ascent needs a form in {BEST_RESPONSE_FORMS}")
     return optimizer
 
@@ -163,10 +188,14 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
     """Search for τ in threshold_form on the training distribution.
 
     threshold_form : label ("poly2", "knots6", "bins10", "nodes") or polynomial degree
-    optimizer      : "auto", "genetic", "best_response" or "genetic+best_response"
+    optimizer      : "auto", "genetic", "best_response", "genetic+best_response"
                      (genetic search in genetic_form, default the same form or knots6
                      for nodes, then best-response ascent started from its result
-                     as well as from the default starts)
+                     as well as from the default starts) or "relaxation" (the
+                     thresholds of the best symmetric participation rule for VCG-PA,
+                     symmetric_relaxation.py, projected on the form, then
+                     best-response ascent from that single start; piecewise-uniform
+                     training distributions with k < n)
     initial_solution : genetic search warm start (parameters of the genetic form)
     warm_starts    : threshold functions used as extra best-response starts
     best_response_options : keyword options of run_best_response_ascent (starts,
@@ -228,11 +257,28 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
         genetic_threshold.start_name = f"genetic ({search_form.label})"
         warm_starts.insert(0, genetic_threshold)
 
+    relaxation_summary = None
+    if optimizer == "relaxation":
+        if training.is_atomic or num_goods >= num_bidders:
+            raise ValueError("the relaxation needs a piecewise-uniform distribution and k < n")
+        begin = time.time()
+        key = ("symmetric_relaxation", num_bidders, num_goods)
+        if key not in training.cache:
+            training.cache[key] = symmetric_relaxation(training, num_bidders, num_goods)
+        relaxation = training.cache[key]
+        relaxation_summary = {"value": relaxation.value,
+                              "threshold_rule": bool(relaxation.is_threshold_rule),
+                              "largest_drop": relaxation.largest_drop,
+                              "seconds": time.time() - begin}
+        best_response_options.update(starts=["relaxation"], num_random_starts=0)
+        warm_starts = []
     search = run_best_response_ascent(
         training, form, num_bidders, num_goods, objective_mechanism=objective_mechanism,
         warm_starts=warm_starts, seed=ga_seed, verbose=verbose, deadline=deadline, scale=scale,
         workers=workers, **best_response_options)
     record_trajectory(form, search.trajectory)
+    if relaxation_summary is not None:
+        search.summary["relaxation"] = relaxation_summary
     summaries.append(search.summary)
     return {"form": form, "parameters": list(search.coefficients), "welfare": search.welfare,
             "optimizer": optimizer, "trajectory": trajectory, "benchmarks": benchmarks,
@@ -273,7 +319,8 @@ def bandwidth_sensitivity(prepared, bandwidth_scales, threshold_form, num_bidder
         result = optimize_threshold(training, threshold_form, num_bidders, num_goods,
                                     **search_options)
         threshold = result["form"].threshold(result["parameters"])
-        ivcg_rule = ivcg_scoring_rule_for(training, threshold, num_bidders, num_goods)
+        design = training.continuous_version() if settings.get("continuous") else training
+        ivcg_rule = ivcg_scoring_rule_for(design, threshold, num_bidders, num_goods)
         welfare = exact_welfare_by_mechanism(prepared.evaluation, threshold, num_bidders,
                                              num_goods, ivcg_rule)
         rows.append(_sensitivity_row(scale, result["form"].spec(result["parameters"]),
