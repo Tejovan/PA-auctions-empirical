@@ -70,7 +70,7 @@ GENETIC_DEFAULTS = {
     "num_restarts": 4,
 }
 BEST_RESPONSE_DEFAULTS = {
-    "starts": ["zero", "zero_welfare", "short_genetic"],
+    "starts": ["zero", "zero_welfare", "short_genetic", "relaxation"],
     "num_random_starts": 3,
     "max_iterations": 100,
     "relative_tolerance": 1e-10,
@@ -89,7 +89,8 @@ SECTION_DEFAULTS = {
                    "confidence_level": 0.95, "bootstrap_all_outcomes": True},
     "checks": {"grid_refinement": False, "refinement_factor": 2,
                "bandwidth_sensitivity": [], "grid_relative_tolerance": 0.01,
-               "first_order_tolerance": 1e-4, "monte_carlo_z": 4.0},
+               "first_order_tolerance": 1e-4, "monte_carlo_z": 4.0,
+               "symmetric_relaxation": True},
     "seeds": {"split": 0, "search": 0, "simulation": 1234, "bootstrap": 0},
     "output": {"base": "runs", "workers": 0, "search_history_curves": 400, "report": True},
 }

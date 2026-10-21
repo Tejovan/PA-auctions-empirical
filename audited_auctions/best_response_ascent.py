@@ -56,11 +56,13 @@ Each start is run to convergence and the best result is kept. Starts:
                     (§7.2 [sec:restrictions]; the first best without competition,
                     Prop. 7.10 [prop:no-competition]); alias "no_competition"
   "short_genetic"   a short genetic search in the same form (knots6 for nodes)
+  "relaxation"      the thresholds of the best symmetric participation rule for VCG-PA
+                    (symmetric_relaxation; piecewise-uniform distributions, k < n)
   "random i"        num_random_starts random τ: piecewise linear through 6 externalities
                     spread over the nodes, values uniform on [0, 95% quantile of v]
 plus any warm starts passed as threshold functions (for example the genetic
 search's result, or the optimum at the previous externality scale of a run).
-Default: zero, zero_welfare, short_genetic and 3 random starts. The starts are
+Default: zero, zero_welfare, short_genetic, relaxation and 3 random starts. The starts are
 independent and run simultaneously in up to `workers` processes.
 
 Stopping. The ascent stops for one of the stop_reason values: "no_improving_step",
@@ -98,13 +100,13 @@ import pandas as pd
 from numpy.polynomial import chebyshev
 
 from .genetic_search import SearchResult, run_genetic_search
-from .marginal_contribution import valuation_functions
+from .marginal_contribution import RivalWelfareLoss, valuation_functions
 from .parallel import parallel_map
 from .threshold_evaluation import build_mechanism_model, expected_welfare
 from .threshold_functions import constant_threshold, tabulated_threshold
 from .threshold_forms import BEST_RESPONSE_FORMS, build_threshold_form, externality_nodes
 
-DEFAULT_STARTS = ("zero", "zero_welfare", "short_genetic")
+DEFAULT_STARTS = ("zero", "zero_welfare", "short_genetic", "relaxation")
 DEFAULT_RANDOM_STARTS = 3
 DEFAULT_POLISH_ROUNDS = 3
 STEP_SIZES = tuple(0.5 ** m for m in range(7))
@@ -387,7 +389,8 @@ def random_threshold(type_distribution, rng, num_knots=6):
     return tabulated_threshold(knots, rng.uniform(0.0, top, num_knots))
 
 
-def _start_list(starts, num_random_starts, type_distribution, seed):
+def _start_list(starts, num_random_starts, type_distribution, seed, num_bidders=None,
+                num_goods=None):
     """(name, threshold function or "short_genetic") of each start."""
     thresholds = []
     for start in starts:
@@ -400,6 +403,18 @@ def _start_list(starts, num_random_starts, type_distribution, seed):
                                ZeroWelfareThreshold(type_distribution.maximum_valuation)))
         elif start == "short_genetic":
             thresholds.append(("short_genetic", "short_genetic"))
+        elif start == "relaxation":
+            # Thresholds of the best symmetric participation rule for VCG-PA; skipped where
+            # the relaxation is not defined (atomic distributions, k >= n).
+            if (not type_distribution.is_atomic and num_bidders is not None
+                    and num_goods < num_bidders):
+                from .symmetric_relaxation import symmetric_relaxation
+                key = ("symmetric_relaxation", num_bidders, num_goods)
+                if key not in type_distribution.cache:
+                    type_distribution.cache[key] = symmetric_relaxation(
+                        type_distribution, num_bidders, num_goods)
+                thresholds.append(("relaxation",
+                                   type_distribution.cache[key].threshold_function))
         else:
             raise ValueError(f"unknown start {start!r}")
     rng = np.random.default_rng(None if seed is None else seed + 7919)
@@ -706,7 +721,7 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
     if form.kind not in BEST_RESPONSE_FORMS:
         raise ValueError(f"best-response ascent needs a form in {BEST_RESPONSE_FORMS}")
     start_list = _start_list(list(starts) + list(warm_starts), num_random_starts,
-                             type_distribution, seed)
+                             type_distribution, seed, num_bidders, num_goods)
     if verbose:
         print(f"Best-response ascent ({objective_mechanism}, {form.label}, "
               f"{form.num_parameters} parameters, {len(start_list)} starts, "
@@ -779,3 +794,59 @@ def first_order_check(type_distribution, threshold_function, num_bidders, num_go
         "marginal_contribution": np.where(raw >= maximum, np.nan, marginal),
         "best_response_gap": np.maximum(best_value - current, 0.0),
     })
+
+
+def participation_gap(type_distribution, threshold_function, num_bidders, num_goods,
+                      mechanism="vcg_pa", points_per_interval=24):
+    """Largest welfare gain from one bidder changing its participation set, rivals fixed.
+
+    By the marginal contribution decomposition (paper Prop. 7.4 [prop:decomposition]),
+    a bidder that switches from v >= τ(e) to the set of types with M^τ > 0 raises
+    expected welfare by
+
+        G(τ) = E[M^τ(e, v)^- 1{v >= τ(e)} + M^τ(e, v)^+ 1{v < τ(e)}],
+
+    the largest gain over all participation sets, not only threshold sets
+    (best_response_gap of first_order_check is the gain over threshold sets
+    of one node). G(τ) = 0 if and only if every participant has M^τ >= 0 and
+    every non-participant M^τ <= 0: for VCG-PA, the condition under which τ
+    maximizes welfare among all symmetric participation rules, and hence among
+    all common τ (paper v3 Thm [thm:vcg-sufficient]). For IVCG-PA the scores of τ
+    are held fixed and no such theorem applies.
+
+    Returns (total G, per-node gains, mass with the wrong sign of M^τ).
+    """
+    model = build_mechanism_model(mechanism, type_distribution, threshold_function, num_bidders,
+                                  num_goods)
+    nodes, _, node_of_cell = externality_nodes(type_distribution)
+    maximum = float(type_distribution.maximum_valuation)
+    thresholds = np.asarray(threshold_function(nodes), dtype=float)
+    if type_distribution.is_atomic:
+        loss = RivalWelfareLoss(model)
+        v = type_distribution.valuation_lower
+        e = type_distribution.externalities
+        allocation, rival_loss = loss(v)
+        marginal = (v + e) * allocation - rival_loss
+        participates = v >= thresholds[node_of_cell]
+        wrong = np.where(participates, np.maximum(-marginal, 0), np.maximum(marginal, 0))
+        per_node = np.bincount(node_of_cell, type_distribution.probabilities * wrong, len(nodes))
+        wrong_mass = float(type_distribution.probabilities[wrong > 0].sum())
+        return float(per_node.sum()), per_node, wrong_mass
+    functions = valuation_functions(model, type_distribution)
+    payoffs = ParticipationPayoffs(type_distribution, functions, node_of_cell, len(nodes))
+    unit, unit_weights = np.polynomial.legendre.leggauss(points_per_interval)
+    left, right = functions.breakpoints[:-1], functions.breakpoints[1:]
+    half = (right - left) / 2
+    valuations = ((left + right) / 2)[:, None] + half[:, None] * unit          # (N, P)
+    weights = half[:, None] * unit_weights                                       # (N, P)
+    base = chebyshev.chebval(unit, functions.coefficients_a)                     # (N, P)
+    allocation = chebyshev.chebval(unit, functions.coefficients_x)
+    integrand = (payoffs.density[:, :, None] * base[None]
+                 + payoffs.externality_density[:, :, None] * allocation[None])  # (G, N, P)
+    participates = valuations[None] >= np.where(thresholds >= maximum, np.inf,
+                                                thresholds)[:, None, None]
+    wrong = np.where(participates, np.maximum(-integrand, 0), np.maximum(integrand, 0))
+    per_node = (wrong * weights[None]).sum(axis=(1, 2))
+    density = np.abs(payoffs.density)[:, :, None] * np.ones_like(valuations)[None]
+    wrong_mass = float(((wrong > 0) * density * weights[None]).sum())
+    return float(per_node.sum()), per_node, wrong_mass

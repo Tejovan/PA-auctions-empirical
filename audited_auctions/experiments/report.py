@@ -66,8 +66,9 @@ PAPER_FIGURES = (*LEAF_FIGURES, "tau-by", "welfare-vs-zeta")
 FIGURE_INFO = {
     "types": ("Types, τ and penalties",
               "(a) type distribution, τ(e), abstention region, excluded externalities, "
-              "first-best boundary v = −e, bids pooled by IVCG-PA; (b) penalties r(e) of "
-              "VCG-PA and IVCG-PA, recipient penalty −e.", "always"),
+              "first-best boundary v = −e (also the recipient penalty −e), penalties r(e) of "
+              "VCG-PA and IVCG-PA, bids pooled by IVCG-PA, linear valuation axis; (b) the "
+              "same on a logarithmic valuation axis.", "always"),
     "outcomes": ("Expected outcomes",
                  "(a) expected welfare W = bidder net utility + revenue + penalties + "
                  "externality welfare, per mechanism, with the share of the first-best gain; "
@@ -347,6 +348,10 @@ def gap_decomposition(summary, kind):
     supremum over T. The suprema are replaced by the best values found among the run's
     combinations (IVCG-PA and VCG-PA welfare of every τ of the market), so OPT and OPT^VCG
     are lower bounds. Columns *_share divide each gap by the first-best gain FB − W_VCG.
+    With the symmetric relaxation (piecewise-uniform training data), relaxation_vcg is the
+    welfare of the best symmetric participation rule for VCG-PA on the training distribution,
+    an estimate of an upper bound on OPT^VCG over common τ, and relaxation_minus_opt_vcg its
+    gap to the best VCG-PA welfare found (synthetic data: training = evaluation).
     """
     class_column = "threshold_form" if kind == "optimize" else "tau_label"
     market = ["distribution", "zeta", "num_bidders", "num_goods"]
@@ -364,6 +369,11 @@ def gap_decomposition(summary, kind):
             row = dict(zip(market, keys), threshold_class=label, first_best=first_best,
                        vcg=vcg, opt_found=opt, opt_vcg_found=opt_vcg, opt_vcg_class=opt_class,
                        **gaps)
+            if "relaxation_value" in group and group.relaxation_value.notna().any():
+                relaxation = float(group.relaxation_value.max())
+                row["relaxation_vcg"] = relaxation
+                gaps["relaxation_minus_opt_vcg"] = relaxation - opt_vcg
+                row["relaxation_minus_opt_vcg"] = relaxation - opt_vcg
             row.update({f"{name}_share": (value / gain if abs(gain) > 1e-15 else np.nan)
                         for name, value in gaps.items()})
             rows.append(row)

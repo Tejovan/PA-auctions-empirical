@@ -164,7 +164,7 @@ def test_time_limit_stops_gracefully():
     result = run_best_response_ascent(distribution, "nodes", 6, 2, verbose=False,
                                       deadline=time.time())
     reasons = [s["stop_reason"] for s in result.summary["starts"]]
-    assert reasons[0] == "time_limit" and len(reasons) == 6  # 3 named + 3 random starts
+    assert reasons[0] == "time_limit" and len(reasons) == 7  # 4 named + 3 random starts
     assert set(reasons[1:]) == {"skipped (time limit)"}
     assert np.isfinite(result.welfare)
     search = optimize_threshold(distribution, "poly1", 6, 2, optimizer="genetic",
@@ -173,3 +173,24 @@ def test_time_limit_stops_gracefully():
     summary = search["search_summaries"][0]
     assert summary["stop_reason"] == "time_limit" and summary["generations_run"] == 1
     assert summary["local_starts"] == []
+
+
+def test_participation_gap_and_relaxation():
+    from audited_auctions.best_response_ascent import participation_gap
+    from audited_auctions.symmetric_relaxation import symmetric_relaxation
+    from audited_auctions.threshold_functions import polynomial_threshold, tabulated_threshold
+
+    distribution = synthetic_distribution("example_n", num_valuation_cells=60)
+    # Example N with n = 2, k = 1: the best τ(−c) is 4c/3 and τ(0) = 0 (paper Ex. 7.11).
+    harm = 0.6
+    relaxation = symmetric_relaxation(distribution, 2, 1, num_intervals=600)
+    assert relaxation.is_threshold_rule
+    best = relaxation.thresholds[np.argmin(relaxation.nodes)]
+    assert abs(best - 4 * harm / 3) < 0.01
+    optimum = tabulated_threshold([-harm, 0.0], [4 * harm / 3, 0.0])
+    welfare = 2 / 3 - harm / 2 + (harm / 2) * (0.8) ** 2 - 0.8 ** 3 / 4
+    assert abs(relaxation.value - welfare) < 1e-4
+    gap, _, _ = participation_gap(distribution, optimum, 2, 1)
+    assert gap < 1e-9
+    zero_welfare, _, _ = participation_gap(distribution, polynomial_threshold([0.0, -1.0]), 2, 1)
+    assert zero_welfare > 1e-3

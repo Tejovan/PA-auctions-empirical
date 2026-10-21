@@ -9,8 +9,9 @@ semi-transparent type distribution in the background; legends outside busy
 axes; one shared legend for panels with the same series).
 
 Per combination:
-  types_tau_penalties       (a) types, τ, abstention region, first-best boundary
-                            v = −e, IVCG-PA pooled bids; (b) penalties r(e)
+  types_tau_penalties       types, τ, abstention region, first-best boundary v = −e,
+                            penalties r(e), IVCG-PA pooled bids: (a) linear and
+                            (b) logarithmic valuation axis
   expected_outcomes         (a) expected welfare split into bidder net utility,
                             revenue, penalties and externality part; (b) changes
                             over VCG with bootstrap intervals
@@ -494,8 +495,9 @@ def _percent(value):
 # ─── Type plane ─────────────────────────────────────────────────────────────────
 
 
-def draw_types(ax, types, alpha=0.55):
-    """Type distribution in light, semi-transparent gray (lowest layer)."""
+def draw_types(ax, types, alpha=0.72):
+    """Type distribution in semi-transparent gray (lowest layer)."""
+    types = default_view(types)
     e_axis, v_axis = types["background_e"], types["background_v"]
     density = np.asarray(types["background_density"], dtype=float)
     if str(types["shading"]) == "log":
@@ -512,26 +514,69 @@ def draw_types(ax, types, alpha=0.55):
     type_plane_axes(ax, types)
 
 
+def _valuation_quantile(types, level):
+    """Quantile of the valuations of the type background."""
+    v_axis = np.asarray(types["background_v"], dtype=float)
+    weights = np.asarray(types["background_density"], dtype=float).sum(axis=1)
+    if weights.sum() <= 0:
+        return float(types["v_limits"][1])
+    cumulative = np.cumsum(weights) / weights.sum()
+    return float(v_axis[min(np.searchsorted(cumulative, level), len(v_axis) - 1)])
+
+
+def _log_lower_limit(types):
+    """Lower end of a logarithmic valuation axis: stored, or the 0.5% quantile of the
+    positive valuations of the type background."""
+    stored = float(types.get("v_log_lower", 0.0) or 0.0)
+    if stored > 0:
+        return stored
+    v_axis = np.asarray(types["background_v"], dtype=float)
+    weights = np.asarray(types["background_density"], dtype=float).sum(axis=1)
+    positive = v_axis > 0
+    if not positive.any() or weights[positive].sum() <= 0:
+        return 1e-3 * float(types["v_limits"][1])
+    cumulative = np.cumsum(weights[positive]) / weights[positive].sum()
+    return float(v_axis[positive][min(np.searchsorted(cumulative, 0.005), positive.sum() - 1)])
+
+
+def type_view(types, scale):
+    """types with the valuation axis of one view: "linear" or "log" (plain logarithmic,
+    from a small positive valuation to the top of the support)."""
+    view = dict(types)
+    view["scale"] = scale
+    if scale == "log":
+        view["v_limits"] = np.array([_log_lower_limit(types), float(types["v_limits"][1])])
+    return view
+
+
+def default_view(types):
+    """The view of single-panel type plots: logarithmic for heavy-tailed valuations."""
+    if "scale" in types:
+        return types
+    heavy = bool(types.get("v_log", float(types.get("v_linear_below", 0.0)) > 0))
+    return type_view(types, "log" if heavy else "linear")
+
+
 def type_plane_axes(ax, types):
-    """Limits, labels and scale of a type-plane plot (symmetric log valuation axis for
-    heavy-tailed empirical data)."""
+    """Limits, labels and scale of a type-plane plot (plain logarithmic valuation axis in
+    the log view)."""
+    types = default_view(types)
     ax.set_xlim(types["e_limits"])
     ax.set_ylim(types["v_limits"])
     ax.set_xlabel("externality e")
-    linear_below = float(types.get("v_linear_below", 0.0))
-    if linear_below > 0:
-        ax.set_yscale("symlog", linthresh=linear_below, linscale=1.0)
-        ax.set_ylabel(f"valuation v (log scale above {compact(linear_below)})")
+    if types["scale"] == "log":
+        ax.set_yscale("log")
+        ax.set_ylabel("valuation v (log scale)")
     else:
         ax.set_ylabel("valuation v")
-    _compact_axes(ax)
+    _compact_axes(ax, y=types["scale"] != "log")
 
 
 def draw_threshold(ax, e_grid, tau, types, color=THRESHOLD_COLOR, linestyle="-", label=None,
                    linewidth=2.0, zorder=5, halo=True):
     """τ(e) on the type plot; excluded externalities (τ = v̄⁺) as a thick bar at the top."""
     tau = np.asarray(tau, dtype=float)
-    v_limits = types["v_limits"]
+    v_limits = default_view(types)["v_limits"]
     finite = np.isfinite(tau)
     shown = np.where(finite, np.clip(tau, v_limits[0], v_limits[1]), np.nan)
     line, = ax.plot(e_grid, shown, color=color, linestyle=linestyle, linewidth=linewidth,
@@ -564,69 +609,83 @@ def _pooled_bid_intervals(data):
     return [interval for interval in intervals if interval[1] > interval[0]]
 
 
-def _visible_pooled_intervals(data, v_limits, minimum_share=0.003):
-    """Pooled bid intervals for the type plot: gaps below minimum_share of the valuation
-    range merged, intervals below it dropped (5_ironing.pdf shows all of them)."""
-    span = v_limits[1] - v_limits[0]
-    merged = []
+def _visible_pooled_intervals(data, types, minimum_share=0.002):
+    """Pooled bid intervals wider than minimum_share of the valuation axis of the view
+    (measured in log10 v on a logarithmic axis); not merged, so that the many small
+    pools at the thresholds of discrete externality nodes stay separate
+    (5_ironing.pdf shows all of them)."""
+    low_limit, high_limit = types["v_limits"]
+    log = types.get("scale") == "log"
+    def position(v):
+        return np.log10(max(v, low_limit)) if log else v
+    span = position(high_limit) - position(low_limit)
+    intervals = []
     for low, high in _pooled_bid_intervals(data):
-        if merged and low - merged[-1][1] < minimum_share * span:
-            merged[-1][1] = high
-        else:
-            merged.append([low, high])
-    return [(low, high) for low, high in merged if high - low >= minimum_share * span]
+        if high <= low_limit or low >= high_limit:
+            continue
+        if position(min(high, high_limit)) - position(max(low, low_limit)) >= minimum_share * span:
+            intervals.append((max(low, low_limit), min(high, high_limit)))
+    return intervals
 
 
 # ─── Per combination ────────────────────────────────────────────────────────────
+
+
+def _types_panel(ax, data, types):
+    """Types, abstention region, τ(e), the line v = −e and the penalties r(e) in one axes."""
+    draw_types(ax, types)
+    v_low, v_high = types["v_limits"]
+    e_grid, tau = data["e_grid"], data["tau_grid"]
+    shown = np.where(np.isfinite(tau), np.clip(tau, v_low, v_high), v_high)
+    ax.fill_between(e_grid, v_low, shown, linewidth=0, zorder=-1, **REGION_OUT)
+    pooled = _visible_pooled_intervals(data, types)
+    for low, high in pooled:
+        ax.axhspan(low, high, linewidth=0, **REGION_QTY, zorder=1)
+    dense_e = np.linspace(*types["e_limits"], 800)
+    boundary = np.where(-dense_e > 0, -dense_e, np.nan)
+    ax.plot(dense_e, boundary, color=MECHANISM_COLORS["first_best"],
+            linestyle=MECHANISM_LINESTYLES["first_best"], linewidth=1.4, zorder=3)
+    for mechanism in PARTICIPANT_AUDITS:
+        penalty = np.asarray(data[f"penalty_{mechanism}"], dtype=float)
+        if types["scale"] == "log":
+            penalty = np.where(penalty >= v_low, penalty, np.nan)
+        ax.plot(e_grid, np.minimum(penalty, v_high), color=MECHANISM_COLORS[mechanism],
+                linestyle=MECHANISM_LINESTYLES[mechanism], linewidth=1.2, zorder=4)
+    draw_threshold(ax, e_grid, tau, types)
+    ax.set_ylabel("valuation v, penalty r(e)" + (" (log scale)" if types["scale"] == "log"
+                                                  else ""))
+    return bool(pooled)
 
 
 def types_tau_penalties(results, data, types, path):
     combination = results["combination"]
     with plt.rc_context(STYLE):
         fig, axes = _new_figure(6.5, 3.0, 1, 2)
-        ax = axes[0, 0]
-        draw_types(ax, types)
-        e_grid, tau = data["e_grid"], data["tau_grid"]
-        shown = np.where(np.isfinite(tau), np.clip(tau, *types["v_limits"]), types["v_limits"][1])
-        ax.fill_between(e_grid, types["v_limits"][0], shown, linewidth=0, zorder=-1,
-                        **REGION_OUT)
-        draw_threshold(ax, e_grid, tau, types)
-        ax.plot(e_grid, -e_grid, color=MECHANISM_COLORS["first_best"], linestyle="-.",
-                linewidth=1.4, zorder=3)
-        pooled = _visible_pooled_intervals(data, types["v_limits"])
-        for low, high in pooled:
-            ax.axhspan(low, high, linewidth=0, **REGION_QTY,
-                       zorder=1)
-        ax.set_title("(a) Types and threshold τ(e)", loc="left")
-
-        ax = axes[0, 1]
-        for mechanism in PARTICIPANT_AUDITS:
-            ax.plot(e_grid, data[f"penalty_{mechanism}"], color=MECHANISM_COLORS[mechanism],
-                    linestyle=MECHANISM_LINESTYLES[mechanism], zorder=3)
-        ax.plot(e_grid, -e_grid, color=MECHANISM_COLORS["first_best"],
-                linestyle=MECHANISM_LINESTYLES["first_best"], linewidth=1.4, zorder=2)
-        ax.axhline(0, **REFERENCE, zorder=1)
-        ax.set_xlim(types["e_limits"])
-        penalties = np.concatenate([data["penalty_vcg_pa"], data["penalty_ivcg_pa"]])
-        top = max(float(np.nanmax(penalties)), 1e-12)
-        ax.set_ylim(-0.08 * top, 1.25 * max(top, float(np.nanmax(np.minimum(-e_grid, 3 * top)))))
-        ax.set_xlabel("externality e")
-        ax.set_ylabel("penalty")
-        _compact_axes(ax)
-        ax.set_title("(b) Penalties r(e) that induce τ", loc="left")
+        linear, logarithmic = type_view(types, "linear"), type_view(types, "log")
+        heavy = default_view(types)["scale"] == "log"
+        if heavy:  # heavy tail: the linear view stops at the 97.5% quantile of valuations
+            upper = float(types.get("v_linear_upper", 0.0) or _valuation_quantile(types, 0.975))
+            linear["v_limits"] = np.array([linear["v_limits"][0], upper])
+        pooled = _types_panel(axes[0, 0], data, linear)
+        axes[0, 0].set_title("(a) Types, threshold τ(e), penalties r(e)", loc="left")
+        pooled = _types_panel(axes[0, 1], data, logarithmic) or pooled
+        axes[0, 1].set_title("(b) The same, logarithmic valuation axis", loc="left")
 
         handles = [Line2D([], [], color=THRESHOLD_COLOR, linewidth=2, label="threshold τ(e)"),
                    Patch(**REGION_OUT, label="abstain: v < τ(e)"),
                    Line2D([], [], color=THRESHOLD_COLOR, linewidth=5,
                           label=r"excluded e ($\tau = \bar{v}^{+}$)"),
                    Line2D([], [], color=MECHANISM_COLORS["first_best"], linestyle="-.",
-                          label="v = −e (first best) / recipient penalty −e"),
-                   mechanism_line("vcg_pa", label="r(e) in VCG-PA"),
-                   mechanism_line("ivcg_pa", label="r(e) in IVCG-PA")]
+                          label="v = −e: first-best boundary and recipient penalty −e"),
+                   mechanism_line("vcg_pa", label="penalty r(e) in VCG-PA"),
+                   mechanism_line("ivcg_pa", label="penalty r(e) in IVCG-PA")]
         if pooled:
             handles.append(Patch(**REGION_QTY, label="bids pooled by IVCG-PA"))
-        _shared_legend(fig, handles, columns=4)
-        note = f"{str(types['description'])}; penalties on the evaluation distribution."
+        _shared_legend(fig, handles, columns=3)
+        note = (f"{str(types['description'])}; penalties on the evaluation distribution, "
+                "in valuation units (r(e) ≤ τ(e)); zero penalties are not drawn on the "
+                "logarithmic axis" + ("; (a) shows valuations up to their 97.5% quantile."
+                                      if heavy else "."))
         return _finish(fig, path, context_line(combination), note)
 
 
@@ -1069,7 +1128,8 @@ def search_history(results, data, types, path_tried, path_trace):
         draw_types(ax, types, alpha=0.45)
         tried = data["search_tried"]
         for curve in tried:
-            ax.plot(data["search_e"], np.clip(curve, *types["v_limits"]), color="#9a9a9a",
+            ax.plot(data["search_e"], np.clip(curve, *default_view(types)["v_limits"]),
+                    color="#9a9a9a",
                     linewidth=0.5, alpha=0.18, zorder=2, rasterized=True,
                     antialiased=False)  # without antialiasing the image compresses ~2×
         draw_threshold(ax, data["e_grid"], data["tau_grid"], types, color=THRESHOLD_COLOR,

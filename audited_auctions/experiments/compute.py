@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ..best_response_ascent import first_order_check
+from ..best_response_ascent import first_order_check, participation_gap
 from ..empirical import bootstrap_welfare
 from ..marginal_contribution import RivalWelfareLoss
 from ..pipeline import (
@@ -56,7 +56,9 @@ from ..threshold_evaluation import (
     exact_outcomes,
     grid_refinement_check,
     penalty_from_table,
+    tau_independent_outcomes,
 )
+from ..symmetric_relaxation import symmetric_relaxation
 from ..threshold_forms import (
     ThresholdForm,
     ex_ante_cutoff,
@@ -119,18 +121,17 @@ def plot_geometry(prepared):
                  distribution.maximum_valuation)
     if e_high <= e_low:
         e_low, e_high = e_low - 0.5, e_high + 0.5
-    # Heavy-tailed valuations (empirical data, heavy_tail family): symmetric logarithmic
-    # valuation axis, linear below the median valuation.
+    # Heavy-tailed valuations (empirical data, heavy_tail family): single-panel type plots
+    # use a logarithmic valuation axis from the v_tail quantile of the valuations.
     heavy_tailed = prepared.is_empirical or prepared.settings.get("family") == "heavy_tail"
-    v_linear_below = (quantile(distribution.valuation_midpoints, 0.5) if heavy_tailed
-                      else 0.0)
+    v_log_lower = max(quantile(distribution.valuation_midpoints, v_tail), 1e-12)
     e_pad, v_pad = 0.04 * (e_high - e_low), 0.04 * (v_high - v_low)
     e_limits = (e_low - e_pad, e_high + e_pad)
-    v_limits = (v_low - (0.05 * v_linear_below if v_linear_below > 0 else v_pad),
-                v_high + v_pad)
+    v_limits = (v_low - v_pad, v_high + v_pad)
     return {"e_limits": np.array(e_limits), "v_limits": np.array(v_limits),
             "e_grid": np.linspace(*e_limits, 400), "v_grid": np.linspace(*v_limits, 240),
-            "v_linear_below": v_linear_below}
+            "v_log": heavy_tailed, "v_log_lower": v_log_lower,
+            "v_linear_upper": quantile(distribution.valuation_midpoints, 0.975)}
 
 
 def type_background(prepared, geometry):
@@ -396,10 +397,8 @@ def _marginal_contribution_map(training, threshold, combination, geometry):
     e_values = np.linspace(*geometry["e_limits"], 120)
     v_low = max(geometry["v_limits"][0], 0.0)
     v_high = min(geometry["v_limits"][1], training.maximum_valuation)
-    linear_below = geometry["v_linear_below"]
-    if linear_below > v_low:  # log-spaced above, matching the symmetric log axis
-        v_values = np.unique(np.concatenate([np.linspace(v_low, linear_below, 60),
-                                             np.geomspace(linear_below, v_high, 120)]))
+    if geometry["v_log"]:  # log-spaced, matching the logarithmic valuation axis
+        v_values = np.geomspace(geometry["v_log_lower"], v_high, 180)
     else:
         v_values = np.linspace(v_low, v_high, 160)
     maps = {"mc_e": e_values, "mc_v": v_values}
@@ -425,13 +424,53 @@ def _ironing(training, threshold, combination):
     return {f"iron_{key}": np.asarray(value) for key, value in curves.items()}, binds
 
 
+def _sufficiency(training, threshold, combination, relaxation_wanted):
+    """Distance of τ from the sufficient condition for VCG-PA (paper v3 Thm
+    [thm:vcg-sufficient]), on the training distribution.
+
+    participation_gap: G(τ) = E[M^- 1{participate} + M^+ 1{abstain}], the largest welfare
+      gain from one bidder changing its participation set (best_response_ascent.
+      participation_gap); share = G / (FB − W_VCG). G = 0 for VCG-PA if and only if τ
+      maximizes VCG-PA welfare over all symmetric participation rules.
+    relaxation: best symmetric participation rule for VCG-PA (symmetric_relaxation), an
+      estimate of an upper bound on VCG-PA welfare over all common τ; share_attained =
+      (W^VCG(τ) − W_VCG) / (relaxation − W_VCG). Piecewise-uniform distributions only.
+    """
+    n, k = combination.num_bidders, combination.num_goods
+    vcg = tau_independent_outcomes(training, "vcg", n, k, welfare_only=True)
+    gain = tau_independent_outcomes(training, "first_best", n, k, welfare_only=True) - vcg
+    out = {}
+    for mechanism in PARTICIPANT_AUDIT_MECHANISMS:
+        try:
+            total, _, wrong_mass = participation_gap(training, threshold, n, k, mechanism)
+        except (ValueError, IndexError):
+            continue
+        out[f"participation_gap_{mechanism}"] = total
+        out[f"participation_gap_share_{mechanism}"] = total / gain if abs(gain) > 1e-15 else None
+        out[f"wrong_sign_mass_{mechanism}"] = wrong_mass
+    if relaxation_wanted and not training.is_atomic and k < n:
+        key = ("symmetric_relaxation", n, k)
+        if key not in training.cache:
+            training.cache[key] = symmetric_relaxation(training, n, k)
+        relaxation = training.cache[key]
+        welfare = exact_outcomes(training, threshold, n, k)["vcg_pa"]["welfare"]
+        out.update({
+            "relaxation_value": relaxation.value,
+            "relaxation_threshold_rule": bool(relaxation.is_threshold_rule),
+            "relaxation_largest_drop": relaxation.largest_drop,
+            "training_welfare_vcg_pa": welfare,
+            "relaxation_share_attained": ((welfare - vcg) / (relaxation.value - vcg)
+                                          if relaxation.value - vcg > 1e-15 else None)})
+    return out
+
+
 def _check(path, name, value, tolerance, verdict, note):
     return {"path": path, "check": name, "value": value, "tolerance": tolerance,
             "verdict": verdict, "note": note}
 
 
 def _checks(combination, config, prepared, threshold, evaluation, first_order, search_summary,
-            sensitivity, refinement, bootstrap_summary):
+            sensitivity, refinement, bootstrap_summary, sufficiency=None):
     path, checks = combination.path, []
     tolerances = config["checks"]
 
@@ -508,6 +547,24 @@ def _checks(combination, config, prepared, threshold, evaluation, first_order, s
                              "W*(τ*)/FB on the training distribution against max{β_{n,k}, "
                              "1 − 1/e} (paper Thm 8.9)" + ("; atomic: no boundary mixing"
                                                           if atomic else "")))
+
+    # Sufficient condition for VCG-PA (paper v3 Thm [thm:vcg-sufficient]): informational.
+    sufficiency = sufficiency or {}
+    share = sufficiency.get("participation_gap_share_vcg_pa")
+    if share is not None:
+        checks.append(_check(path, "sufficient_condition", share, None, "info",
+                             "G(τ)/(FB − W_VCG), G = largest welfare gain from one bidder "
+                             "changing its participation set (M^τ < 0 participants, M^τ > 0 "
+                             "abstainers); 0 iff τ is best among all symmetric participation "
+                             "rules for VCG-PA"))
+    attained = sufficiency.get("relaxation_share_attained")
+    if attained is not None:
+        rule = ("a threshold rule" if sufficiency["relaxation_threshold_rule"]
+                else "not a threshold rule")
+        checks.append(_check(path, "symmetric_relaxation", attained, None, "info",
+                             "(W^VCG(τ) − W_VCG)/(best symmetric rule − W_VCG) on the training "
+                             f"distribution (midpoint estimate of the bound); best symmetric "
+                             f"rule is {rule}"))
 
     if refinement is not None:
         gain_base = refinement.gain_over_vcg_base.drop(index=refinement.index[0])
@@ -597,6 +654,11 @@ def compute_combination(combination, config, run_folder, warm_start=None):
         first_order_error = str(error)
     else:
         first_order_error = None
+    sufficiency = _sufficiency(prepared.training, threshold, combination,
+                               config["checks"]["symmetric_relaxation"])
+    # The relaxation is solved on the training distribution; it bounds the evaluation
+    # welfare only where the two coincide (synthetic data).
+    sufficiency["relaxation_on_evaluation"] = not prepared.is_empirical
     try:
         arrays.update(_marginal_contribution_map(prepared.training, threshold, combination,
                                                  geometry))
@@ -630,7 +692,7 @@ def compute_combination(combination, config, run_folder, warm_start=None):
         sensitivity.drop(columns=["tau_parameters", "threshold_spec"]).to_csv(
             folder / "bandwidth-sensitivity.csv")
     checks = _checks(combination, config, prepared, threshold, evaluation, first_order,
-                     search_summary, sensitivity, refinement, bootstrap_summary)
+                     search_summary, sensitivity, refinement, bootstrap_summary, sufficiency)
     timing["diagnostics"] = time.time() - stage
 
     # Files -------------------------------------------------------------------------
@@ -669,6 +731,7 @@ def compute_combination(combination, config, run_folder, warm_start=None):
             **search_summary, "trace": _trace(search_result),
             "history": _history(search_result)},
         "first_order_error": first_order_error,
+        "sufficiency": sufficiency,
         "checks": checks,
         "seconds": timing,
     }
@@ -702,6 +765,12 @@ def summary_row(results):
         row["training_welfare"] = results["search"]["training_welfare"]
         row["search_seconds"] = results["search"]["seconds"]
     row["ironing_binds"] = results["ironing_binds"]
+    sufficiency = results.get("sufficiency") or {}
+    row.update({key: value for key, value in sufficiency.items()
+                if key in ("participation_gap_share_vcg_pa", "participation_gap_share_ivcg_pa",
+                           "relaxation_share_attained", "relaxation_threshold_rule")})
+    if sufficiency.get("relaxation_on_evaluation") and "relaxation_value" in sufficiency:
+        row["relaxation_value"] = sufficiency["relaxation_value"]
     row["seconds"] = results["seconds"]["total"]
     return row
 

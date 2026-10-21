@@ -195,7 +195,7 @@ Combinations of a method with a form it cannot search are skipped and listed in 
 
 | Key | Default | Meaning |
 |---|---|---|
-| `starts` | `["zero", "zero_welfare", "short_genetic"]` | `zero`: τ ≡ 0; `zero_welfare`: the zero-welfare threshold τ⁰(e) = max(0, −e); `short_genetic`: a short genetic search in the same form |
+| `starts` | `["zero", "zero_welfare", "short_genetic", "relaxation"]` | `zero`: τ ≡ 0; `zero_welfare`: the zero-welfare threshold τ⁰(e) = max(0, −e); `short_genetic`: a short genetic search in the same form; `relaxation`: the thresholds of the best symmetric participation rule for VCG-PA (`symmetric_relaxation.py`; skipped for atomic distributions) |
 | `num_random_starts` | 3 | random starts in addition (τ piecewise linear through 6 externalities, values uniform on [0, 95% quantile of v]); all starts run in parallel |
 | `max_iterations` | 100 | iterations per start |
 | `relative_tolerance` | 1e-10 | stop when relative welfare gains fall below this |
@@ -238,6 +238,7 @@ A τ value at or above v̄ excludes the externality (τ = v̄⁺ in the paper).
 | `bandwidth_sensitivity` | `[]` | empirical, optimize runs: redesign τ with these bandwidth multipliers, e.g. `[0.5, 2.0]` |
 | `first_order_tolerance` | 1e-4 | `nodes` form: pass if max \|M(e, τ(e))\| / v̄ at interior thresholds is below this |
 | `monte_carlo_z` | 4.0 | pass if every simulated mean is within this many standard errors of the exact value |
+| `symmetric_relaxation` | true | piecewise-uniform training data: solve the best symmetric participation rule for VCG-PA (about 5 s per distribution, n, k; cached) and report the share of its gain that τ attains |
 
 ### 3.9 `[seeds]`
 
@@ -316,7 +317,7 @@ Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves
 
 | Link name | File | Panels | Drawn |
 |---|---|---|---|
-| `types` | `1_types-tau-penalties.pdf` | (a) types, τ(e), abstention region, excluded externalities, first-best boundary v = −e, bids pooled by IVCG-PA; (b) penalties r(e) of VCG-PA and IVCG-PA, recipient penalty −e | always |
+| `types` | `1_types-tau-penalties.pdf` | (a) type distribution, τ(e), abstention region, excluded externalities, first-best boundary v = −e (also the recipient penalty −e), penalties r(e) of VCG-PA and IVCG-PA, bids pooled by IVCG-PA, linear valuation axis; (b) the same on a logarithmic valuation axis | always |
 | `outcomes` | `2_expected-outcomes.pdf` | (a) W split into bidder net utility + revenue + penalties + externality welfare, with the share of the first-best gain; (b) change of each component over VCG, with bootstrap intervals | always |
 | `distributions` | `3_outcome-distributions.pdf` | rows W, Σvx, Σex, revenue, penalties; left: per-auction distribution per mechanism; right: paired difference from VCG in the same auction | always |
 | `scatter` | `4_gain-scatter.pdf` | per auction, for VCG-PA and IVCG-PA: captured gain vs achievable gain (first best − VCG); revenue change vs welfare change | always |
@@ -355,6 +356,12 @@ Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves
 | `grid_refinement` | largest relative change of a gain over VCG on a finer grid, τ fixed | pass if < `grid_relative_tolerance` |
 | `bandwidth_sensitivity` | spread of the gain over VCG across bandwidths | pass if ≤ the width of its bootstrap interval |
 | `ex_ante_guarantee` | W*(τ*)/FB for the ex ante cutoff τ* on the training distribution | pass if ≥ max{β_{n,k}, 1 − 1/e} (paper Thm 8.9); info for atomic training data |
+| `sufficient_condition` | G(τ)/(FB − W_VCG) for VCG-PA, G(τ) = E[M^τ⁻ 1{participate} + M^τ⁺ 1{abstain}] = the largest welfare gain from one bidder changing its participation set (any set, rivals fixed) | info; 0 if and only if τ is best among all symmetric participation rules for VCG-PA, and then best among all common τ (paper v3, sufficiency theorem) |
+| `symmetric_relaxation` | (W^VCG(τ) − W_VCG)/(J − W_VCG), J = welfare of the best symmetric participation rule for VCG-PA (an upper bound on VCG-PA welfare over all common τ; midpoint estimate, error of order (interval width)²) | info; near 1 means no common τ does much better; the message says whether the best symmetric rule is a threshold rule |
+
+`results.json` stores these under `sufficiency` (also `wrong_sign_mass_*`, the probability of types whose marginal contribution has the wrong sign, and the gap for IVCG-PA with its scores held fixed, for which no sufficiency theorem holds); `summary.csv` has `participation_gap_share_*`, `relaxation_share_attained`, `relaxation_threshold_rule`, and, for synthetic data (training = evaluation distribution), `relaxation_value`, which `gap-decomposition.csv` reports as `relaxation_vcg` with the gap `relaxation_minus_opt_vcg` to the best VCG-PA welfare found.
+
+**Why IVCG-PA irons in many small bands.** The externality of a piecewise-uniform distribution takes finitely many values (the grid nodes). At the threshold τ(e_j) of node j, all of node j enters at once, so the expected welfare contribution ŵ^τ(v) drops there, and IVCG-PA pools a small band around each threshold: the ironed score is a staircase over the range of valuations where thresholds are. With e independent of v, a continuous externality distribution with nonincreasing mean residual life (e.g. a log-concave density), and steep thresholds (τ(e) + e nonincreasing where τ > 0, as for every τ that meets the sufficient condition, paper v3), ŵ^τ is nondecreasing and nothing is pooled. The staircase is a discretization effect: the number of bands grows with the number of nodes, their total width stays about the same, and the welfare gain of IVCG-PA over VCG-PA it produces shrinks like the squared node spacing (`independent`, n = 8, k = 2, τ(e) = max(0, −2e): 1.7·10⁻⁴, 2.1·10⁻⁵, 2.3·10⁻⁶ at 51, 151, 451 nodes). Gains of IVCG-PA that do not shrink under `grid_refinement` come from the distribution, not the grid.
 
 ### 4.5 Reusing results
 
