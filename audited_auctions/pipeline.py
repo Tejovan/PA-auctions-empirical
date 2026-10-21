@@ -182,7 +182,7 @@ def _genetic_restart(options):
 
 def optimize_threshold(training, threshold_form, num_bidders, num_goods,
                        objective_mechanism="vcg_pa", optimizer="auto", ga_options=None,
-                       ga_seed=None, num_restarts=1, initial_solution=None, genetic_form=None,
+                       ga_seed=0, num_restarts=1, initial_solution=None, genetic_form=None,
                        best_response_options=None, warm_starts=(), verbose=True,
                        time_limit=None, workers=1):
     """Search for τ in threshold_form on the training distribution.

@@ -518,18 +518,22 @@ def _checks(combination, config, prepared, threshold, evaluation, first_order, s
     if first_order is not None:
         mechanisms = ([combination.objective] if combination.objective
                       else list(PARTICIPANT_AUDIT_MECHANISMS))
-        rows = first_order[first_order.mechanism.isin(mechanisms)
-                           & (first_order.status == "interior") & (first_order.mass > 0)]
-        scale = max(float(prepared.training.maximum_valuation), 1e-12)
-        worst = float(rows.marginal_contribution.abs().max() / scale) if len(rows) else 0.0
+        rows = first_order[first_order.mechanism.isin(mechanisms)]
+        worst = float(rows.first_order_violation.max()) if len(rows) else 0.0
         restricted = combination.threshold_form not in ("nodes",)
-        verdict = ("info" if restricted or combination.objective is None
+        atomic = prepared.training.is_atomic
+        verdict = ("info" if restricted or atomic or combination.objective is None
                    else "pass" if worst < tolerances["first_order_tolerance"] else "fail")
-        note = ("max |M^τ(e, τ(e))| / v̄ at interior thresholds; zero at a per-node optimum "
-                "(paper: zero marginal contribution at interior optimal thresholds)")
-        if verdict == "info":
+        note = ("max over nodes of the first-order violation / v̄: |M^τ(e, τ(e))| at interior "
+                "thresholds, M < 0 at τ = 0, M > 0 at exclusion; zero at a per-node optimum "
+                "(paper: zero marginal contribution at interior optimal thresholds); nodes "
+                "where moving τ(e) cannot change W (no valuation density on the improving "
+                "side, or negligible mass) are not counted")
+        if restricted or combination.objective is None:
             note += ("; restricted form or given τ: measures the distance from the "
                      "per-node optimum")
+        if atomic:
+            note += "; atomic training data: no density, nothing is checked"
         checks.append(_check(path, "first_order", worst, tolerances["first_order_tolerance"],
                              verdict, note))
 

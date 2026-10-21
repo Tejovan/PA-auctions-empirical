@@ -209,7 +209,7 @@ def _best_distinct(population, fitness, count):
 def run_genetic_search(type_distribution, polynomial_degree, num_bidders, num_goods,
                        objective_mechanism="vcg_pa", num_generations=500, sol_per_pop=50,
                        num_parents_mating=15, mutation_probability=0.25,
-                       mutation_sigma_fraction=0.15, range_multiplier=3.0, seed=None,
+                       mutation_sigma_fraction=0.15, range_multiplier=3.0, seed=0,
                        initial_solution=None, local_refinement="nelder_mead",
                        stall_generations=DEFAULT_STALL_GENERATIONS,
                        stall_tolerance=DEFAULT_STALL_TOLERANCE,

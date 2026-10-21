@@ -272,7 +272,7 @@ A τ value at or above v̄ excludes the externality (τ = v̄⁺ in the paper).
 | `refinement_factor` | 2 | refinement of both grids |
 | `grid_relative_tolerance` | 0.01 | pass if every gain over VCG changes by less than this share |
 | `bandwidth_sensitivity` | `[]` | empirical, optimize runs: redesign τ with these bandwidth multipliers, e.g. `[0.5, 2.0]` |
-| `first_order_tolerance` | 1e-4 | `nodes` form: pass if max \|M(e, τ(e))\| / v̄ at interior thresholds is below this |
+| `first_order_tolerance` | 1e-4 | `nodes` form: pass if the largest first-order violation / v̄ (\|M(e, τ(e))\| at interior thresholds; [check `first_order`](#44-checks)) is below this |
 | `monte_carlo_z` | 4.0 | pass if every simulated mean is within this many standard errors of the exact value |
 | `symmetric_relaxation` | true | piecewise-uniform training data: solve the best symmetric participation rule for VCG-PA (about 5 s per distribution, n, k; cached; shared with the `relaxation` method) and report the share of its gain that τ attains on the training grid |
 
@@ -340,7 +340,7 @@ Mechanisms: VCG, VCG-PA, IVCG-PA, first best. Metrics: welfare W, valuation welf
 | `gap-decomposition.csv` | per distribution, ζ, market and class T of thresholds: FB − OPT, OPT − OPT^VCG, OPT^VCG − OPT^VCG_T, also as shares of the first-best gain (paper §10). OPT and OPT^VCG are the best values found in the run, so they are lower bounds; include the `nodes` form for OPT^VCG close to the supremum. With the relaxation: `relaxation_vcg`, `relaxation_minus_opt_vcg` and `relaxation_basis` ([§4.4](#44-checks)) |
 | `tau.json` | τ of the combination; reusable in evaluate runs (`tau_file`, `from_run`) |
 | `tau.csv` | per externality node: mass, τ, excluded flag, penalty for VCG-PA and IVCG-PA |
-| `first-order.csv` | per node and mechanism: threshold status, allocation, penalty, own-allocation charge, displaced term, marginal contribution M, best-response gap, Pigouvian charge |
+| `first-order.csv` | per node and mechanism: threshold status, allocation, penalty, own-allocation charge, displaced term, marginal contribution M, best-response gap, first-order violation, Pigouvian charge |
 | `results.json` | every statistic of the combination: settings (`distribution_settings.continuous`), exact outcomes, changes over VCG, shares, bootstrap intervals, search record (with `relaxation` for the relaxation method), sufficiency measures, checks, timings |
 | `data.npz` | arrays behind the figures: simulated and bootstrap draws, ironing intervals, allocation curves, τ and penalty grids, tried τ curves |
 | `types.npz` | grids, density and nodes of the type distribution |
@@ -386,7 +386,7 @@ Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves
 | Check | Value | Verdict |
 |---|---|---|
 | `monte_carlo_vs_exact` | largest \|z\| of a simulated mean against the exact value (welfare, revenue, four mechanisms) | pass if < `monte_carlo_z` |
-| `first_order` | max \|M(e, τ(e))\| / v̄ at interior thresholds, on the training grid (the search's distribution) | pass if < `first_order_tolerance` for `nodes`; info for restricted forms and given τ |
+| `first_order` | largest first-order violation / v̄ on the training grid (the search's distribution): \|M(e, τ(e))\| at interior thresholds, M < 0 at τ = 0, M > 0 at exclusion; only nodes where moving τ(e) changes W ([details](audited_auctions/README.md#first-order-check)) | pass if < `first_order_tolerance` for `nodes`; info for restricted forms, given τ and atomic training data |
 | `search_starts_spread` | welfare spread of the final points of the starts, in units of FB − W_VCG (training) | info; large means local optima (the best start is kept) |
 | `search_stop` | number of search stages stopped by the time limit or an iteration cap | pass if all converged; info if an iteration cap was hit; fail if the time limit was hit |
 | `grid_refinement` | largest relative change of a gain over VCG on a finer grid, τ fixed | pass if < `grid_relative_tolerance` |

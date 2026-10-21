@@ -79,11 +79,13 @@ Per-iteration diagnostics (history of each start), at the current τ:
                     rate of change of W if every parameter moves by v̄ in its
                     ascent direction, in units of scale (the first-best gain
                     FB − W_VCG when given, else |W|). Zero at a stationary point.
-  max_marginal      largest violation, / v̄, over nodes with positive mass, of the
-                    first-order conditions of an optimal common τ: |M^τ(e, τ(e))| at
+  max_marginal      largest violation, / v̄, of the first-order conditions of an
+                    optimal common τ (first_order_violation): |M^τ(e, τ(e))| at
                     interior thresholds (zero marginal contribution, Prop. 7.9
                     [prop:zero-marginal-equal]), max(0, −M(e, 0)) at τ(e) = 0 and
-                    max(0, M(e, v̄)) at exclusion.
+                    max(0, M(e, v̄)) at exclusion, counted only at nodes where moving
+                    τ(e) in the improving direction changes W: the joint density of
+                    (e, v) on that side of τ(e) times |M| is above NEGLIGIBLE_SLOPE.
   gap               best-response gap Σ_e max_t g_e(t) − Σ_e g_e(τ(e)), in units of
                     scale: the gain one bidder could get by deviating alone.
 Not zero at an optimum in general: a common optimum need not be a best response.
@@ -107,6 +109,11 @@ from .threshold_functions import constant_threshold, tabulated_threshold
 from .threshold_forms import BEST_RESPONSE_FORMS, build_threshold_form, externality_nodes
 
 DEFAULT_STARTS = ("zero", "zero_welfare", "short_genetic", "relaxation")
+# A node's first-order condition is checked only where one bidder's welfare slope in its
+# threshold, mass × density of v given e at τ(e) (improving side) × |M|, exceeds this
+# (dimensionless: unchanged when e and v are rescaled). Below it, τ(e) cannot change W
+# measurably: in a gap of the valuation support, or at a node of negligible mass.
+NEGLIGIBLE_SLOPE = 1e-12
 DEFAULT_RANDOM_STARTS = 3
 DEFAULT_POLISH_ROUNDS = 3
 STEP_SIZES = tuple(0.5 ** m for m in range(7))
@@ -442,23 +449,49 @@ def _past(deadline):
     return deadline is not None and time.time() >= deadline
 
 
+def first_order_violation(type_distribution, values, marginal):
+    """Per externality node: violation of the first-order conditions of an optimal common
+    τ, / v̄ (see max_marginal in the module docstring); 0 where not checked.
+
+    values: τ at the nodes (raw: <= 0 is τ = 0, >= v̄ is exclusion); marginal:
+    M^τ(e, τ(e)) at the clipped thresholds. Atomic distributions have no density, so
+    nothing is checked (W is a step function of τ).
+    """
+    nodes, _, node_of_cell = externality_nodes(type_distribution)
+    maximum = float(type_distribution.maximum_valuation)
+    values = np.asarray(values, dtype=float)
+    marginal = np.asarray(marginal, dtype=float)
+    violation = np.where(values <= 0, np.maximum(-marginal, 0.0),
+                         np.where(values >= maximum, np.maximum(marginal, 0.0),
+                                  np.abs(marginal)))
+    if type_distribution.is_atomic:
+        return np.zeros(len(nodes))
+    lower, upper = type_distribution.valuation_lower, type_distribution.valuation_upper
+    density = type_distribution.probabilities / (upper - lower)
+    t = np.clip(values, 0.0, maximum)[node_of_cell]
+    above = np.bincount(node_of_cell, weights=density * ((lower <= t) & (t < upper)),
+                        minlength=len(nodes))
+    below = np.bincount(node_of_cell, weights=density * ((lower < t) & (t <= upper)),
+                        minlength=len(nodes))
+    # Improving direction: lower τ if M > 0 (types just below τ add welfare), else raise it.
+    side = np.where(marginal > 0, below, above)
+    checked = np.isfinite(violation) & (side * violation > NEGLIGIBLE_SLOPE)
+    return np.where(checked, violation, 0.0) / maximum
+
+
 def first_order_measures(type_distribution, form, parameters, num_bidders, functions, welfare,
                          scale=None):
     """(stationarity, max_marginal) of τ = form.threshold(parameters); see the module
     docstring. functions: valuation_functions of the objective model at this τ.
     Stationarity is None for atomic distributions (W is a step function of τ)."""
-    nodes, masses, node_of_cell = externality_nodes(type_distribution)
+    nodes, _, node_of_cell = externality_nodes(type_distribution)
     maximum = float(type_distribution.maximum_valuation)
     values = form.finite_values(parameters, nodes)
     clipped = np.clip(values, 0.0, maximum)
     allocation, loss = functions.rival_welfare_loss(clipped)
     marginal = (clipped + nodes) * allocation - loss
-    # Violation of the first-order conditions: |M| at interior thresholds; at τ = 0,
-    # M(e, 0) < 0 (raising τ helps); at exclusion, M(e, v̄) > 0 (admitting types helps).
-    violation = np.where(values <= 0, np.maximum(-marginal, 0.0),
-                         np.where(values >= maximum, np.maximum(marginal, 0.0), np.abs(marginal)))
-    violation = violation[(masses > 0) & np.isfinite(violation)]
-    max_marginal = float(np.max(violation) / maximum) if len(violation) else 0.0
+    max_marginal = float(np.max(first_order_violation(type_distribution, values, marginal),
+                                initial=0.0))
     if type_distribution.is_atomic:
         return None, max_marginal
     payoffs = ParticipationPayoffs(type_distribution, functions, node_of_cell, len(nodes))
@@ -702,7 +735,7 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
                              objective_mechanism="vcg_pa", starts=DEFAULT_STARTS,
                              warm_starts=(), max_iterations=100, relative_tolerance=1e-10,
                              short_genetic_generations=40, polish_rounds=DEFAULT_POLISH_ROUNDS,
-                             num_random_starts=DEFAULT_RANDOM_STARTS, seed=None, verbose=True,
+                             num_random_starts=DEFAULT_RANDOM_STARTS, seed=0, verbose=True,
                              deadline=None, scale=None, workers=1):
     """Maximize the exact welfare of objective_mechanism over τ in threshold_form.
 
@@ -767,7 +800,8 @@ def first_order_check(type_distribution, threshold_function, num_bidders, num_go
     R(τ(e)), own-allocation charge −e X^τ(τ), displaced term L^τ(τ) − p(τ)
     (rival welfare loss minus the critical-value payment; the displaced
     externality Δ^τ in VCG-PA), marginal contribution M^τ(e, τ(e)) = r − (−e X^τ +
-    displaced), and the best-response gap max_t g_e(t) − g_e(τ(e)).
+    displaced), the best-response gap max_t g_e(t) − g_e(τ(e)), and first_order_violation
+    (/ v̄; 0 where moving τ(e) cannot change W, see first_order_violation).
 
     At an optimal common τ, interior thresholds where the density of v given e
     is positive have zero marginal contribution (paper Prop. 7.9 [prop:zero-marginal-equal];
@@ -796,6 +830,7 @@ def first_order_check(type_distribution, threshold_function, num_bidders, num_go
         "displaced_term": loss - payment,
         "marginal_contribution": np.where(raw >= maximum, np.nan, marginal),
         "best_response_gap": np.maximum(best_value - current, 0.0),
+        "first_order_violation": first_order_violation(type_distribution, raw, marginal),
     })
 
 

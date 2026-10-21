@@ -352,7 +352,7 @@ def evaluate_threshold(
     num_bidders,
     num_goods,
     num_simulated_draws=0,
-    random_seed=None,
+    random_seed=0,
     simulation_draws=None,
     externality_grid=None,
     ivcg_scoring_rule=None,
