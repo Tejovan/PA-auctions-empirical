@@ -647,10 +647,10 @@ def harm_rises_distribution(correlation=-0.6, means=(-0.3, 1.0), standard_deviat
 
 def harmful_middle_distribution(valuation_mean=1.0, valuation_sd=0.45, externality_mean=-0.3,
                                 slope=-0.9, externality_sd=0.4, wiggle_amplitude=0.5,
-                                wiggle_width=0.15, wiggle_center=1.0, num_externality_nodes=151,
-                                num_valuation_cells=150):
+                                wiggle_width=0.22, wiggle_center=1.0, wiggle_spread=0.25,
+                                num_externality_nodes=151, num_valuation_cells=150):
     """v ~ N(valuation_mean, valuation_sd²) truncated to v ∈ [0, v̄];
-    given v, e ~ N(m(v), externality_sd²).
+    given v, e ~ N(m(v), s(v)²).
 
     The conditional mean m(v) = externality_mean + slope (v − valuation_mean)
     − wiggle_amplitude x exp((1 − x²)/2), x = (v − wiggle_center)/wiggle_width, falls
@@ -659,31 +659,36 @@ def harmful_middle_distribution(valuation_mean=1.0, valuation_sd=0.45, externali
     below it at v = wiggle_center + wiggle_width. Between the two, m(v) falls with
     slope slope − e^{1/2} wiggle_amplitude / wiggle_width, so the expected welfare
     contribution v + E[e | v] decreases there and IVCG-PA irons (a continuous
-    analogue of Example T, Ex. 6.4 [ex:T-pool]).
+    analogue of Example T, Ex. 6.4 [ex:T-pool]). The conditional standard deviation
+    s(v) = externality_sd + wiggle_spread exp(−x²/2) widens the ridge at the wiggle.
     """
     def conditional_mean(v):
         x = (v - wiggle_center) / wiggle_width
         return (externality_mean + slope * (v - valuation_mean)
                 - wiggle_amplitude * x * np.exp(0.5 - 0.5 * x * x))
 
+    def conditional_sd(v):
+        x = (v - wiggle_center) / wiggle_width
+        return externality_sd + wiggle_spread * np.exp(-0.5 * x * x)
+
     def density(e, v):
         return (_normal_pdf(v, valuation_mean, valuation_sd)
-                * _normal_pdf(e, conditional_mean(v), externality_sd))
+                * _normal_pdf(e, conditional_mean(v), conditional_sd(v)))
 
     valuation_edges = np.linspace(max(0.0, valuation_mean - 5 * valuation_sd),
                                   valuation_mean + 5 * valuation_sd, num_valuation_cells + 1)
-    means = conditional_mean(np.linspace(valuation_edges[0], valuation_edges[-1], 1001))
+    valuations = np.linspace(valuation_edges[0], valuation_edges[-1], 1001)
+    means, sds = conditional_mean(valuations), conditional_sd(valuations)
     return gridded_density_distribution(
         density,
-        np.linspace(means.min() - 5 * externality_sd, means.max() + 5 * externality_sd,
-                    num_externality_nodes),
+        np.linspace((means - 5 * sds).min(), (means + 5 * sds).max(), num_externality_nodes),
         valuation_edges,
         name="M harm rises with a wiggle in the middle",
         metadata={"family": "harmful_middle", "valuation_mean": valuation_mean,
                   "valuation_sd": valuation_sd, "externality_mean": externality_mean,
                   "slope": slope, "externality_sd": externality_sd,
                   "wiggle_amplitude": wiggle_amplitude, "wiggle_width": wiggle_width,
-                  "wiggle_center": wiggle_center},
+                  "wiggle_center": wiggle_center, "wiggle_spread": wiggle_spread},
     )
 
 
