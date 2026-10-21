@@ -647,7 +647,7 @@ def harm_rises_distribution(correlation=-0.6, means=(-0.3, 1.0), standard_deviat
 
 def harmful_middle_distribution(valuation_mean=1.0, valuation_sd=0.45, externality_mean=-0.3,
                                 slope=-0.9, externality_sd=0.4, wiggle_amplitude=0.5,
-                                wiggle_width=0.22, wiggle_center=1.0, wiggle_spread=0.25,
+                                wiggle_width=0.26, wiggle_center=1.0, wiggle_spread=0.38,
                                 num_externality_nodes=151, num_valuation_cells=150):
     """v ~ N(valuation_mean, valuation_sd²) truncated to v ∈ [0, v̄];
     given v, e ~ N(m(v), s(v)²).

@@ -18,7 +18,7 @@ Further documentation:
 
 1. [Quick start](#1-quick-start)
 2. [Command line: `run.py`](#2-command-line-runpy)
-3. [Configuration files](#3-configuration-files)
+3. [Configuration files](#3-configuration-files): [top level](#31-top-level) · [`[[distributions]]`](#32-distributions) ([family options](#family-options)) · [`[markets]`](#33-markets) · [`[design]`](#34-design) · [`[[optimizers]]`](#35-optimizers) · [`[[thresholds]]`](#36-thresholds) · [`[evaluation]`](#37-evaluation) · [`[checks]`](#38-checks) · [`[seeds]`](#39-seeds) · [`[output]`](#310-output)
 4. [Outputs of a run](#4-outputs-of-a-run)
 5. [Running on the BU SCC](#5-running-on-the-bu-scc)
 6. [Distributions and data](#6-distributions-and-data)
@@ -123,16 +123,18 @@ Unknown keys are an error. Example files in [configs/](configs/):
 | `name` | text | part of the run folder name `<date>_<time>_<kind>_<name>` |
 | `description` | text | shown in the run's README |
 
-### 3.2 `[[distributions]]` (one table per distribution; at least one)
+### 3.2 `[[distributions]]`
+
+One table per distribution; at least one.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `source` | required | a synthetic family (`a`–`f`, `h`, `example_n`, `independent`, `harm_rises`, `harmful_middle`, `heavy_tail`), the data set `tweets`, or a path to a CSV file with columns `e_score`, `v_score` |
+| `source` | required | a synthetic family (`a`–`f`, `h`, `example_n`, `independent`, `harm_rises`, `harmful_middle`, `heavy_tail`; [definitions](#family-options)), the data set `tweets`, or a path to a CSV file with columns `e_score`, `v_score` |
 | `label` | source name | folder name of the distribution |
 | `externality_scales` | `[1.0]` | externality scales ζ (e = ζ · e_score); one sub-folder `z<ζ>` each |
 | `num_externality_nodes` | 151 (synthetic), 241 (empirical) | externality grid of the piecewise-uniform distribution |
 | `num_valuation_cells` | 150 (synthetic), 400 (empirical) | valuation cells per externality node |
-| `options` | `{}` | synthetic only: family parameters, e.g. `options = {correlation = -0.4}` for `harm_rises` ([audited_auctions/README.md](audited_auctions/README.md#synthetic-families)) |
+| `options` | `{}` | synthetic only: family parameters, e.g. `options = {correlation = -0.4}` for `harm_rises`; every family's options: [table below](#family-options) |
 | `valuation_scale` | 1.0 | empirical: valuation of one action (v = valuation_scale · v_score) |
 | `truncation_quantile` | 0.995 | empirical: training rows with v above this quantile of all rows are dropped; the quantile is the valuation bound v̄ |
 | `evaluation_truncation_quantile` | `truncation_quantile` | empirical: the same for the test rows (1.0 keeps every row) |
@@ -141,6 +143,17 @@ Unknown keys are an error. Example files in [configs/](configs/):
 | `bandwidth_scale` | 1.0 | empirical: multiplier of the kernel bandwidth |
 | `evaluation` | `"atomic"` | empirical: test half as atoms (`"atomic"`) or smoothed like the training half (`"smoothed"`) |
 
+<a id="family-options"></a>**Family options** (`options = {...}`; unknown names are an error; `python run.py --options` lists them). Every family is truncated to v ≥ 0 and gridded with `num_externality_nodes` × `num_valuation_cells`. Previews: [§6](#6-distributions-and-data).
+
+| Family | Distribution | Options (default) |
+|---|---|---|
+| `a`–`f`, `h` | equal-weight mixtures of bivariate normals at (e, v) = `a` (0, 1); `b` (−1, 1), (0, 1); `c` (−1, 1), (0, 2); `d` (−1, 2), (0, 1); `e` (0, 2), (0, 1); `f` the four of `b`–`e`; `h` (0, 2); variances 0.1 (`a`, `h`) or 0.05, independent coordinates; cut at ±5 sd | none |
+| `example_n` | v ~ U[0, 1]; e ∈ {−c, 0} with probability ½ each, independent of v (paper Ex. 7.11) | `harm` c (0.6) |
+| `independent` | v ~ U[0, 1] independent of e ~ N(μ, σ²) | `externality_mean` μ (−0.3), `externality_sd` σ (0.5) |
+| `harm_rises` | (e, v) bivariate normal | `means` [e, v] ([−0.3, 1.0]), `standard_deviations` [e, v] ([0.5, 0.4]), `correlation` (−0.6) |
+| `harmful_middle` | v ~ N(μ_v, σ_v²); given v, e ~ N(m(v), s(v)²) with m(v) = μ_e + b (v − μ_v) − A x e^{(1 − x²)/2}, s(v) = σ_e + S e^{−x²/2}, x = (v − c)/W. The ridge m(v) falls with slope b, is A above that line at v = c − W and A below it at v = c + W; S widens the ridge there ([previews](#harmful-middle-options)) | `valuation_mean` μ_v (1.0), `valuation_sd` σ_v (0.45), `externality_mean` μ_e (−0.3), `slope` b (−0.9), `externality_sd` σ_e (0.4), `wiggle_amplitude` A (0.5), `wiggle_width` W (0.26), `wiggle_center` c (1.0), `wiggle_spread` S (0.38) |
+| `heavy_tail` | log v ~ N(0, s²), truncated at its q quantile; given v, e ~ N(−a √v, σ²) | `log_valuation_sd` s (1.0), `truncation_quantile` q (0.995), `harm_slope` a (0.5), `externality_sd` σ (0.4) |
+
 ### 3.3 `[markets]`
 
 | Key | Default | Meaning |
@@ -148,19 +161,21 @@ Unknown keys are an error. Example files in [configs/](configs/):
 | `num_bidders` | `[8]` | numbers of bidders n |
 | `num_goods` | `[1]` | numbers of identical goods k |
 
-### 3.4 `[design]` (optimize runs)
+### 3.4 `[design]`
+
+Optimize runs only.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `objectives` | `["vcg_pa"]` | auction whose exact expected welfare τ maximizes: `vcg_pa`, `ivcg_pa` |
 
-The forms of τ are set per optimizer (`threshold_forms` in `[[optimizers]]`, §3.5). A `threshold_forms` key in `[design]` is an error.
+The forms of τ are set per optimizer (`threshold_forms` in [`[[optimizers]]`](#35-optimizers)). A `threshold_forms` key in `[design]` is an error.
 
-### 3.5 `[[optimizers]]` (optimize runs; default: one best-response optimizer)
+### 3.5 `[[optimizers]]`
 
-Each table is one optimizer with its own forms of τ; the run computes every objective × optimizer × form of that optimizer.
+Optimize runs only; default: one best-response optimizer. Each table is one optimizer with its own forms of τ; the run computes every objective × optimizer × form of that optimizer. Keys: [every method](#every-method), [genetic search](#genetic-search), [best-response ascent](#best-response-ascent), [symmetric relaxation](#symmetric-relaxation).
 
-**Every method:**
+<a id="every-method"></a>**Every method:**
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -189,7 +204,7 @@ method = "best_response"
 threshold_forms = ["nodes"]
 ```
 
-**Genetic search** (`genetic`, and the genetic stage of `genetic+best_response`):
+<a id="genetic-search"></a>**Genetic search** (`genetic`, and the genetic stage of `genetic+best_response`):
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -205,7 +220,7 @@ threshold_forms = ["nodes"]
 | `num_local_starts` | 5 | Nelder–Mead starts |
 | `local_max_evaluations` | 2000 | evaluations per Nelder–Mead start |
 
-**Best-response ascent** (`best_response`, `genetic+best_response`):
+<a id="best-response-ascent"></a>**Best-response ascent** (`best_response`, `genetic+best_response`):
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -218,11 +233,15 @@ threshold_forms = ["nodes"]
 | `genetic_form` | same form, or `knots6` for `nodes` | `genetic+best_response` only: form of the genetic stage |
 | `warm_start_across_zeta` | false | also start from the optimum at the previous ζ, rescaled: τ(e) = τ_prev(e ζ_prev / ζ); the ζ values of a distribution then run in sequence |
 
-**Symmetric relaxation** (`relaxation`). A linear program (`symmetric_relaxation.py`, about 5 s per distribution, n, k) finds the best symmetric participation rule for VCG-PA: each type participates with some probability, the same for all bidders. Its value bounds the VCG-PA welfare of every common τ from above (a midpoint estimate, error of order (interval width)²). τ is read off it (each node's threshold is the first valuation at which at least half of the node participates), projected on the form, and improved by best-response ascent from that single start, with the best-response keys above (`starts` and `num_random_starts` are ignored). `results.json` records the linear program under `search.relaxation`: `value`, `threshold_rule` (whether the best symmetric rule is a threshold rule; then the τ read off it is a best common τ for VCG-PA, up to the discretization, paper v3), `largest_drop`, `seconds`. The same τ is also one of the default `starts` of `best_response`, where the best start is kept; the separate method shows what the relaxation gives alone. With the objective `ivcg_pa` it is a start only (the relaxation is for VCG-PA). Needs k < n and a piecewise-uniform training distribution; other combinations are skipped and listed in the plan.
+<a id="symmetric-relaxation"></a>**Symmetric relaxation** (`relaxation`). A linear program (`symmetric_relaxation.py`, about 5 s per distribution, n, k) finds the best symmetric participation rule for VCG-PA: each type participates with some probability, the same for all bidders. Its value J bounds the VCG-PA welfare of every common τ from above (midpoint estimate, error of order (interval width)²). The method reads τ off it (each node's threshold is the first valuation at which at least half of the node participates), projects it on the form, and runs best-response ascent from that single start with the [best-response keys](#best-response-ascent) (`starts` and `num_random_starts` are ignored).
 
-### 3.6 `[[thresholds]]` (evaluate runs; at least one)
+- **Record:** `results.json` → `search.relaxation`: `value` (J), `threshold_rule` (true: the best symmetric rule is a threshold rule, and the τ read off it is a best common τ for VCG-PA up to the discretization, paper v3), `largest_drop`, `seconds`.
+- **As a start:** the same τ is a default `starts` entry of `best_response`, where the best start is kept; the separate method shows what the relaxation gives alone.
+- **Scope:** with the objective `ivcg_pa` it is a start only. Needs k < n and a piecewise-uniform training distribution; other combinations are skipped and listed in the plan.
 
-Each table has a `label` (folder name `tau-<label>`) and exactly one source:
+### 3.6 `[[thresholds]]`
+
+Evaluate runs only; at least one. Each table has a `label` (folder name `tau-<label>`) and exactly one source:
 
 | Key | Example | τ(e) |
 |---|---|---|
@@ -378,7 +397,7 @@ Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves
 
 `results.json` stores these under `sufficiency` (also `wrong_sign_mass_*`, the probability of types whose marginal contribution has the wrong sign, and the gap for IVCG-PA with its scores held fixed, for which no sufficiency theorem holds). `summary.csv` has `participation_gap_share_*`, `relaxation_share_attained`, `relaxation_threshold_rule`, `relaxation_value_training` (J) and `training_welfare_vcg_pa` (W^VCG(τ) on the training grid). `gap-decomposition.csv` reports J as `relaxation_vcg` and its gap `relaxation_minus_opt_vcg` to the best VCG-PA welfare found. `relaxation_basis` says where both are measured: `evaluation` when the evaluation distribution is the training grid itself (synthetic data, `continuous = false`), else `training grid` (J and the best training welfare; J is then not comparable with the evaluation welfare in the other columns).
 
-**Ironing bands of the grid.** On a gridded distribution, the externality takes the node values and the valuation density jumps at cell edges. At the threshold τ(e_j) of node j, all of node j enters at once, and at every cell edge where the mix of externalities changes, E[e | v] jumps; the expected welfare contribution ŵ^τ(v) drops at these points, and IVCG-PA pools a small band around each: the ironed score is a staircase. These bands are a discretization effect: their number grows with the grid, their total width stays about the same, and the welfare gain of IVCG-PA over VCG-PA they produce shrinks like the squared spacing (`independent`, n = 8, k = 2, τ(e) = max(0, −2e): 1.7·10⁻⁴, 2.1·10⁻⁵, 2.3·10⁻⁶ at 51, 151, 451 nodes; `harm_rises`, 81 nodes, cutoff τ: 7.8·10⁻⁵, 1.2·10⁻⁶ at 50, 400 valuation cells). The continuous evaluation (default, [§6](#continuous-evaluation)) removes them: ŵ^τ is then continuous, and IVCG-PA irons only where ŵ^τ decreases. With e independent of v, an externality density with nonincreasing mean residual life (e.g. log-concave) and steep thresholds (τ(e) + e nonincreasing where τ > 0, as for every τ that meets the sufficient condition, paper v3), ŵ^τ is nondecreasing and nothing is pooled (`independent`, `harm_rises`, `heavy_tail` with a welfare cutoff τ, n = 4, k = 1, 21–161 nodes: IVCG-PA − VCG-PA at most 3·10⁻⁷ on the continuous version, up to 1.2·10⁻³ on the grid). In `harmful_middle`, E[e | v] falls faster than v rises at the wiggle, so ŵ^τ decreases there and the ironing is not a grid effect (n = 4, k = 1, welfare cutoffs w ∈ {0, 0.4}, 41 and 81 nodes: IVCG-PA − VCG-PA = 0.08–0.12 on the grid and on the continuous version).
+**Ironing on the grid.** On a gridded distribution (`continuous = false`), IVCG-PA irons in many small bands, at node thresholds and cell edges; they are a discretization effect, and their welfare effect shrinks like the squared spacing. On the continuous version (the default), IVCG-PA irons only where ŵ^τ decreases, as at the wiggle of `harmful_middle`. Mechanism and measurements: [audited_auctions/README.md](audited_auctions/README.md#grid-ironing-bands).
 
 ### 4.5 Reusing results
 
@@ -479,9 +498,13 @@ Login nodes are for light work only (e.g. the smoke test, `--report`); submit ev
 | ![h](docs/distributions/h.webp)<br>`h`: one normal at (e, v) = (0, 2) | ![example_n](docs/distributions/example_n.webp)<br>`example_n`: Example N: e ∈ {−0.6, 0}, v ~ U[0, 1] | ![independent](docs/distributions/independent.webp)<br>`independent`: v ~ U[0, 1] independent of e ~ N(−0.3, 0.5²) |
 | ![harm_rises](docs/distributions/harm_rises.webp)<br>`harm_rises`: one normal, correlation −0.6 | ![harmful_middle](docs/distributions/harmful_middle.webp)<br>`harmful_middle`: steep ridge with a wiggle at v = 1; ironing binds | ![heavy_tail](docs/distributions/heavy_tail.webp)<br>`heavy_tail`: lognormal v (log axis), harm grows with v |
 
+<a id="harmful-middle-options"></a>**`harmful_middle` options** ([definitions](#family-options)). Rows 1–3: `wiggle_width` × `wiggle_spread`; row 4: `wiggle_amplitude`; other options at their defaults.
+
+![harmful_middle options](docs/distributions/harmful_middle_options.webp)
+
 [draw_distributions.py](draw_distributions.py) redraws these previews into [docs/distributions/](docs/distributions/) (about 2 s).
 
-Every family is a piecewise-uniform distribution on a grid: externalities on nodes, valuations uniform within cells. All quantities are exact for that distribution. Parameters and grid accuracy: [audited_auctions/README.md](audited_auctions/README.md#synthetic-families).
+Every family is a piecewise-uniform distribution on a grid: externalities on nodes, valuations uniform within cells. All quantities are exact for that distribution. Definitions and options: [§3.2](#family-options); grid accuracy: [audited_auctions/README.md](audited_auctions/README.md#synthetic-families).
 
 <a id="continuous-evaluation"></a>**Continuous evaluation** (`[evaluation] continuous = true`, the default). The grid has jumps a continuous density does not have: each externality node is a point mass in e, and the valuation density jumps at cell edges. Under a continuous τ, a whole node enters at its threshold, which makes IVCG-PA iron in many small bands ([§4.4](#44-checks)). The run therefore uses two versions of each gridded distribution:
 

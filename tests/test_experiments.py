@@ -42,6 +42,9 @@ def test_configuration_errors_name_the_problem():
         resolve_config(optimize_config(optimizers=[{"method": "annealing"}]))
     with pytest.raises(ConfigError, match="neither a synthetic family"):
         resolve_config(optimize_config(distributions=[{"source": "no_such_family"}]))
+    with pytest.raises(ConfigError, match="unknown options"):
+        resolve_config(optimize_config(distributions=[{"source": "harmful_middle",
+                                                       "options": {"wiggle": 0.3}}]))
     with pytest.raises(ConfigError, match="thresholds"):
         resolve_config({"kind": "evaluate", "distributions": [{"source": "harmful_middle"}]})
     with pytest.raises(ConfigError, match="cannot search form 'poly1'"):

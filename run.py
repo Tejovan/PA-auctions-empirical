@@ -36,13 +36,14 @@ def list_options():
         SECTION_DEFAULTS,
         SYNTHETIC_DEFAULTS,
         THRESHOLD_SOURCES,
+        family_options,
     )
     from audited_auctions.type_distributions import SYNTHETIC_FAMILIES
 
     print("Synthetic families:", ", ".join(sorted(SYNTHETIC_FAMILIES)))
     print("Data sets:", ", ".join(f"{name} = {path}" for name, path in DATA_SETS.items()),
           "(or any CSV with columns e_score, v_score)")
-    print("Threshold forms: poly<d>, knots<K>, bins<K>, nodes")
+    print("Threshold forms: poly<d>, knots<K>, bins<K>, cutoff, nodes")
     print("Objectives:", ", ".join(OBJECTIVES))
     print("Optimizer methods:", ", ".join(METHODS))
     print("Given thresholds (evaluate runs):", ", ".join(THRESHOLD_SOURCES))
@@ -54,6 +55,11 @@ def list_options():
         print(f"\n{title} (defaults):")
         for key, value in defaults.items():
             print(f"  {key} = {value!r}")
+    print("\nsynthetic family options (options = {...}; defaults):")
+    for family in sorted(SYNTHETIC_FAMILIES):
+        options = family_options(family)
+        print(f"  {family}: " + (", ".join(f"{k} = {v!r}" for k, v in options.items())
+                                 or "none"))
 
 
 def main():

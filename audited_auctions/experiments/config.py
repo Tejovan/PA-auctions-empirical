@@ -20,6 +20,7 @@ with <design> = <objective>_<form>_<optimizer> (optimize) or tau-<label> (evalua
 """
 
 import copy
+import inspect
 import itertools
 import json
 import tomllib
@@ -127,6 +128,16 @@ def _merge(defaults, table, where):
 # ─── Distributions ──────────────────────────────────────────────────────────────
 
 
+GRID_KEYS = ("num_externality_nodes", "num_valuation_cells")
+
+
+def family_options(family):
+    """Parameters of a synthetic family settable by `options` (grid keys excluded), with defaults."""
+    parameters = inspect.signature(SYNTHETIC_FAMILIES[family]).parameters
+    return {name: parameter.default for name, parameter in parameters.items()
+            if name not in GRID_KEYS}
+
+
 def resolve_distribution(table):
     """A [[distributions]] table with defaults; source = family name, data set name or CSV."""
     table = dict(table)
@@ -138,6 +149,10 @@ def resolve_distribution(table):
         table.pop(derived, None)
     if source in SYNTHETIC_FAMILIES:
         resolved = _merge(SYNTHETIC_DEFAULTS, table, f"distribution {source}")
+        unknown = set(resolved["options"]) - set(family_options(source))
+        if unknown:
+            raise ConfigError(f"distribution {source}: unknown options {sorted(unknown)}; "
+                              f"allowed: {sorted(family_options(source)) or 'none'}")
         resolved.update(kind="synthetic", source=source, path=None,
                         label=label or source.replace("_", "-"))
     else:

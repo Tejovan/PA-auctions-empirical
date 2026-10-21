@@ -144,11 +144,17 @@ def test_genetic_search_rejects_nodes_and_best_response_rejects_polynomials():
 
 def test_ascent_history_reaches_first_order_conditions():
     distribution = synthetic_distribution("harmful_middle", **SMALL_GRID)
-    result = run_best_response_ascent(distribution, "nodes", 6, 2, verbose=False)
+    result = run_best_response_ascent(distribution, "nodes", 6, 2, verbose=False, seed=0)
+    form = build_threshold_form("nodes", distribution)
     for start in result.summary["starts"]:
         assert start["stop_reason"] in ("no_improving_step", "small_gain")
         last = start["history"][-1]
-        assert last["max_marginal"] < 1e-4 and last["stationarity"] < 1e-4
+        assert last["stationarity"] < 1e-4
+        # |M| at interior thresholds of nodes with mass >= 1e-6: a start can leave τ > 0 at
+        # an edge node of smaller mass, where moving τ gains less than the stop tolerance.
+        check = first_order_check(distribution, form.threshold(start["parameters"]), 6, 2)
+        interior = check[(check.status == "interior") & (check.mass >= 1e-6)]
+        assert interior.marginal_contribution.abs().max() / distribution.maximum_valuation < 1e-4
     # τ ≡ 0 satisfies the first-order conditions (a bidder with v = 0 never wins, so
     # M(e, 0) = 0) but is not optimal; the best-response gap detects it.
     zero = next(s for s in result.summary["starts"] if s["start"] == "zero")
