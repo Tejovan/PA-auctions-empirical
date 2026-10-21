@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from audited_auctions.experiments import report
 from audited_auctions.experiments.compute import compute_combination, load_threshold_file
 from audited_auctions.experiments.config import ConfigError, expand, resolve_config
 from audited_auctions.experiments.provenance import to_toml
@@ -52,6 +53,8 @@ def test_configuration_errors_name_the_problem():
                                                     "threshold_forms": ["poly1"]}]))
     with pytest.raises(ConfigError, match="per optimizer"):
         resolve_config(optimize_config(design={"threshold_forms": ["knots3"]}))
+    with pytest.raises(ConfigError, match="previews"):
+        resolve_config({**optimize_config(), "output": {"previews": "svg"}})
 
 
 def test_expansion_runs_every_valid_combination():
@@ -146,21 +149,29 @@ def test_whole_runs_with_figures_and_reused_thresholds(tmp_path):
     assert "## Checks" in readme and summary.path.iloc[0] in readme
     assert (leaf / "thumbs" / "2_expected-outcomes.webp").exists()
     assert (leaf / "search" / "thumbs" / "convergence.webp").exists()
-    assert "(compare/thumbs/share-of-first-best-gain.webp)" in readme
+    assert 'src="compare/thumbs/share-of-first-best-gain.webp"' in readme
     assert f"({summary.path.iloc[0]}/README.md)" in readme
     leaf_readme = (leaf / "README.md").read_text()
-    assert ("[![2_expected-outcomes](thumbs/2_expected-outcomes.webp)](2_expected-outcomes.pdf)"
+    assert ('<a href="2_expected-outcomes.pdf" title="2_expected-outcomes.pdf"><img '
+            'src="thumbs/2_expected-outcomes.webp" alt="2_expected-outcomes" width="440"'
             in leaf_readme)
-    assert "(search/thumbs/convergence.webp)" in leaf_readme
+    assert 'src="search/thumbs/convergence.webp"' in leaf_readme
     assert "(../README.md)" in leaf_readme
     market = leaf.parent
     market_readme = (market / "README.md").read_text()
     assert f"({market.relative_to(folder)}/README.md)" in readme
     assert f"[{leaf.name}]({leaf.name}/README.md)" in market_readme
-    assert f"({leaf.name}/thumbs/small/1_types-tau-penalties.webp)" in market_readme
-    assert (leaf / "thumbs" / "small" / "1_types-tau-penalties.webp").exists()
+    assert (f'src="{leaf.name}/thumbs/1_types-tau-penalties.webp" alt="1_types-tau-penalties" '
+            'width="300"') in market_readme
+    record = tomllib.loads((folder / "run.toml").read_text())
+    record["config"]["output"]["previews"] = "markdown"
+    assert report.preview_settings(record)["previews"] == "markdown"
+    report._PREVIEWS.update(report.preview_settings(record))
+    assert report._preview(folder, f"{leaf.relative_to(folder)}/1_types-tau-penalties.pdf",
+                           str(market.relative_to(folder))).startswith("[![1_types-tau-penalties]")
+    report._PREVIEWS.update(report.preview_settings({}))
     assert "(harmful-middle/z1/compare/README.md)" in readme
-    assert "](thumbs/" in (compare / "README.md").read_text()
+    assert 'src="thumbs/' in (compare / "README.md").read_text()
     record = tomllib.loads((folder / "run.toml").read_text())
     assert record["run"]["num_combinations"] == 6 and "commit" in record["code"]
 

@@ -294,6 +294,12 @@ A τ value at or above v̄ excludes the externality (τ = v̄⁺ in the paper).
 | `workers` | 0 | parallel processes; 0 = number of cores − 2; `--workers` overrides. One process per combination; workers beyond the number of combinations go to each combination's parallel stages (search starts and restarts, Nelder–Mead starts, bootstrap) |
 | `search_history_curves` | 400 | tried thresholds kept for `search/tried-taus.pdf` |
 | `report` | true | draw figures after computing; `--no-report` overrides |
+| `previews` | `"html"` | README previews: `"html"`, `<img>` tags at a fixed display width (VS Code's classic Markdown preview, Cmd+Shift+V, and GitHub; VS Code's new markdown editor does not show them); `"markdown"`, markdown images shown at their pixel size (every Markdown viewer; set `preview_dpi` to about 60) |
+| `preview_dpi` | 120 | pixels per inch of the WebP previews `thumbs/<name>.webp` (one per figure); at 120 and the default widths, about two image pixels per screen pixel on high-density screens |
+| `preview_width` | 440 | `"html"`: display width in pixels of every preview in the combination, comparison and run READMEs |
+| `preview_grid_width` | 300 | `"html"`: display width in pixels of the previews in the market READMEs' tables |
+
+The preview keys apply when figures are drawn, also by `--report RUN`, which reads them from `[config.output]` in the run's `run.toml` (defaults for older runs): to change the previews of a finished run, edit them there and run `--report RUN`.
 
 ## 4. Outputs of a run
 
@@ -324,7 +330,7 @@ runs/2026-10-19_1400_optimize_standard-test/
           tau.json  tau.csv  first-order.csv  results.json  data.npz  README.md
           1_types-tau-penalties.pdf … 6_marginal-contribution.pdf
           search/tried-taus.pdf  search/convergence.pdf  search/iterations.pdf
-          thumbs/*.webp  thumbs/small/*.webp  search/thumbs/*.webp
+          thumbs/*.webp  search/thumbs/*.webp
 runs/index.csv             one line per run: folder, kind, name, start, seconds, combinations,
                            failures, failed checks, commit, dirty flag, host
 ```
@@ -349,7 +355,7 @@ Mechanisms: VCG, VCG-PA, IVCG-PA, first best. Metrics: welfare W, valuation welf
 
 ### 4.3 Figures
 
-Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves) are rasterized at 150 dpi. Each has a WebP preview `thumbs/<name>.webp` in its folder (60 pixels per inch, shown at its pixel size); the market READMEs' preview tables use a copy reduced to 0.75 of that width, `thumbs/small/<name>.webp`. Previews are markdown images, which every markdown viewer shows (VS Code's markdown editor does not show HTML `<img>` tags). The link name is the label used in the run README's results table and the name for `--paper`.
+Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves) are rasterized at 150 dpi. Each has a WebP preview `thumbs/<name>.webp` in its folder (120 pixels per inch), shown in the README files at 440 pixels wide, and 300 in the market READMEs' tables; the format, resolution and widths are [`[output]` keys](#310-output). The link name is the label used in the run README's results table and the name for `--paper`.
 
 **Per combination:**
 

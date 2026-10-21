@@ -179,9 +179,9 @@ PAPER_MARGINS = {"left": 0.62, "right": 0.12, "bottom": 0.50, "top": 0.12}
 PAPER_DPI = 300  # rasterized artists in paper panels (run figures: STYLE, 150 dpi)
 _PAPER = {"on": False}
 
-# Previews of run figures in the README files: WebP, 60 pixels per inch, shown at their
-# pixel size (markdown images: VS Code's markdown editor does not render HTML <img> tags).
-THUMBNAIL_DPI = 60
+# Previews of run figures in the README files: one WebP per figure, at the [output]
+# preview_dpi of the run (set per worker process by set_thumbnail_dpi).
+_THUMBNAIL = {"dpi": 120}
 # Previews of the synthetic families in the code README: WebP, about 70 pixels per inch.
 DISTRIBUTION_PREVIEW_DPI = 70
 
@@ -190,6 +190,11 @@ def thumbnail_path(path):
     """Preview of the figure at path: thumbs/<stem>.webp in the figure's folder."""
     path = Path(path)
     return path.parent / "thumbs" / f"{path.stem}.webp"
+
+
+def set_thumbnail_dpi(dpi):
+    """Pixels per inch of the WebP previews (module-wide; each worker process sets it)."""
+    _THUMBNAIL["dpi"] = dpi
 
 
 def set_paper(on):
@@ -454,7 +459,7 @@ def _finish(fig, path, title, note=None):
     fig.savefig(path, bbox_inches="tight", pad_inches=0.08)
     thumbnail = thumbnail_path(path)
     thumbnail.parent.mkdir(exist_ok=True)
-    fig.savefig(thumbnail, bbox_inches="tight", pad_inches=0.08, dpi=THUMBNAIL_DPI,
+    fig.savefig(thumbnail, bbox_inches="tight", pad_inches=0.08, dpi=_THUMBNAIL["dpi"],
                 pil_kwargs={"quality": 80})
     plt.close(fig)
     return path

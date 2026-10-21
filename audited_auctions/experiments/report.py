@@ -18,8 +18,9 @@ saved in the compare/ folder of the deepest level above every varied input:
                                      input ∈ market, form, optimizer, objective, threshold
   <distribution>/compare/welfare-vs-zeta_<fixed inputs>.pdf
   compare/share-of-first-best-gain.pdf
-Every figure has a WebP preview thumbs/<name>.webp next to it (figures.THUMBNAIL_DPI; market
-READMEs: thumbs/small/<name>.webp, SMALL_PREVIEW_SCALE of its width). README files (FIGURE_INFO and
+Every figure has one WebP preview thumbs/<name>.webp next to it ([output] preview_dpi), shown
+in the README files as HTML <img> tags at a fixed width or as markdown images ([output]
+previews, preview_width, preview_grid_width; preview_settings). README files (FIGURE_INFO and
 COMPARE_INFO hold the descriptions):
   README.md                   inputs, checks, results with links to every figure, gap
                               decomposition, figure reference, comparison figures, files
@@ -46,11 +47,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from PIL import Image
 
 from .. import figures
 from .compute import read_json
-from .config import OBJECTIVE_SHORT
+from .config import OBJECTIVE_SHORT, SECTION_DEFAULTS
 
 LEAF_FIGURES = {
     "types": "1_types-tau-penalties.pdf",
@@ -329,9 +329,19 @@ def _overview(folder, rows, kind, target):
     return target
 
 
-def _run_job(job, paper=None):
-    """paper: None (the run's figures) or the set of figure names to export as panels."""
+def preview_settings(record):
+    """[output] preview keys of a run (run.toml record); defaults for older runs."""
+    output = record.get("config", {}).get("output", {})
+    return {key: output.get(key, value) for key, value in SECTION_DEFAULTS["output"].items()
+            if key.startswith("preview")}
+
+
+def _run_job(job, paper=None, thumbnail_dpi=None):
+    """paper: None (the run's figures) or the set of figure names to export as panels;
+    thumbnail_dpi: pixels per inch of the WebP previews ([output] preview_dpi)."""
     figures.set_paper(paper is not None)
+    if thumbnail_dpi:
+        figures.set_thumbnail_dpi(thumbnail_dpi)
     kind, arguments = job
     if kind == "leaf":
         return leaf_figures(*arguments, select=paper)
@@ -534,36 +544,22 @@ def _figure_key(file):
     return next((key for key in COMPARE_INFO if name.startswith(key)), Path(file).stem)
 
 
-# Previews in the market READMEs: the figure's preview reduced to this share of its width,
-# saved as thumbs/small/<name>.webp, so that the combinations fit side by side.
-SMALL_PREVIEW_SCALE = 0.75
+# README previews, from [output] of the run's configuration (set by write_readme):
+# "html": <img> tags at a fixed display width (classic Markdown preview, GitHub);
+# "markdown": markdown images shown at their pixel size (any Markdown viewer).
+_PREVIEWS = dict(SECTION_DEFAULTS["output"])
 
 
-def _small_thumbnail(folder, thumbnail):
-    """thumbs/small/<name>.webp next to the preview thumbnail (path relative to folder),
-    made from it if missing or older; returns its path relative to folder."""
-    small = thumbnail.parent / "small" / thumbnail.name
-    source, target = folder / thumbnail, folder / small
-    try:
-        if not target.exists() or target.stat().st_mtime < source.stat().st_mtime:
-            target.parent.mkdir(exist_ok=True)
-            with Image.open(source) as image:
-                size = (round(SMALL_PREVIEW_SCALE * image.width),
-                        round(SMALL_PREVIEW_SCALE * image.height))
-                image.resize(size, Image.LANCZOS).save(target, quality=80)
-    except OSError:
-        return thumbnail
-    return small
-
-
-def _preview(folder, file, base, small=False):
-    """Markdown preview of the figure file (path relative to the run folder) linked to its
-    PDF, for a README in folder base; small: the reduced preview of the market READMEs."""
+def _preview(folder, file, base, grid=False):
+    """Preview of the figure file (path relative to the run folder) linked to its PDF, for
+    a README in folder base; grid: a cell of the market READMEs' preview tables."""
     relative = Path(os.path.relpath(file, base))
     thumbnail = figures.thumbnail_path(relative)
-    if small:
-        thumbnail = _small_thumbnail(folder / base, thumbnail)
-    return f"[![{relative.stem}]({thumbnail})]({relative})"
+    if _PREVIEWS["previews"] == "markdown":
+        return f"[![{relative.stem}]({thumbnail})]({relative})"
+    width = _PREVIEWS["preview_grid_width" if grid else "preview_width"]
+    return (f'<a href="{relative}" title="{relative.name}"><img src="{thumbnail}" '
+            f'alt="{relative.stem}" width="{width}" loading="lazy"></a>')
 
 
 def _gallery(folder, files, base, info=None):
@@ -679,18 +675,30 @@ def _market_readme(folder, market, rows, leaf_files):
         for (label, column), row in grid.items():
             file = f"{row['path']}/{leaf_name}"
             if file in leaf_files.get(row["path"], []):
-                cells[label, column] = _preview(folder, file, market, small=True)
+                cells[label, column] = _preview(folder, file, market, grid=True)
         if not cells:
             continue
         title, text, _ = FIGURE_INFO[key]
-        lines += [f"### {title}", "", text, "",
-                  "| | " + " | ".join(columns) + " |", "|---" * (len(columns) + 1) + "|"]
-        for label in row_labels:
-            lines.append(f"| **{label}** | " + " | ".join(
-                cells.get((label, column), "not drawn" if (label, column) in grid else "")
-                for column in columns) + " |")
-        lines.append("")
+        lines += [f"### {title}", "", text, ""]
+        lines += _preview_table(columns, row_labels, {
+            (label, column): cells.get((label, column), "not drawn" if (label, column) in grid
+                                       else "") for label in row_labels for column in columns})
     (folder / market / "README.md").write_text("\n".join(lines))
+
+
+def _preview_table(columns, row_labels, cells):
+    """Lines of the table of previews (rows: row_labels; columns: columns): HTML, or a
+    markdown table when [output] previews = "markdown"."""
+    if _PREVIEWS["previews"] == "markdown":
+        lines = ["| | " + " | ".join(columns) + " |", "|---" * (len(columns) + 1) + "|"]
+        lines += [f"| **{label}** | " + " | ".join(cells[label, column] for column in columns)
+                  + " |" for label in row_labels]
+        return lines + [""]
+    lines = ["<table>", "<tr><th></th>" + "".join(f"<th>{c}</th>" for c in columns) + "</tr>"]
+    lines += [f"<tr><th>{label}</th>" + "".join(
+        f'<td align="center">{cells[label, column]}</td>' for column in columns) + "</tr>"
+        for label in row_labels]
+    return lines + ["</table>", ""]
 
 
 def _compare_readme(folder, compare, files):
@@ -714,11 +722,12 @@ def make_report(folder, workers=None, log=print):
     jobs = [("leaf", (str(folder), path)) for path in summary.path]
     jobs += comparison_jobs(folder, summary, kind)
     workers = workers or record["host"].get("workers", 1)
+    dpi = [preview_settings(record)["preview_dpi"]] * len(jobs)
     if workers > 1:
         with ProcessPoolExecutor(max_workers=workers) as pool:
-            outputs = list(pool.map(_run_job, jobs, chunksize=1))
+            outputs = list(pool.map(_run_job, jobs, [None] * len(jobs), dpi, chunksize=1))
     else:
-        outputs = [_run_job(job) for job in jobs]
+        outputs = [_run_job(job, None, d) for job, d in zip(jobs, dpi)]
     leaf_files, compare_files = {}, []
     for job, files in zip(jobs, outputs):
         if job[0] == "leaf":
@@ -779,4 +788,5 @@ def write_readme(folder, files=None):
     checks_file = folder / "checks.csv"
     checks = pd.read_csv(checks_file) if checks_file.exists() else pd.DataFrame()
     files = files or _existing_figures(folder, summary)
+    _PREVIEWS.update(preview_settings(record))
     _readme(folder, record, summary, checks, files["leaf"], files["compare"])

@@ -100,7 +100,9 @@ SECTION_DEFAULTS = {
                "first_order_tolerance": 1e-4, "monte_carlo_z": 4.0,
                "symmetric_relaxation": True},
     "seeds": {"split": 0, "search": 0, "simulation": 1234, "bootstrap": 0},
-    "output": {"base": "runs", "workers": 0, "search_history_curves": 400, "report": True},
+    "output": {"base": "runs", "workers": 0, "search_history_curves": 400, "report": True,
+               "previews": "html", "preview_dpi": 120, "preview_width": 440,
+               "preview_grid_width": 300},
 }
 
 
@@ -249,6 +251,11 @@ def resolve_config(raw):
     for objective in config["design"]["objectives"]:
         if objective not in OBJECTIVES:
             raise ConfigError(f"objectives must be in {OBJECTIVES}, got {objective!r}")
+    if config["output"]["previews"] not in ("html", "markdown"):
+        raise ConfigError('[output] previews must be "html" or "markdown"')
+    for key in ("preview_dpi", "preview_width", "preview_grid_width"):
+        if not (isinstance(config["output"][key], int) and config["output"][key] > 0):
+            raise ConfigError(f"[output] {key} must be a positive integer")
     config["checks"]["bandwidth_sensitivity"] = [
         float(s) for s in _as_list(config["checks"]["bandwidth_sensitivity"])]
 
