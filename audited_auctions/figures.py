@@ -795,9 +795,10 @@ def _density(ax, values, grid, color, linestyle, scale=1.0, fill=True):
 
 
 def _range(arrays, tail=0.005):
-    stacked = np.concatenate([np.asarray(a, dtype=float) for a in arrays if len(a)])
-    if not len(stacked):
+    arrays = [np.asarray(a, dtype=float) for a in arrays if len(a)]
+    if not arrays:
         return -1.0, 1.0
+    stacked = np.concatenate(arrays)
     low, high = np.quantile(stacked, [tail, 1 - tail])
     pad = 0.06 * (high - low) if high > low else max(abs(low), 1.0) * 0.1
     return low - pad, high + pad
