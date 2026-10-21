@@ -10,7 +10,7 @@ name = "standard-test"
 description = "Standard test of the code: all run features on small grids."
 
 [[distributions]]
-source = "harmful_middle"        # v ~ U[0,1]; harmful types in a middle band; ironing binds
+source = "harmful_middle"        # steep ridge with a wiggle; ironing binds
 num_externality_nodes = 41
 num_valuation_cells = 60
 
