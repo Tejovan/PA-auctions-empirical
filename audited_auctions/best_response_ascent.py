@@ -73,12 +73,17 @@ point so far is kept). The polish (L-BFGS-B) stops on its projected gradient
 (gtol), which is the first-order condition in the form's parameters.
 
 Per-iteration diagnostics (history of each start), at the current τ:
-  stationarity      v̄ Σ_j |∂W/∂θ_j| / scale, the projected gradient of W in the form's
+  stationarity      m Σ_j |∂W/∂θ_j| / scale, the projected gradient of W in the form's
                     parameters θ (at τ(e) = 0 and exclusion only the one-sided
                     derivative into [0, v̄] that raises W counts): the
-                    rate of change of W if every parameter moves by v̄ in its
-                    ascent direction, in units of scale (the first-best gain
-                    FB − W_VCG when given, else |W|). Zero at a stationary point.
+                    rate of change of W if every parameter moves by the median
+                    valuation m in its ascent direction, in units of scale (the
+                    first-best gain FB − W_VCG when given, else |W|). Zero at a smooth
+                    stationary point. W has kinks where thresholds cross valuation-cell
+                    edges, so a restricted form can be optimal at a kink with a small
+                    positive stationarity (tweets, knots4: 1e-4, while a local search
+                    found at most 1.5e-8 of the first-best gain more). The median, not v̄,
+                    because heavy-tailed valuations put v̄ far above where τ lies.
   max_marginal      largest violation, / v̄, of the first-order conditions of an
                     optimal common τ (first_order_violation): |M^τ(e, τ(e))| at
                     interior thresholds (zero marginal contribution, Prop. 7.9
@@ -116,6 +121,9 @@ DEFAULT_STARTS = ("zero", "zero_welfare", "short_genetic", "relaxation")
 NEGLIGIBLE_SLOPE = 1e-12
 DEFAULT_RANDOM_STARTS = 3
 DEFAULT_POLISH_ROUNDS = 3
+# Welfare evaluations per polish (L-BFGS-B maxfun; scipy's default is 15000). Observed polishes
+# use 1–301 (synthetic families and tweets, nodes/knots6/bins10, n <= 8).
+POLISH_MAX_EVALUATIONS = 500
 STEP_SIZES = tuple(0.5 ** m for m in range(7))
 KNOT_GRID_SIZE = 48
 KNOT_ZOOM_GRID_SIZE = 17
@@ -498,7 +506,17 @@ def first_order_measures(type_distribution, form, parameters, num_bidders, funct
     gradient = _parameter_gradient(type_distribution, form, parameters, num_bidders, functions,
                                    payoffs, bounds=True)
     scale = scale if scale else max(abs(welfare), 1e-300)
-    return float(maximum * np.sum(np.abs(gradient)) / scale), max_marginal
+    return float(median_valuation(type_distribution) * np.sum(np.abs(gradient)) / scale), \
+        max_marginal
+
+
+def median_valuation(type_distribution):
+    """Median of v (cell midpoints; at least 1e-12 v̄): the unit of the stationarity."""
+    order = np.argsort(type_distribution.valuation_midpoints)
+    cumulative = np.cumsum(type_distribution.probabilities[order])
+    median = type_distribution.valuation_midpoints[order][
+        min(np.searchsorted(cumulative, 0.5 * cumulative[-1]), len(order) - 1)]
+    return max(float(median), 1e-12 * float(type_distribution.maximum_valuation))
 
 
 def ascend(type_distribution, form, parameters, num_bidders, num_goods, mechanism,
@@ -646,7 +664,8 @@ def polish(type_distribution, form, parameters, num_bidders, num_goods, mechanis
 
     outcome = minimize(objective, parameters, jac=True, method="L-BFGS-B", bounds=bounds,
                        callback=callback,
-                       options={"maxiter": max_iterations, "ftol": 1e-15, "gtol": 1e-12})
+                       options={"maxiter": max_iterations, "maxfun": POLISH_MAX_EVALUATIONS,
+                                "ftol": 1e-15, "gtol": 1e-12})
     welfare = expected_welfare(type_distribution, form.threshold(outcome.x), num_bidders,
                                num_goods, mechanism)
     if welfare > start_welfare:

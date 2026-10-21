@@ -1244,7 +1244,7 @@ def search_iterations(results, path, tolerances):
         ax.set_title("(b) Distance to the best welfare found", loc="left")
         diagnostics = any(p.get("max_marginal") is not None
                           for line in lines for p in line["points"])
-        panels = ((axes[1, 0], "stationarity", "v̄ Σ|∂W/∂θ| / (FB − W_VCG)",
+        panels = ((axes[1, 0], "stationarity", "m Σ|∂W/∂θ| / (FB − W_VCG), m = median v",
                    "(c) Stationarity in the form's parameters θ"),
                   (axes[1, 1], "max_marginal", "first-order violation in M / v̄",
                    "(d) Zero marginal contribution"),

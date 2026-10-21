@@ -228,7 +228,7 @@ threshold_forms = ["nodes"]
 | `num_random_starts` | 3 | random starts in addition (τ piecewise linear through 6 externalities, values uniform on [0, 95% quantile of v]); all starts run in parallel |
 | `max_iterations` | 100 | iterations per start |
 | `relative_tolerance` | 1e-10 | stop when relative welfare gains fall below this |
-| `polish_rounds` | 3 | gradient polishes |
+| `polish_rounds` | 3 | gradient polishes (L-BFGS-B, at most 500 welfare evaluations each) |
 | `short_genetic_generations` | 40 | generations of the `short_genetic` start |
 | `genetic_form` | same form, or `knots6` for `nodes` | `genetic+best_response` only: form of the genetic stage |
 | `warm_start_across_zeta` | false | also start from the optimum at the previous ζ, rescaled: τ(e) = τ_prev(e ζ_prev / ζ); the ζ values of a distribution then run in sequence |
