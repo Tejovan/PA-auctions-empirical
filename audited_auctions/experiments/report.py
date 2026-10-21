@@ -18,10 +18,12 @@ saved in the compare/ folder of the deepest level above every varied input:
                                      input ∈ market, form, optimizer, objective, threshold
   <distribution>/compare/welfare-vs-zeta_<fixed inputs>.pdf
   compare/share-of-first-best-gain.pdf
-Every figure has a WebP preview thumbs/<name>.webp next to it. README files (FIGURE_INFO and
+Every figure has a WebP preview thumbs/<name>.webp next to it (figures.THUMBNAIL_DPI). README files (FIGURE_INFO and
 COMPARE_INFO hold the descriptions):
   README.md                   inputs, checks, results with links to every figure, gap
                               decomposition, figure reference, comparison figures, files
+  <distribution>/z<ζ>/n<n>-k<k>/README.md   results of the market's combinations; per figure,
+                              the previews of all its combinations side by side
   <combination>/README.md     results table, files, each figure under a heading with its
                               description and preview (linked to the PDF), figures not drawn
                               and why, links to paper/ folders
@@ -43,6 +45,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from PIL import Image
 
 from .. import figures
 from .compute import read_json
@@ -455,13 +458,19 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
               "the change of expected revenue over VCG. All rows: summary.csv.", "",
               "| combination | share VCG-PA | share IVCG-PA | Δrevenue VCG-PA | figures |",
               "|---|---|---|---|---|"]
+    markets = {}
     for row in summary.sort_values("path").to_dict("records"):
+        markets.setdefault(str(Path(row["path"]).parent), []).append(row)
         links = " ".join(f"[{_figure_key(file)}]({file})"
                          for file in leaf_files.get(row["path"], []))
         _leaf_readme(folder, row, leaf_files.get(row["path"], []))
         lines.append(f"| [{row['path']}]({row['path']}/README.md) | {_share_label(row, 'vcg_pa')} | "
                      f"{_share_label(row, 'ivcg_pa')} | "
                      f"{figures.compact(row['revenue_change_vcg_pa'])} | {links} |")
+    for market, rows in markets.items():
+        _market_readme(folder, market, rows, leaf_files)
+    lines += ["", "Figures of all combinations of a market side by side: "
+              + ", ".join(f"[{market}]({market}/README.md)" for market in markets) + ".", ""]
     gaps_file = folder / "gap-decomposition.csv"
     if gaps_file.exists():
         gaps = pd.read_csv(gaps_file)
@@ -493,7 +502,7 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
     by_folder = {}
     for file in sorted(compare_files):
         by_folder.setdefault(str(Path(file).parent), []).append(file)
-    lines += _gallery(by_folder.pop("compare", []), ".")
+    lines += _gallery(folder, by_folder.pop("compare", []), ".")
     for compare, files in by_folder.items():
         _compare_readme(folder, compare, files)
         lines.append(f"- [{compare}]({compare}/README.md): {_count(len(files), 'figure')}")
@@ -524,7 +533,20 @@ def _figure_key(file):
     return next((key for key in COMPARE_INFO if name.startswith(key)), Path(file).stem)
 
 
-def _gallery(files, base, info=None):
+def _preview(folder, file, base, scale=figures.THUMBNAIL_SCALE):
+    """HTML preview of the figure file (path relative to the run folder) linked to its PDF,
+    for a README in folder base; shown at scale of the preview's pixel width."""
+    relative = Path(os.path.relpath(file, base))
+    thumbnail = figures.thumbnail_path(relative)
+    try:
+        with Image.open(folder / base / thumbnail) as image:
+            width = f' width="{round(scale * image.width)}"'
+    except OSError:
+        width = ""
+    return f'<a href="{relative}"><img src="{thumbnail}" alt="{relative.stem}"{width}></a>'
+
+
+def _gallery(folder, files, base, info=None):
     """Markdown lines showing the preview of each figure (paths relative to the run
     folder), linked to the PDF, for a README in folder base (relative to the run); with
     info (key → title, text, condition), a heading and description above each preview."""
@@ -536,7 +558,7 @@ def _gallery(files, base, info=None):
             lines += [f"### {title}: [{relative}]({relative})", "", text, ""]
         else:
             lines += [f"**[{relative}]({relative})**  "]
-        lines += [f"[![{relative.stem}]({figures.thumbnail_path(relative)})]({relative})", ""]
+        lines += [_preview(folder, file, base), ""]
     return lines
 
 
@@ -556,12 +578,13 @@ def _leaf_readme(folder, row, files):
     if not (folder / path).is_dir():
         return
     up = os.path.relpath(".", path)
-    lines = [f"# {path}", "", f"Run: [README.md]({up}/README.md)", ""]
+    links = [f"Run: [README.md]({up}/README.md)",
+             f"all combinations of this market: [{Path(path).parent}/README.md](../README.md)"]
     compare = Path(path).parent.parent / "compare"
     if (folder / compare).is_dir():
-        lines[-2:] = [f"Run: [README.md]({up}/README.md) · comparison figures of this market "
-                      f"family: [{compare}/README.md]({os.path.relpath(compare, path)}/README.md)",
-                      ""]
+        links.append(f"comparison figures of this market family: [{compare}/README.md]"
+                     f"({os.path.relpath(compare, path)}/README.md)")
+    lines = [f"# {path}", "", " · ".join(links), ""]
     lines += ["## Results", "",
               "Exact expected values on the evaluation distribution. Share: (W − W_VCG)/"
               "(W_FB − W_VCG).", "",
@@ -582,7 +605,7 @@ def _leaf_readme(folder, row, files):
               "best-response gap, Pigouvian charge",
               "- `results.json`: every statistic; `data.npz`: arrays behind the figures", "",
               "## Figures", ""]
-    lines += _gallery(files, path, FIGURE_INFO)
+    lines += _gallery(folder, files, path, FIGURE_INFO)
     drawn = {_figure_key(file) for file in files}
     optimized = isinstance(row.get("optimizer"), str)
     missing = [key for key in FIGURE_INFO if key not in drawn
@@ -594,10 +617,66 @@ def _leaf_readme(folder, row, files):
     (folder / path / "README.md").write_text("\n".join(lines))
 
 
+def _market_readme(folder, market, rows, leaf_files):
+    """README of a market folder <distribution>/z<ζ>/n<n>-k<k>: results of its
+    combinations and, per figure, the previews of all combinations side by side (rows:
+    objectives; columns: form and optimizer, or the given thresholds)."""
+    if not (folder / market).is_dir():
+        return
+    up = os.path.relpath(".", market)
+    links = [f"Run: [README.md]({up}/README.md)"]
+    compare = Path(market).parent / "compare"
+    if (folder / compare).is_dir():
+        links.append(f"comparison figures of this market family: [{compare}/README.md]"
+                     f"(../compare/README.md)")
+    lines = [f"# {market}", "", " · ".join(links), "",
+             "## Results", "",
+             "Share of the first-best welfare gain over VCG, (W − W_VCG)/(W_FB − W_VCG), and the "
+             "change of expected revenue over VCG.", "",
+             "| combination | share VCG-PA | share IVCG-PA | Δrevenue VCG-PA |", "|---|---|---|---|"]
+    grid = {}
+    for row in rows:
+        name = Path(row["path"]).name
+        lines.append(f"| [{name}]({name}/README.md) | {_share_label(row, 'vcg_pa')} | "
+                     f"{_share_label(row, 'ivcg_pa')} | "
+                     f"{figures.compact(row['revenue_change_vcg_pa'])} |")
+        objective = row.get("objective")
+        if isinstance(objective, str):
+            grid[(figures.SHORT[objective], name.removeprefix(OBJECTIVE_SHORT[objective] + "_"))] = row
+        else:
+            grid[("", name)] = row
+    order = list(figures.SHORT.values())
+    row_labels = sorted(dict.fromkeys(label for label, _ in grid),
+                        key=lambda label: order.index(label) if label in order else -1)
+    columns = list(dict.fromkeys(column for _, column in grid))
+    lines += ["", "## Figures", "",
+              "Each figure of every combination; rows: objective of the search; columns: form and "
+              "optimizer. Click a preview for the PDF; the combinations' READMEs are linked in the results "
+              "table.",
+              ""]
+    for key, leaf_name in LEAF_FIGURES.items():
+        cells = {}
+        for (label, column), row in grid.items():
+            file = f"{row['path']}/{leaf_name}"
+            if file in leaf_files.get(row["path"], []):
+                cells[label, column] = _preview(folder, file, market, scale=0.5)
+        if not cells:
+            continue
+        title, text, _ = FIGURE_INFO[key]
+        lines += [f"### {title}", "", text, "", "<table>",
+                  "<tr><th></th>" + "".join(f"<th>{column}</th>" for column in columns) + "</tr>"]
+        for label in row_labels:
+            lines.append(f"<tr><th>{label}</th>" + "".join(
+                f"<td>{cells.get((label, column), 'not drawn' if (label, column) in grid else '')}"
+                "</td>" for column in columns) + "</tr>")
+        lines += ["</table>", ""]
+    (folder / market / "README.md").write_text("\n".join(lines))
+
+
 def _compare_readme(folder, compare, files):
     up = os.path.relpath(".", compare)
     lines = [f"# Comparison figures in {compare}", "", f"Run: [README.md]({up}/README.md)", ""]
-    lines += _gallery(files, compare, COMPARE_INFO)
+    lines += _gallery(folder, files, compare, COMPARE_INFO)
     lines += _paper_folders(folder, compare)
     (folder / compare / "README.md").write_text("\n".join(lines))
 

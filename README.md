@@ -318,6 +318,7 @@ runs/2026-10-19_1400_optimize_standard-test/
       types.npz            type-distribution background of the figures (smooth density on a 300 × 300 grid, independent of the computation grid)
       compare/tau-by-<input>_<fixed inputs>.pdf
       n<n>-k<k>/
+        README.md          the market's combinations: results, each figure side by side
         <objective>_<form>_<optimizer>/                 (evaluate runs: tau-<label>/)
           tau.json  tau.csv  first-order.csv  results.json  data.npz  README.md
           1_types-tau-penalties.pdf … 6_marginal-contribution.pdf
@@ -347,7 +348,7 @@ Mechanisms: VCG, VCG-PA, IVCG-PA, first best. Metrics: welfare W, valuation welf
 
 ### 4.3 Figures
 
-Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves) are rasterized at 150 dpi. Each has a WebP preview `thumbs/<name>.webp` in its folder. The link name is the label used in the run README's results table and the name for `--paper`.
+Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves) are rasterized at 150 dpi. Each has a WebP preview `thumbs/<name>.webp` in its folder (80 pixels per inch, shown at 0.75 of that width; half of it in the market READMEs' preview tables). The link name is the label used in the run README's results table and the name for `--paper`.
 
 **Per combination:**
 
@@ -376,7 +377,8 @@ Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves
 | File | Sections |
 |---|---|
 | `README.md` | run facts; inputs; check counts and failed checks; results table with links to every figure; gap decomposition; figure reference; comparison figures (share overview preview, links to `compare/` READMEs); files |
-| `<combination>/README.md` | link to the run and the market's comparison figures; results table (W, share of the first-best gain, revenue, penalties per mechanism); ironing flag; files; each figure under a heading with its description and preview; figures not drawn and why; links to `paper/` folders |
+| `<distribution>/z<ζ>/n<n>-k<k>/README.md` | link to the run and the market's comparison figures; results table of the market's combinations (share of the first-best gain, revenue change) linked to their READMEs; per figure, its description and a table of previews (rows: objective of the search; columns: form and optimizer; evaluate runs: one row, a column per given threshold) |
+| `<combination>/README.md` | link to the run, the market's README and the market's comparison figures; results table (W, share of the first-best gain, revenue, penalties per mechanism); ironing flag; files; each figure under a heading with its description and preview; figures not drawn and why; links to `paper/` folders |
 | `.../compare/README.md` | each comparison figure with its description and preview; links to `paper/` folders |
 
 `python run.py --report RUN` rewrites every README; `--paper` rewrites them with links to the exported panels.

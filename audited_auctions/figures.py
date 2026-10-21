@@ -179,8 +179,10 @@ PAPER_MARGINS = {"left": 0.62, "right": 0.12, "bottom": 0.50, "top": 0.12}
 PAPER_DPI = 300  # rasterized artists in paper panels (run figures: STYLE, 150 dpi)
 _PAPER = {"on": False}
 
-# Previews of run figures in the README files: WebP, about 45 pixels per inch.
-THUMBNAIL_DPI = 45
+# Previews of run figures in the README files: WebP, 80 pixels per inch, shown at
+# THUMBNAIL_SCALE of their pixel width (sharp on high-density screens and when zoomed).
+THUMBNAIL_DPI = 80
+THUMBNAIL_SCALE = 0.75
 # Previews of the synthetic families in the code README: WebP, about 70 pixels per inch.
 DISTRIBUTION_PREVIEW_DPI = 70
 
@@ -454,7 +456,7 @@ def _finish(fig, path, title, note=None):
     thumbnail = thumbnail_path(path)
     thumbnail.parent.mkdir(exist_ok=True)
     fig.savefig(thumbnail, bbox_inches="tight", pad_inches=0.08, dpi=THUMBNAIL_DPI,
-                pil_kwargs={"quality": 75})
+                pil_kwargs={"quality": 80})
     plt.close(fig)
     return path
 
