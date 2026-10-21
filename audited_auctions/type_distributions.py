@@ -88,7 +88,8 @@ class TypeDistribution:
     valuation_upper : (num_cells,) upper end (equal to lower for atoms)
     probabilities   : (num_cells,) probability of each cell; sums to one
     name            : short label used in figure titles
-    density_grid    : optional, for plotting contours only: dict with keys
+    density_grid    : optional, for plotting only: the smooth density on a fine grid
+                      (PLOT_GRID_POINTS per axis), independent of the cells; keys
                       "externality_grid", "valuation_grid", "density"
                       (density has shape (len(valuation_grid), len(externality_grid)))
     metadata        : free-form provenance (family parameters, smoothing settings)
@@ -420,6 +421,10 @@ def population_distribution_from_csv(csv_path, externality_scale=1.0, valuation_
 # ─── Gridded densities (piecewise uniform) ────────────────────────────────────
 
 
+# Points per axis of the density grid drawn behind the type-plane figures.
+PLOT_GRID_POINTS = 300
+
+
 def _node_weights(nodes):
     """Integration weights of grid nodes: the length of each node's Voronoi cell."""
     nodes = np.asarray(nodes, dtype=float)
@@ -464,14 +469,18 @@ def gridded_density_distribution(density_function, externality_nodes, valuation_
     lower_mesh = np.broadcast_to(valuation_edges[:-1][:, None], cell_mass.shape)
     upper_mesh = np.broadcast_to(valuation_edges[1:][:, None], cell_mass.shape)
     total = cell_mass.sum()
+    # Plot grid: the density itself on a fine grid, independent of the cells (externality
+    # nodes stay as they are when they carry the weights of a discrete distribution).
+    plot_e = (externality_nodes if externality_weights is not None else
+              np.linspace(externality_nodes[0], externality_nodes[-1], PLOT_GRID_POINTS))
+    plot_v = np.linspace(valuation_edges[0], valuation_edges[-1], PLOT_GRID_POINTS)
+    plot_density = np.asarray(density_function(*np.meshgrid(plot_e, plot_v)), dtype=float)
+    plot_density = np.where(np.isfinite(plot_density) & (plot_density > 0), plot_density, 0.0)
     return TypeDistribution(
         externality_mesh.ravel(), lower_mesh.ravel(), upper_mesh.ravel(), cell_mass.ravel(),
         name=name,
-        density_grid={
-            "externality_grid": externality_nodes,
-            "valuation_grid": midpoints,
-            "density": density * (cell_mass.sum() / total if total > 0 else 1.0),
-        },
+        density_grid={"externality_grid": plot_e, "valuation_grid": plot_v,
+                      "density": plot_density / (total if total > 0 else 1.0)},
         metadata=metadata or {},
     )
 

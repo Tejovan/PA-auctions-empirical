@@ -315,7 +315,7 @@ runs/2026-10-19_1400_optimize_standard-test/
   <distribution>/
     compare/welfare-vs-zeta_<fixed inputs>.pdf          (only with several ζ)
     z<ζ>/
-      types.npz            type-distribution background of the figures
+      types.npz            type-distribution background of the figures (smooth density on a 300 × 300 grid, independent of the computation grid)
       compare/tau-by-<input>_<fixed inputs>.pdf
       n<n>-k<k>/
         <objective>_<form>_<optimizer>/                 (evaluate runs: tau-<label>/)

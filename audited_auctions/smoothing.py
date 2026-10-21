@@ -41,7 +41,7 @@ check sensitivity with 0.5 and 2.
 import numpy as np
 from scipy.signal import fftconvolve
 
-from .type_distributions import TypeDistribution
+from .type_distributions import PLOT_GRID_POINTS, TypeDistribution
 
 
 def _linear_binning(points_u, points_y, u_nodes, y_nodes):
@@ -59,6 +59,29 @@ def _linear_binning(points_u, points_y, u_nodes, y_nodes):
                 index_y < len(y_nodes))
             np.add.at(counts, (index_y[inside], index_u[inside]), (factor_u * factor_y)[inside])
     return counts
+
+
+def _kernel_density_on_grid(u, y, y_max, bandwidth, u_nodes, y_nodes):
+    """Gaussian kernel density of the points (u, y), reflected at y_max, on a uniform grid
+    (linear binning and FFT convolution); shape (len(y_nodes), len(u_nodes))."""
+    du, dy = u_nodes[1] - u_nodes[0], y_nodes[1] - y_nodes[0]
+    sd_u, sd_y = np.sqrt(np.diag(bandwidth))
+    # Extend the grid by the kernel radius so that reflected points are binned.
+    pad_u, pad_y = int(np.ceil(4 * sd_u / du)) + 1, int(np.ceil(4 * sd_y / dy)) + 1
+    u_extended = u_nodes[0] + du * np.arange(-pad_u, len(u_nodes) + pad_u)
+    y_extended = y_nodes[0] + dy * np.arange(-pad_y, len(y_nodes) + pad_y)
+    counts = _linear_binning(np.concatenate([u, u]), np.concatenate([y, 2 * y_max - y]),
+                             u_extended, y_extended)
+    offsets_u = du * np.arange(-pad_u, pad_u + 1)
+    offsets_y = dy * np.arange(-pad_y, pad_y + 1)
+    mesh_u, mesh_y = np.meshgrid(offsets_u, offsets_y)
+    inverse = np.linalg.inv(bandwidth)
+    quadratic = (inverse[0, 0] * mesh_u**2 + 2 * inverse[0, 1] * mesh_u * mesh_y
+                 + inverse[1, 1] * mesh_y**2)
+    kernel = np.exp(-0.5 * quadratic) / (2 * np.pi * np.sqrt(np.linalg.det(bandwidth)))
+    density_extended = fftconvolve(counts, kernel, mode="same") / len(u)
+    return np.clip(density_extended[pad_y:pad_y + len(y_nodes), pad_u:pad_u + len(u_nodes)],
+                   0.0, None)
 
 
 def kernel_density_distribution(externalities, valuations, maximum_valuation, bandwidth_scale=1.0,
@@ -102,25 +125,7 @@ def kernel_density_distribution(externalities, valuations, maximum_valuation, ba
     y_edges = np.linspace(min(y.min(), y_max) - 4 * sd_y, y_max, num_valuation_cells + 1)
     y_mids = (y_edges[:-1] + y_edges[1:]) / 2
     du, dy = u_nodes[1] - u_nodes[0], y_edges[1] - y_edges[0]
-
-    # Extend the grid by the kernel radius so that reflected points are binned.
-    pad_u, pad_y = int(np.ceil(4 * sd_u / du)) + 1, int(np.ceil(4 * sd_y / dy)) + 1
-    u_extended = u_nodes[0] + du * np.arange(-pad_u, num_externality_nodes + pad_u)
-    y_extended = y_mids[0] + dy * np.arange(-pad_y, num_valuation_cells + pad_y)
-    counts = _linear_binning(np.concatenate([u, u]), np.concatenate([y, 2 * y_max - y]),
-                             u_extended, y_extended)
-
-    offsets_u = du * np.arange(-pad_u, pad_u + 1)
-    offsets_y = dy * np.arange(-pad_y, pad_y + 1)
-    mesh_u, mesh_y = np.meshgrid(offsets_u, offsets_y)
-    inverse = np.linalg.inv(bandwidth)
-    quadratic = (inverse[0, 0] * mesh_u**2 + 2 * inverse[0, 1] * mesh_u * mesh_y
-                 + inverse[1, 1] * mesh_y**2)
-    kernel = np.exp(-0.5 * quadratic) / (2 * np.pi * np.sqrt(np.linalg.det(bandwidth)))
-
-    density_extended = fftconvolve(counts, kernel, mode="same") / num_points
-    density = np.clip(density_extended[pad_y:pad_y + num_valuation_cells,
-                                       pad_u:pad_u + num_externality_nodes], 0.0, None)
+    density = _kernel_density_on_grid(u, y, y_max, bandwidth, u_nodes, y_mids)
 
     cell_mass = density * du * dy
     keep = cell_mass > relative_mass_floor * cell_mass.max()
@@ -128,14 +133,18 @@ def kernel_density_distribution(externalities, valuations, maximum_valuation, ba
     valuation_edges = np.exp(y_edges)
     rows, columns = np.nonzero(keep)
 
-    # Density in (e, v) coordinates for contour plots: f(u, y) |du/de| |dy/dv|.
-    jacobian = 1.0 / (externality_unit * np.cosh(u_nodes)[None, :] * np.exp(y_mids)[:, None])
+    # Density in (e, v) coordinates for the figures, f(u, y) |du/de| |dy/dv|, on a fine grid
+    # over the same rectangle (independent of the cells).
+    plot_u = np.linspace(u_nodes[0], u_nodes[-1], PLOT_GRID_POINTS)
+    plot_y = np.linspace(y_edges[0], y_max, PLOT_GRID_POINTS)
+    plot_density = _kernel_density_on_grid(u, y, y_max, bandwidth, plot_u, plot_y)
+    jacobian = 1.0 / (externality_unit * np.cosh(plot_u)[None, :] * np.exp(plot_y)[:, None])
     return TypeDistribution(
         externality_nodes[columns], valuation_edges[rows], valuation_edges[rows + 1],
         cell_mass[rows, columns],
         name=name,
-        density_grid={"externality_grid": externality_nodes, "valuation_grid": np.exp(y_mids),
-                      "density": density * jacobian},
+        density_grid={"externality_grid": externality_unit * np.sinh(plot_u),
+                      "valuation_grid": np.exp(plot_y), "density": plot_density * jacobian},
         metadata={"smoothing": "kernel", "bandwidth_scale": bandwidth_scale,
                   "preserve_variance": preserve_variance,
                   "bandwidth_matrix_asinh_log": bandwidth.tolist(),
