@@ -324,7 +324,7 @@ runs/2026-10-19_1400_optimize_standard-test/
           tau.json  tau.csv  first-order.csv  results.json  data.npz  README.md
           1_types-tau-penalties.pdf … 6_marginal-contribution.pdf
           search/tried-taus.pdf  search/convergence.pdf  search/iterations.pdf
-          thumbs/*.webp  search/thumbs/*.webp
+          thumbs/*.webp  thumbs/small/*.webp  search/thumbs/*.webp
 runs/index.csv             one line per run: folder, kind, name, start, seconds, combinations,
                            failures, failed checks, commit, dirty flag, host
 ```
@@ -349,7 +349,7 @@ Mechanisms: VCG, VCG-PA, IVCG-PA, first best. Metrics: welfare W, valuation welf
 
 ### 4.3 Figures
 
-Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves) are rasterized at 150 dpi. Each has a WebP preview `thumbs/<name>.webp` in its folder (80 pixels per inch, shown at 0.75 of that width; half of it in the market READMEs' preview tables). The link name is the label used in the run README's results table and the name for `--paper`.
+Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves) are rasterized at 150 dpi. Each has a WebP preview `thumbs/<name>.webp` in its folder (60 pixels per inch, shown at its pixel size); the market READMEs' preview tables use a copy reduced to 0.75 of that width, `thumbs/small/<name>.webp`. Previews are markdown images, which every markdown viewer shows (VS Code's markdown editor does not show HTML `<img>` tags). The link name is the label used in the run README's results table and the name for `--paper`.
 
 **Per combination:**
 

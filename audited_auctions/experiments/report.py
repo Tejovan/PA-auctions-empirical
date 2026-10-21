@@ -18,7 +18,8 @@ saved in the compare/ folder of the deepest level above every varied input:
                                      input ∈ market, form, optimizer, objective, threshold
   <distribution>/compare/welfare-vs-zeta_<fixed inputs>.pdf
   compare/share-of-first-best-gain.pdf
-Every figure has a WebP preview thumbs/<name>.webp next to it (figures.THUMBNAIL_DPI). README files (FIGURE_INFO and
+Every figure has a WebP preview thumbs/<name>.webp next to it (figures.THUMBNAIL_DPI; market
+READMEs: thumbs/small/<name>.webp, SMALL_PREVIEW_SCALE of its width). README files (FIGURE_INFO and
 COMPARE_INFO hold the descriptions):
   README.md                   inputs, checks, results with links to every figure, gap
                               decomposition, figure reference, comparison figures, files
@@ -533,17 +534,36 @@ def _figure_key(file):
     return next((key for key in COMPARE_INFO if name.startswith(key)), Path(file).stem)
 
 
-def _preview(folder, file, base, scale=figures.THUMBNAIL_SCALE):
-    """HTML preview of the figure file (path relative to the run folder) linked to its PDF,
-    for a README in folder base; shown at scale of the preview's pixel width."""
+# Previews in the market READMEs: the figure's preview reduced to this share of its width,
+# saved as thumbs/small/<name>.webp, so that the combinations fit side by side.
+SMALL_PREVIEW_SCALE = 0.75
+
+
+def _small_thumbnail(folder, thumbnail):
+    """thumbs/small/<name>.webp next to the preview thumbnail (path relative to folder),
+    made from it if missing or older; returns its path relative to folder."""
+    small = thumbnail.parent / "small" / thumbnail.name
+    source, target = folder / thumbnail, folder / small
+    try:
+        if not target.exists() or target.stat().st_mtime < source.stat().st_mtime:
+            target.parent.mkdir(exist_ok=True)
+            with Image.open(source) as image:
+                size = (round(SMALL_PREVIEW_SCALE * image.width),
+                        round(SMALL_PREVIEW_SCALE * image.height))
+                image.resize(size, Image.LANCZOS).save(target, quality=80)
+    except OSError:
+        return thumbnail
+    return small
+
+
+def _preview(folder, file, base, small=False):
+    """Markdown preview of the figure file (path relative to the run folder) linked to its
+    PDF, for a README in folder base; small: the reduced preview of the market READMEs."""
     relative = Path(os.path.relpath(file, base))
     thumbnail = figures.thumbnail_path(relative)
-    try:
-        with Image.open(folder / base / thumbnail) as image:
-            width = f' width="{round(scale * image.width)}"'
-    except OSError:
-        width = ""
-    return f'<a href="{relative}"><img src="{thumbnail}" alt="{relative.stem}"{width}></a>'
+    if small:
+        thumbnail = _small_thumbnail(folder / base, thumbnail)
+    return f"[![{relative.stem}]({thumbnail})]({relative})"
 
 
 def _gallery(folder, files, base, info=None):
@@ -659,17 +679,17 @@ def _market_readme(folder, market, rows, leaf_files):
         for (label, column), row in grid.items():
             file = f"{row['path']}/{leaf_name}"
             if file in leaf_files.get(row["path"], []):
-                cells[label, column] = _preview(folder, file, market, scale=0.5)
+                cells[label, column] = _preview(folder, file, market, small=True)
         if not cells:
             continue
         title, text, _ = FIGURE_INFO[key]
-        lines += [f"### {title}", "", text, "", "<table>",
-                  "<tr><th></th>" + "".join(f"<th>{column}</th>" for column in columns) + "</tr>"]
+        lines += [f"### {title}", "", text, "",
+                  "| | " + " | ".join(columns) + " |", "|---" * (len(columns) + 1) + "|"]
         for label in row_labels:
-            lines.append(f"<tr><th>{label}</th>" + "".join(
-                f"<td>{cells.get((label, column), 'not drawn' if (label, column) in grid else '')}"
-                "</td>" for column in columns) + "</tr>")
-        lines += ["</table>", ""]
+            lines.append(f"| **{label}** | " + " | ".join(
+                cells.get((label, column), "not drawn" if (label, column) in grid else "")
+                for column in columns) + " |")
+        lines.append("")
     (folder / market / "README.md").write_text("\n".join(lines))
 
 

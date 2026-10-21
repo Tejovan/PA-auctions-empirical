@@ -179,10 +179,9 @@ PAPER_MARGINS = {"left": 0.62, "right": 0.12, "bottom": 0.50, "top": 0.12}
 PAPER_DPI = 300  # rasterized artists in paper panels (run figures: STYLE, 150 dpi)
 _PAPER = {"on": False}
 
-# Previews of run figures in the README files: WebP, 80 pixels per inch, shown at
-# THUMBNAIL_SCALE of their pixel width (sharp on high-density screens and when zoomed).
-THUMBNAIL_DPI = 80
-THUMBNAIL_SCALE = 0.75
+# Previews of run figures in the README files: WebP, 60 pixels per inch, shown at their
+# pixel size (markdown images: VS Code's markdown editor does not render HTML <img> tags).
+THUMBNAIL_DPI = 60
 # Previews of the synthetic families in the code README: WebP, about 70 pixels per inch.
 DISTRIBUTION_PREVIEW_DPI = 70
 

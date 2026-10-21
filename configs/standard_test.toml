@@ -21,8 +21,8 @@ num_externality_nodes = 61
 num_valuation_cells = 100
 
 [markets]
-num_bidders = [4, 8]
-num_goods = [1, 2]
+num_bidders = [4, 6]
+num_goods = [1, 3]
 
 [design]
 objectives = ["vcg_pa", "ivcg_pa"]

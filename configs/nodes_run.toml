@@ -2,9 +2,9 @@
 # (ascent from the relaxation's τ only), both objectives, two distributions.
 #   python run.py configs/nodes_run.toml --yes
 # Default grids (harmful_middle 151 × 150, tweets 241 × 400); 100 iterations, 3 polishes,
-# 2 random starts, 20-generation short genetic start: more thorough than the standard test.
-# Estimate 4.6 min on a MacBook Pro M4 (with the defaults, 3 random starts and 40 generations:
-# 5.8 min of computation).
+# 3 random starts, 20-generation short genetic start: more thorough than the standard test.
+# Estimate 5.0 min on a MacBook Pro M4 (with 40 generations, the default: 5.8 min of
+# computation).
 # n = 4, k = 4 is the no-competition edge case (every participant gets a good); the
 # relaxation needs k < n and is skipped there.
 
@@ -28,10 +28,10 @@ objectives = ["vcg_pa", "ivcg_pa"]
 
 [[optimizers]]
 label = "br"                     # best-response ascent: zero, zero_welfare, short_genetic,
-method = "best_response"         # relaxation and 2 random starts; best start kept
+method = "best_response"         # relaxation and 3 random starts; best start kept
 threshold_forms = ["nodes"]
 max_iterations = 100
-num_random_starts = 2
+num_random_starts = 3
 short_genetic_generations = 20
 polish_rounds = 3
 
