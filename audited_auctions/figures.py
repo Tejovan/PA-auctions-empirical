@@ -728,30 +728,32 @@ def _bar_parts(mechanism):
 def _part_style(part):
     if part == "valuation_welfare":
         return {**VALUATION_PART, "linewidth": 0.8}
+    if part == "externality_welfare":
+        return dict(EXTERNALITY_PART)
     return {"facecolor": COMPONENT_COLORS[part], "hatch": COMPONENT_HATCHES[part],
             "edgecolor": "white", "linewidth": 1.0}
 
 
-# Expected-outcomes bars: welfare W as a right-pointing ink triangle on the bar, with a
-# white outline so it stands out from the hatched externality fill; its interval is a
-# vertical bar at the triangle's tip. Both have a white halo.
+# Expected-outcomes bars: welfare W as a thick ink level line across the bar, its interval
+# a vertical bar through the line's middle (mean ± interval); both have a white halo. The
+# externality part is a light hatch (dark lines on white), so the ink line stands out.
 BAR_WIDTH = 0.6
-WELFARE_STYLE = (-0.06, 0.07)  # x offsets from the bar center: marker, interval
-WELFARE_MARKER = {"marker": ">", "color": INK, "markersize": 7, "markeredgecolor": "white",
-                  "markeredgewidth": 1.0, "linestyle": "none"}
-HALO = [path_effects.withStroke(linewidth=3.2, foreground="white")]
+HALO = [path_effects.withStroke(linewidth=3.6, foreground="white")]
+EXTERNALITY_PART = {"facecolor": "white", "edgecolor": "#3b3b3b", "hatch": "///",
+                    "linewidth": 0.8}
 
 
-def _welfare_level(ax, position, welfare, interval):
-    """W at the bar: the marker, and the interval at the marker's tip."""
-    marker_x, interval_x = (position + offset for offset in WELFARE_STYLE)
+def _welfare_level(ax, position, welfare, interval, width=BAR_WIDTH):
+    """W at the bar: a level line across it, and the interval through its middle."""
     if interval:
-        bars = ax.errorbar(interval_x, welfare, yerr=[[max(welfare - interval[0], 0)],
-                                                      [max(interval[1] - welfare, 0)]],
-                           color=INK, capsize=2.5, linewidth=1.1, capthick=1.1, zorder=4)
+        bars = ax.errorbar(position, welfare, yerr=[[max(welfare - interval[0], 0)],
+                                                    [max(interval[1] - welfare, 0)]],
+                           color=INK, capsize=3, linewidth=1.1, capthick=1.1, zorder=5)
         for artist in bars.lines[1] + bars.lines[2]:
             artist.set_path_effects(HALO)
-    ax.plot(marker_x, welfare, **WELFARE_MARKER, zorder=5)
+    half = 0.5 * width
+    ax.plot([position - half, position + half], [welfare, welfare], color=INK, linewidth=2.2,
+            solid_capstyle="butt", path_effects=HALO, zorder=6)
 
 
 def _fit_labels(fig, ax, labels, pad_points=2.0):
@@ -814,7 +816,8 @@ def expected_outcomes(results, path):
         ax.legend(handles=[Patch(**_part_style(p), label=METRIC_LABELS[p]
                                  + (" (first best)" if p == "valuation_welfare"
                                     and not _PAPER["on"] else "")) for p in parts]
-                  + [Line2D([], [], **WELFARE_MARKER, label="welfare W (sum)")],
+                  + [Line2D([], [], color=INK, linewidth=2.2, path_effects=HALO,
+                            label="welfare W (sum)" + (", with interval" if bootstrap else ""))],
                   loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2)
         _fit_labels(fig, ax, labels)
 
