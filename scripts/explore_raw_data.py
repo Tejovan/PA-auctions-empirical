@@ -290,32 +290,37 @@ def fig_beta_parts(table, ours):
 
 def fig_signs(table, ours):
     """Which ratings grow with reach: by note sign and helpfulness level."""
-    eta = table.impression_count.to_numpy(float)
-    misleading = ours[ours.sign < 0].groupby("tweetId").agg(
-        helpful=("n_h", "sum"), somewhat=("n_s", "sum"), not_helpful=("n_nh", "sum"),
-        top=("n_h", "max"), notes=("noteId", "size"))
-    frame = table.set_index("id").join(misleading).fillna(0)
-    fig, axes = plt.subplots(1, 3, figsize=(9.3, 2.9))
-    ax = axes[0]
+    eta_all = table.impression_count.to_numpy(float)
+    fig, axes = plt.subplots(2, 2, figsize=(6.8, 7.4))
     series = [("helpful", "Helpful", "-", "o"), ("somewhat", "Somewhat helpful", "--", "s"),
               ("not_helpful", "Not helpful", ":", "^"), ("top", "Helpful, top note", "-.", "D")]
-    for (column, label, line, marker), color in zip(series, CATEGORY_COLORS):
-        y = frame[column].to_numpy(float)
+    for ax, sign, letter, title in ((axes[0, 0], -1, "a", "misleading"),
+                                    (axes[0, 1], 1, "b", "not-misleading")):
+        counts = ours[ours.sign == sign].groupby("tweetId").agg(
+            helpful=("n_h", "sum"), somewhat=("n_s", "sum"), not_helpful=("n_nh", "sum"),
+            top=("n_h", "max"))
+        frame = table.set_index("id").join(counts, how="inner")  # posts with such a note
+        eta = frame.impression_count.to_numpy(float)
         edges = np.quantile(eta, np.linspace(0, 1, 13))
         index = np.clip(np.digitize(eta, edges[1:-1]), 0, 11)
-        x = [np.median(eta[index == b]) for b in range(12)]
-        m = [np.median(y[index == b]) for b in range(12)]
-        slope = np.polyfit(np.log(eta[y > 0]), np.log(y[y > 0]), 1)[0]
-        ax.plot(x, m, color=color, linestyle=line, marker=marker, markersize=3.5,
-                linewidth=1.4, label=f"{label} (slope {slope:.2f})")
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlabel("impressions $\\eta$")
-    ax.set_ylabel("median ratings")
-    ax.set_title("(a) Ratings on misleading notes", loc="left")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.25))
-    for ax, column, letter, label in ((axes[1], "beta_minus", "b", "$-\\beta^-$ (misleading notes)"),
-                                      (axes[2], "beta_plus", "c", "$\\beta^+$ (not-misleading notes)")):
+        for (column, label, line, marker), color in zip(series, CATEGORY_COLORS):
+            y = frame[column].to_numpy(float)
+            x = [np.median(eta[index == b]) for b in range(12)]
+            m = [np.median(y[index == b]) for b in range(12)]
+            slope = np.polyfit(np.log(eta[y > 0]), np.log(y[y > 0]), 1)[0]
+            ax.plot(x, m, color=color, linestyle=line, marker=marker, markersize=3.5,
+                    linewidth=1.4, label=f"{label} (slope {slope:.2f})")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_ylim(0.7, 3000)
+        ax.set_xlabel("impressions $\\eta$")
+        ax.set_ylabel("median ratings per post")
+        ax.set_title(f"({letter}) Ratings on {title} notes\n{len(frame)} posts with such a note",
+                     loc="left")
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), fontsize=7)
+    eta = eta_all
+    for ax, column, letter, label in ((axes[1, 0], "beta_minus", "c", "$-\\beta^-$ (misleading notes)"),
+                                      (axes[1, 1], "beta_plus", "d", "$\\beta^+$ (not-misleading notes)")):
         y = table[column].abs().to_numpy(float)
         keep = y > 0
         scatter(ax, eta[keep], y[keep])
@@ -325,6 +330,7 @@ def fig_signs(table, ours):
         ax.set_xlabel("impressions $\\eta$")
         ax.set_title(f"({letter}) {label}\nSpearman with $\\eta$ {rho(eta, y):.2f}; "
                      f"> 0 in {keep.mean():.0%}", loc="left")
+    fig.tight_layout()
     save(fig, "7_ratings_by_sign_and_level")
 
 
@@ -390,6 +396,227 @@ def fig_age(table):
     save(fig, "6_post_age")
 
 
+# ---------------------------------------------------------------- our posts vs all noted posts
+
+GROUPS = (("ours", "our posts", "-"), ("unfetched", "> 400 Helpful, not fetched", "--"),
+          ("near", "100-400 Helpful", ":"), ("rest", "< 100 Helpful", "-."))
+MISLEADING_TAGS = ("misleadingFactualError", "misleadingMissingImportantContext",
+                   "misleadingUnverifiedClaimAsFact", "misleadingManipulatedMedia",
+                   "misleadingOutdatedInformation", "misleadingSatire", "misleadingOther")
+NOT_MISLEADING_TAGS = ("notMisleadingFactuallyCorrect", "notMisleadingPersonalOpinion",
+                       "notMisleadingClearlySatire", "notMisleadingOutdatedButNotWhenWritten",
+                       "notMisleadingOther")
+HELPFUL_TAGS = ("helpfulGoodSources", "helpfulClear", "helpfulAddressesClaim",
+                "helpfulImportantContext", "helpfulUnbiasedLanguage", "helpfulOther")
+NOT_HELPFUL_TAGS = ("notHelpfulNoteNotNeeded", "notHelpfulOpinionSpeculation",
+                    "notHelpfulMissingKeyPoints", "notHelpfulIncorrect",
+                    "notHelpfulSourcesMissingOrUnreliable", "notHelpfulArgumentativeOrBiased",
+                    "notHelpfulIrrelevantSources", "notHelpfulHardToUnderstand",
+                    "notHelpfulSpamHarassmentOrAbuse", "notHelpfulOther")
+SNOWFLAKE_EPOCH_MS = 1288834974657
+
+
+def tag_label(tag):
+    """'notHelpfulNoteNotNeeded' -> 'note not needed'."""
+    for prefix in ("notMisleading", "misleading", "notHelpful", "helpful"):
+        if tag.startswith(prefix):
+            tag = tag[len(prefix):]
+            break
+    words = "".join(f" {c.lower()}" if c.isupper() else c for c in tag).strip()
+    return words
+
+
+def note_extras():
+    """Note reason fields and per-note rating-tag sums (raw_data/*.tsv written by mariadb)."""
+    fields = cached("note_fields", lambda: pd.read_csv(ROOT / "raw_data" / "note_fields.tsv",
+                                                       sep="\t", na_values=["NULL"]))
+    tags = cached("note_tags", lambda: pd.read_csv(ROOT / "raw_data" / "note_tags.tsv",
+                                                   sep="\t", na_values=["NULL"]))
+    return fields.merge(tags, on="noteId", how="left")
+
+
+def post_groups(all_notes, post_ids):
+    """Every post with notes, in four groups by its most-helpful note."""
+    frame = all_notes.assign(misleading=all_notes.classification == MISLEADING)
+    per = frame.groupby("tweetId").agg(
+        max_helpful=("n_h", "max"), n_notes=("noteId", "size"), n_ratings=("n_all", "sum"),
+        first_note_ms=("note_ms", "min"), share_misleading=("misleading", "mean"))
+    group = np.select([per.index.isin(post_ids), per.max_helpful > 400, per.max_helpful >= 100],
+                      ["ours", "unfetched", "near"], "rest")
+    per["group"] = group
+    ids = per.index.to_numpy(np.int64)
+    post_ms = np.where(ids > 2**41, (ids >> 22) + SNOWFLAKE_EPOCH_MS, np.nan)
+    per["post_ms"] = post_ms
+    per["note_delay_days"] = (per.first_note_ms - per.post_ms) / DAY
+    return per
+
+
+def group_color(index):
+    return CATEGORY_COLORS[index]
+
+
+def ccdf(ax, values, **kwargs):
+    values = np.sort(np.asarray(values, float))
+    values = values[values > 0]
+    share = 1 - np.arange(len(values)) / len(values)
+    ax.step(values, share, where="post", **kwargs)
+
+
+def fig_groups_counts(per, notes_grouped):
+    fig, axes = plt.subplots(2, 2, figsize=(6.8, 5.6))
+    for i, (key, label, line) in enumerate(GROUPS):
+        posts = per[per.group == key]
+        notes = notes_grouped[notes_grouped.group == key]
+        kwargs = {"color": group_color(i), "linestyle": line, "linewidth": 1.4,
+                  "label": f"{label} ({len(posts):,} posts)"}
+        ccdf(axes[0, 0], posts.n_notes, **kwargs)
+        ccdf(axes[0, 1], notes.n_all, **kwargs)
+        axes[1, 0].hist(posts.share_misleading, bins=np.linspace(0, 1, 21), density=True,
+                        histtype="step", **kwargs)
+        rated = notes[(notes.classification == MISLEADING) & (notes.n_all >= 20)]
+        axes[1, 1].hist(rated.helpful_share, bins=np.linspace(0, 1, 26), density=True,
+                        histtype="step", **kwargs)
+    for ax in axes[0]:
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_ylabel("share of at least")
+    axes[0, 0].set_xlabel("notes on the post")
+    axes[0, 0].set_title("(a) Notes per post", loc="left")
+    axes[0, 1].set_xlabel("ratings of the note")
+    axes[0, 1].set_title("(b) Ratings per note", loc="left")
+    axes[1, 0].set_xlabel("share of the post's notes that are misleading")
+    axes[1, 0].set_ylabel("density")
+    axes[1, 0].set_title("(c) Note classification mix", loc="left")
+    axes[1, 1].set_xlabel("helpful share of the note's ratings")
+    axes[1, 1].set_title("(d) Contention, misleading notes\nwith at least 20 ratings", loc="left")
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=2, bbox_to_anchor=(0.5, -0.04))
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    save(fig, "8_groups_notes_and_ratings")
+
+
+def fig_groups_timing(per, notes_grouped):
+    fig, axes = plt.subplots(1, 3, figsize=(9.3, 3.2))
+    days = np.array(LAG_DAYS)
+    for i, (key, label, line) in enumerate(GROUPS):
+        posts = per[per.group == key]
+        notes = notes_grouped[notes_grouped.group == key]
+        kwargs = {"color": group_color(i), "linestyle": line, "linewidth": 1.4, "label": label}
+        delay = posts.note_delay_days.dropna().clip(lower=1 / 1440)
+        values = np.sort(delay)
+        axes[0].plot(values, np.arange(1, len(values) + 1) / len(values), **kwargs)
+        total = notes.n_all.sum()
+        axes[1].plot(days, [notes[f"n_{d}d"].sum() / total for d in LAG_DAYS], marker="o",
+                     markersize=3, **kwargs)
+        months = pd.to_datetime(posts.post_ms.dropna(), unit="ms")
+        months = months[months >= "2022-10-01"].dt.to_period("M")
+        share = months.value_counts(normalize=True).sort_index()
+        axes[2].plot(share.index.to_timestamp(), share.values, **kwargs)
+    axes[0].set_xscale("log")
+    axes[0].set_xlabel("days from post to its first note")
+    axes[0].set_ylabel("share of posts")
+    axes[0].set_title("(a) Note delay", loc="left")
+    axes[1].set_xscale("log")
+    axes[1].set_ylim(0.5, 1)
+    axes[1].set_xlabel("days after the note was written")
+    axes[1].set_ylabel("share of ratings so far")
+    axes[1].set_title("(b) Rating timing", loc="left")
+    axes[2].set_xlabel("post month")
+    axes[2].set_ylabel("share of the group's posts")
+    axes[2].set_title("(c) Post dates", loc="left")
+    axes[2].tick_params(axis="x", labelrotation=30)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=4, bbox_to_anchor=(0.5, -0.06))
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    save(fig, "9_groups_timing")
+
+
+def grouped_bars(ax, rows, values, title, xlabel):
+    """Horizontal bars: rows = tags, one bar per group."""
+    height = 0.8 / len(GROUPS)
+    y = np.arange(len(rows))
+    for i, (key, label, _) in enumerate(GROUPS):
+        ax.barh(y + (i - 1.5) * height, values[key], height=height, color=group_color(i),
+                alpha=0.85, label=label, hatch=("", "///", "...", "xx")[i],
+                edgecolor="white", linewidth=0.3)
+    ax.set_yticks(y, [tag_label(r) for r in rows])
+    ax.invert_yaxis()
+    ax.set_xlabel(xlabel)
+    ax.set_title(title, loc="left")
+
+
+def fig_groups_note_reasons(notes_grouped):
+    fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.6))
+    for ax, classification, tags, letter, name in (
+            (axes[0], MISLEADING, MISLEADING_TAGS + ("trustworthySources",), "a", "misleading"),
+            (axes[1], NOT_MISLEADING, NOT_MISLEADING_TAGS + ("trustworthySources",), "b",
+             "not-misleading")):
+        values = {}
+        for key, _, _ in GROUPS:
+            notes = notes_grouped[(notes_grouped.group == key)
+                                  & (notes_grouped.classification == classification)]
+            values[key] = [notes[t].mean() for t in tags]
+        grouped_bars(ax, tags, values, f"({letter}) Writer's reasons, {name} notes",
+                     "share of notes")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=4, bbox_to_anchor=(0.5, -0.05))
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    save(fig, "10_groups_note_reasons")
+
+
+def fig_groups_rating_reasons(notes_grouped):
+    fig, axes = plt.subplots(1, 2, figsize=(7.6, 4.4))
+    misleading = notes_grouped[notes_grouped.classification == MISLEADING]
+    for ax, tags, denominator, letter, name in (
+            (axes[0], HELPFUL_TAGS, ("n_h", "n_s"), "a", "Helpful and Somewhat"),
+            (axes[1], NOT_HELPFUL_TAGS, ("n_nh", "n_s"), "b", "Not helpful and Somewhat")):
+        values = {}
+        for key, _, _ in GROUPS:
+            notes = misleading[misleading.group == key]
+            total = notes[list(denominator)].sum().sum()
+            values[key] = [notes[t].sum() / total for t in tags]
+        grouped_bars(ax, tags, values, f"({letter}) Raters' reasons\n({name} ratings)",
+                     "tags per rating")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=4, bbox_to_anchor=(0.5, -0.04))
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    save(fig, "11_groups_rating_reasons")
+
+
+def fig_not_helpful_reasons_vs_reach(table, notes_grouped):
+    """Within our posts: why misleading notes get Not-helpful ratings, by reach."""
+    misleading = notes_grouped[(notes_grouped.classification == MISLEADING)
+                               & notes_grouped.tweetId.isin(table.id)]
+    misleading = misleading.assign(top=misleading.groupby("tweetId").n_h.rank(
+        ascending=False, method="first") == 1)
+    eta = table.set_index("id").impression_count
+    bins = pd.qcut(eta, 6)
+    shown = ("notHelpfulNoteNotNeeded", "notHelpfulOpinionSpeculation",
+             "notHelpfulMissingKeyPoints", "notHelpfulIncorrect",
+             "notHelpfulSourcesMissingOrUnreliable")
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.0), sharey=True)
+    for ax, top, letter, name in ((axes[0], True, "a", "top misleading note"),
+                                  (axes[1], False, "b", "other misleading notes")):
+        notes = misleading[misleading.top == top]
+        per_post = notes.groupby("tweetId")[list(shown) + ["n_nh", "n_s"]].sum()
+        per_post["bin"] = bins.reindex(per_post.index)
+        grouped = per_post.groupby("bin", observed=True).sum()
+        x = [interval.mid for interval in grouped.index]
+        x = eta.groupby(bins, observed=True).median().loc[grouped.index].to_numpy()
+        for (tag, color, line) in zip(shown, CATEGORY_COLORS + (INK,),
+                                      ("-", "--", ":", "-.", (0, (5, 1, 1, 1)))):
+            ax.plot(x, grouped[tag] / (grouped.n_nh + grouped.n_s), color=color,
+                    linestyle=line, marker="o", markersize=3, linewidth=1.4,
+                    label=tag_label(tag))
+        ax.set_xscale("log")
+        ax.set_xlabel("impressions $\\eta$ (median of sixth)")
+        ax.set_title(f"({letter}) {name}", loc="left")
+    axes[0].set_ylabel("tags per Not-helpful\nor Somewhat rating")
+    axes[1].legend(loc="upper left", bbox_to_anchor=(1.02, 1))
+    fig.tight_layout()
+    save(fig, "12_not_helpful_reasons_vs_reach")
+
+
 # ---------------------------------------------------------------- report
 
 def summary(all_notes, table, ours, per_post, in_data, csv):
@@ -450,8 +677,27 @@ FIGURES = {
     "6_post_age": "Post age. (a) Post dates; (b) delay from post to its first note; "
     "(c) impressions against age in months at the pull date 2025-02-02.",
     "7_ratings_by_sign_and_level": "Which ratings grow with reach. (a) Median ratings on a "
-    "post's misleading notes by helpfulness level, against impressions; slope = log-log "
-    "regression slope. (b) Rating mass of misleading notes; (c) of not-misleading notes.",
+    "post's misleading notes by helpfulness level, against impressions, in 12 bins of equal "
+    "size; slope = log-log regression slope over posts with a positive count. (b) The same for "
+    "not-misleading notes, over posts with at least one. (c) Rating mass of misleading notes; "
+    "(d) of not-misleading notes.",
+    "8_groups_notes_and_ratings": "Our posts against all noted posts. Groups by the number of "
+    "Helpful ratings of the post's most-helpful note: our posts; > 400 but not in our data; "
+    "100-400; < 100. (a) Notes per post and (b) ratings per note, as the share of posts or "
+    "notes with at least that many; (c) share of a post's notes classified misleading; "
+    "(d) helpful share of the ratings of misleading notes with at least 20 ratings.",
+    "9_groups_timing": "Timing by group. (a) Delay from post to its first note (post time "
+    "from the post ID); (b) share of ratings within d days after the note; (c) post months "
+    "from October 2022 (earlier posts: 0.2% of our posts, 2.8% of the < 100 Helpful group).",
+    "10_groups_note_reasons": "Reasons the note writer selected, share of notes by group. "
+    "(a) Misleading notes; (b) not-misleading notes.",
+    "11_groups_rating_reasons": "Reasons raters selected on misleading notes, tags per rating "
+    "by group. (a) Helpful tags per Helpful or Somewhat rating; (b) Not-helpful tags per "
+    "Not-helpful or Somewhat rating. A rating can carry several tags. Tags of the 2021 "
+    "rating form (unused since) are omitted.",
+    "12_not_helpful_reasons_vs_reach": "Our posts: Not-helpful reasons on misleading notes by "
+    "reach (sixths of impressions). (a) The post's top misleading note (most Helpful "
+    "ratings); (b) its other misleading notes.",
 }
 
 
@@ -468,8 +714,18 @@ def main():
     fig_normalizations(table)
     fig_age(table)
     fig_signs(table, ours)
+    per = post_groups(all_notes, post_frame.id)
+    notes_grouped = note_scores(all_notes.merge(note_extras(), on="noteId", how="left")).merge(
+        per[["group"]], left_on="tweetId", right_index=True)
+    fig_groups_counts(per, notes_grouped)
+    fig_groups_timing(per, notes_grouped)
+    fig_groups_note_reasons(notes_grouped)
+    fig_groups_rating_reasons(notes_grouped)
+    fig_not_helpful_reasons_vs_reach(table, notes_grouped)
     rows = summary(all_notes, table, ours, per_post, in_data, csv)
     rows["posts in tweets table"] = len(post_frame)
+    for key, label, _ in GROUPS:
+        rows[f"posts with notes: {label}"] = int((per.group == key).sum())
     selected = per_post.index[per_post.max_helpful > 400]
     rows["  of which in tweets table"] = int(selected.isin(post_frame.id).sum())
     rows["posts in tweets table with no note > 400 Helpful"] = int(
