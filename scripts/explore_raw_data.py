@@ -22,6 +22,7 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
+import matplotlib.lines
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -29,7 +30,8 @@ from scipy.stats import spearmanr
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from audited_auctions.figures import CATEGORY_COLORS, INK, INK_SECONDARY, REFERENCE, STYLE  # noqa: E402
+from audited_auctions.figures import (CATEGORY_COLORS, HALO, INK, INK_SECONDARY,  # noqa: E402
+                                     REFERENCE, STYLE)
 
 CACHE = ROOT / "raw_data" / "cache"
 OUT = ROOT / "output" / "raw_data_exploration"
@@ -126,6 +128,7 @@ def post_table(all_notes, post_frame):
         "n_notes": grouped.size(),
         "n_misleading": grouped.sign.apply(lambda s: (s < 0).sum()),
         "n_ratings": grouped.n_all.sum(),
+        "n_helpful": grouped.n_h.sum(),
         "n_leveled": grouped.n_leveled.sum(),
         "n_old": grouped.n_old.sum(),
         "max_note_ratings": grouped.n_all.max(),
@@ -394,6 +397,67 @@ def fig_age(table):
     ax.set_title(f"(c) Reach does not grow with age\nSpearman: {rho(months, eta):.2f}",
                  loc="left")
     save(fig, "6_post_age")
+
+
+COLOR_BINS = {
+    "n_ratings": ("ratings on the post's notes", (0, 1000, 2000, 5000, np.inf)),
+    "n_helpful": ("Helpful ratings on the post's notes", (0, 700, 1200, 2500, np.inf)),
+}
+
+
+def bin_labels(edges):
+    labels = []
+    for low, high in zip(edges[:-1], edges[1:]):
+        labels.append(f"< {high:,.0f}" if low == 0 else
+                      f"≥ {low:,.0f}" if np.isinf(high) else f"{low:,.0f}–{high:,.0f}")
+    return labels
+
+
+def fig_beta_colored(table):
+    """Signed beta and its two sign parts against reach, points colored by rating volume."""
+    eta = table.impression_count.to_numpy(float)
+    panels = (("beta", "aggregate rating $\\beta$", "linear"),
+              ("beta_minus", "$-\\beta^-$ (misleading notes)", "log"),
+              ("beta_plus", "$\\beta^+$ (not-misleading notes)", "log"))
+    fig, axes = plt.subplots(2, 3, figsize=(9.6, 7.0))
+    order = np.random.default_rng(0).permutation(len(table))
+    for row, (column, (name, edges)) in enumerate(COLOR_BINS.items()):
+        counts = table[column].to_numpy(float)
+        index = np.digitize(counts, edges[1:-1])
+        colors = matplotlib.colormaps["viridis"](np.linspace(0.1, 0.9, len(edges) - 1))
+        labels = bin_labels(edges)
+        for col, (field, label, scale) in enumerate(panels):
+            ax = axes[row, col]
+            y = table[field].to_numpy(float)
+            y = -y if field == "beta_minus" else y
+            keep = y > 0 if scale == "log" else np.full(len(y), True)
+            sel = order[keep[order]]
+            ax.scatter(eta[sel], y[sel], s=3, c=colors[index[sel]], alpha=0.45, linewidths=0,
+                       rasterized=True)
+            for b, color in enumerate(colors):
+                in_bin = keep & (index == b)
+                if in_bin.sum() >= 60:
+                    edges_eta = np.quantile(eta[in_bin], np.linspace(0, 1, 7))
+                    which = np.clip(np.digitize(eta[in_bin], edges_eta[1:-1]), 0, 5)
+                    xs = [np.median(eta[in_bin][which == k]) for k in range(6)]
+                    ms = [np.median(y[in_bin][which == k]) for k in range(6)]
+                    ax.plot(xs, ms, color=color, linewidth=1.6, marker="o", markersize=3,
+                            path_effects=HALO)
+            ax.set_xscale("log")
+            if scale == "log":
+                ax.set_yscale("log")
+            else:
+                ax.axhline(0, **REFERENCE)
+                ax.set_ylim(np.quantile(y, 0.002), np.quantile(y, 0.998))
+            ax.set_xlabel("impressions $\\eta$")
+            letter = "abcdef"[3 * row + col]
+            ax.set_title(f"({letter}) {label}", loc="left")
+        handles = [matplotlib.lines.Line2D([], [], color=c, marker="o", linestyle="-",
+                                           markersize=4, label=l) for c, l in zip(colors, labels)]
+        axes[row, 2].legend(handles=handles, title=f"color: {name}", loc="upper left",
+                            bbox_to_anchor=(1.02, 1), title_fontsize=8)
+    fig.tight_layout()
+    save(fig, "13_beta_vs_reach_by_rating_volume")
 
 
 # ---------------------------------------------------------------- our posts vs all noted posts
@@ -681,6 +745,11 @@ FIGURES = {
     "size; slope = log-log regression slope over posts with a positive count. (b) The same for "
     "not-misleading notes, over posts with at least one. (c) Rating mass of misleading notes; "
     "(d) of not-misleading notes.",
+    "13_beta_vs_reach_by_rating_volume": "Aggregate rating against reach, our posts. Columns: "
+    "(a, d) signed beta on a linear axis (dashed: 0; axis cut at the 0.2% and 99.8% "
+    "quantiles); (b, e) rating mass of misleading notes; (c, f) of not-misleading notes (posts "
+    "with such notes). Top row colored by all ratings on the post's notes, bottom row by "
+    "Helpful ratings; lines: median of each color group in 6 bins of equal size.",
     "8_groups_notes_and_ratings": "Our posts against all noted posts. Groups by the number of "
     "Helpful ratings of the post's most-helpful note: our posts; > 400 but not in our data; "
     "100-400; < 100. (a) Notes per post and (b) ratings per note, as the share of posts or "
@@ -714,6 +783,7 @@ def main():
     fig_normalizations(table)
     fig_age(table)
     fig_signs(table, ours)
+    fig_beta_colored(table)
     per = post_groups(all_notes, post_frame.id)
     notes_grouped = note_scores(all_notes.merge(note_extras(), on="noteId", how="left")).merge(
         per[["group"]], left_on="tweetId", right_index=True)
