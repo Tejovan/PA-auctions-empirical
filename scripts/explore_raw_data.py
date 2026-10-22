@@ -471,6 +471,134 @@ def fig_beta_colored(table):
     save(fig, "13_beta_vs_reach_by_rating_volume")
 
 
+def truncated_fit(x, y, cut):
+    """Maximum-likelihood fit of y = a + b x + s N(0, 1), observed only where y > cut."""
+    from scipy import optimize, stats
+
+    def nll(p):
+        mu = p[0] + p[1] * x
+        s = np.exp(p[2])
+        return -(stats.norm.logpdf(y, mu, s) - stats.norm.logsf(cut, mu, s)).sum()
+
+    result = optimize.minimize(nll, [np.mean(y), 0.1, 0.0], method="Nelder-Mead",
+                               options={"maxiter": 20000, "xatol": 1e-7, "fatol": 1e-7})
+    return result.x
+
+
+def top_helpful(ours, table):
+    """Per post: Helpful ratings of its top misleading and top not-misleading note."""
+    notes = ours[ours.tweetId.isin(table.id)]
+    top = notes.groupby(["tweetId", "sign"]).n_h.max().unstack()
+    top.columns = ["misleading" if c < 0 else "not_misleading" for c in top.columns]
+    top["eta"] = table.set_index("id").impression_count.reindex(top.index)
+    return top
+
+
+def fig_truncation(ours, table):
+    """Does the > 400 Helpful selection flatten the reach slope of misleading notes?"""
+    top = top_helpful(ours, table)
+    cut = 400
+    fig, axes = plt.subplots(2, 3, figsize=(9.8, 6.6))
+    slopes = {}
+    for ax, column, letter, name in ((axes[0, 0], "not_misleading", "a", "not-misleading"),
+                                     (axes[0, 1], "misleading", "b", "misleading")):
+        frame = top[top[column] > 0]
+        x = np.log10(frame.eta.to_numpy(float))
+        y = np.log10(frame[column].to_numpy(float))
+        above = y > np.log10(cut)
+        ax.scatter(10 ** x[~above], 10 ** y[~above], s=3, alpha=0.3, color=INK_SECONDARY,
+                   linewidths=0, rasterized=True, label=f"≤ {cut} Helpful")
+        ax.scatter(10 ** x[above], 10 ** y[above], s=3, alpha=0.35, color=CATEGORY_COLORS[0],
+                   linewidths=0, rasterized=True, label=f"> {cut} Helpful")
+        grid = np.linspace(x.min(), x.max(), 50)
+        for keep, color, line, label in ((np.full(len(x), True), INK, "--", "fit, all posts"),
+                                         (above, CATEGORY_COLORS[0], "-", f"fit, > {cut} only")):
+            if keep.sum() < 50 or keep.sum() == len(x) and column == "misleading":
+                continue
+            slope, intercept = np.polyfit(x[keep], y[keep], 1)
+            slopes[(column, label)] = slope
+            ax.plot(10 ** grid, 10 ** (intercept + slope * grid), color=color, linestyle=line,
+                    linewidth=1.6, path_effects=HALO, label=f"{label}: slope {slope:.2f}")
+        ax.axhline(cut, **REFERENCE)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_ylim(0.8, 3e4)
+        ax.set_xlabel("impressions $\\eta$")
+        ax.set_ylabel("Helpful ratings of the top note")
+        ax.set_title(f"({letter}) Top {name} note\n{len(frame):,} posts, {above.mean():.0%} "
+                     f"above {cut}", loc="left")
+        ax.legend(loc="lower right", fontsize=6.5, markerscale=3)
+
+    # (c) impose cuts on the not-misleading notes, whose slope is known without a cut
+    ax = axes[0, 2]
+    frame = top[top.not_misleading > 0]
+    x = np.log10(frame.eta.to_numpy(float))
+    y = np.log10(frame.not_misleading.to_numpy(float))
+    cuts = np.array([1, 3, 10, 30, 100, 200, 400])
+    naive, corrected = [], []
+    for c in cuts:
+        keep = y > np.log10(c + 0.5)
+        naive.append(np.polyfit(x[keep], y[keep], 1)[0])
+        corrected.append(truncated_fit(x[keep], y[keep], np.log10(c + 0.5))[1])
+    ax.axhline(np.polyfit(x, y, 1)[0], **REFERENCE)
+    ax.text(1, np.polyfit(x, y, 1)[0] + 0.015, "no cut", color=INK_SECONDARY, fontsize=7)
+    ax.plot(cuts, naive, color=CATEGORY_COLORS[0], marker="o", markersize=3.5, linewidth=1.4,
+            label="ordinary fit above the cut")
+    ax.plot(cuts, corrected, color=CATEGORY_COLORS[1], linestyle="--", marker="s",
+            markersize=3.5, linewidth=1.4, label="truncated-normal fit")
+    mis = top[top.misleading > cut]
+    mis_slope = np.polyfit(np.log10(mis.eta), np.log10(mis.misleading), 1)[0]
+    ax.plot([cut], [mis_slope], marker="D", color=INK, linestyle="none", markersize=5,
+            label="misleading notes, > 400 (ordinary)")
+    ax.set_xscale("log")
+    ax.set_ylim(0, 0.7)
+    ax.set_xlabel("cut c (keep notes with > c Helpful)")
+    ax.set_ylabel("slope of log Helpful on log $\\eta$")
+    ax.set_title("(c) Cut imposed on not-misleading\nnotes", loc="left")
+    ax.legend(loc="lower left", fontsize=6.5)
+
+    # (d) model-free: share just above the cut, by reach
+    ax = axes[1, 0]
+    for column, c, color, line, marker, label in (
+            ("misleading", 400, INK, "-", "D", "misleading, > 400"),
+            ("not_misleading", 400, CATEGORY_COLORS[0], "--", "o", "not-misleading, > 400"),
+            ("not_misleading", 100, CATEGORY_COLORS[1], ":", "s", "not-misleading, > 100")):
+        frame = top[top[column] > c]
+        bins = pd.qcut(frame.eta, 5)
+        near = (frame[column] <= 1.5 * c).groupby(bins, observed=True).mean()
+        xs = frame.eta.groupby(bins, observed=True).median()
+        ax.plot(xs, near, color=color, linestyle=line, marker=marker, markersize=3.5,
+                linewidth=1.4, label=f"{label} ({len(frame):,})")
+    ax.set_xscale("log")
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("impressions $\\eta$ (median of fifth)")
+    ax.set_ylabel("share within (c, 1.5c]")
+    ax.set_title("(d) Posts just above the cut", loc="left")
+    ax.legend(loc="lower left", fontsize=6.5)
+
+    # (e, f) distributions in the lowest and highest fifth of reach
+    for ax, column, letter, name in ((axes[1, 1], "misleading", "e", "misleading"),
+                                     (axes[1, 2], "not_misleading", "f", "not-misleading")):
+        frame = top[top[column] > 0]
+        fifth = pd.qcut(frame.eta, 5, labels=False)
+        bins = np.logspace(0, 4.5, 46)
+        for k, color, line, label in ((0, CATEGORY_COLORS[1], "-", "lowest fifth of reach"),
+                                      (4, CATEGORY_COLORS[2], "--", "highest fifth of reach")):
+            values = frame[column][fifth == k]
+            ax.hist(values, bins=bins, histtype="step", density=False, color=color,
+                    linestyle=line, linewidth=1.4,
+                    label=f"{label}: median {values.median():.0f}")
+        ax.axvline(cut, **REFERENCE)
+        ax.set_xscale("log")
+        ax.set_xlabel("Helpful ratings of the top note")
+        ax.set_ylabel("number of posts")
+        ax.set_title(f"({letter}) Top {name} note by reach", loc="left")
+        ax.legend(loc="upper left", fontsize=6.5)
+    fig.tight_layout()
+    save(fig, "14_truncation")
+    return slopes
+
+
 # ---------------------------------------------------------------- our posts vs all noted posts
 
 GROUPS = (("ours", "our posts", "-"), ("unfetched", "> 400 Helpful, not fetched", "--"),
@@ -763,6 +891,15 @@ FIGURES = {
     "quantiles); (b, e) rating mass of misleading notes; (c, f) of not-misleading notes (posts "
     "with such notes). Top row colored by all ratings on the post's notes, bottom row by "
     "Helpful ratings; lines: median of each color group in 6 bins of equal size.",
+    "14_truncation": "Does the > 400 Helpful selection flatten the reach slope? (a) Helpful "
+    "ratings of each post's top not-misleading note against impressions; ochre: above 400; "
+    "lines: log-log least-squares fits to all posts and to those above 400 only. (b) The same "
+    "for the top misleading note (almost all above 400 by selection). (c) Slope of the "
+    "not-misleading notes after keeping only notes with more than c Helpful ratings: "
+    "ordinary least squares (ochre) and a truncated-normal maximum-likelihood fit (purple); "
+    "dashed: slope without a cut; diamond: misleading notes above 400. (d) Share of posts "
+    "with a top note at most 1.5 times the cut, by fifth of reach. (e, f) Distribution of the "
+    "top note's Helpful ratings in the lowest and highest fifth of reach.",
     "8_groups_notes_and_ratings": "Our posts against all noted posts. Groups by the number of "
     "Helpful ratings of the post's most-helpful note: our posts; > 400 but not in our data; "
     "100-400; < 100. (a) Notes per post and (b) ratings per note, as the share of posts or "
@@ -797,6 +934,7 @@ def main():
     fig_age(table)
     fig_signs(table, ours)
     fig_beta_colored(table)
+    fig_truncation(ours, table)
     per = post_groups(all_notes, post_frame.id)
     notes_grouped = note_scores(all_notes.merge(note_extras(), on="noteId", how="left")).merge(
         per[["group"]], left_on="tweetId", right_index=True)
