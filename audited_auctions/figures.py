@@ -732,6 +732,14 @@ def _part_style(part):
             "edgecolor": "white", "linewidth": 1.0}
 
 
+# Expected-outcomes bars: welfare W drawn as a filled ink circle beside each bar, so that
+# it differs from the hatched externality fill and keeps its interval clear of the stack.
+BAR_WIDTH = 0.52
+WELFARE_OFFSET = 0.38
+WELFARE_MARKER = {"marker": "o", "color": INK, "markersize": 5, "markeredgecolor": "white",
+                  "markeredgewidth": 0.8, "linestyle": "none"}
+
+
 def _bar_stack(ax, position, outcomes, parts, width=0.6):
     positive, negative = 0.0, 0.0
     for part in parts:
@@ -752,16 +760,17 @@ def expected_outcomes(results, path):
         ax = axes[0, 0]
         positions = np.arange(len(MECHANISMS))
         for position, mechanism in zip(positions, MECHANISMS):
-            _bar_stack(ax, position, exact[mechanism], _bar_parts(mechanism))
+            _bar_stack(ax, position, exact[mechanism], _bar_parts(mechanism), width=BAR_WIDTH)
+            # W (and its interval) beside the bar, clear of the hatched externality fill
             welfare = exact[mechanism]["welfare"]
-            ax.plot(position, welfare, marker="D", color=INK, markersize=6, zorder=4,
-                    markeredgecolor="white")
             interval = (bootstrap or {}).get("level_intervals", {}).get("welfare", {}).get(
                 mechanism)
             if interval:
-                ax.errorbar(position, welfare, yerr=[[max(welfare - interval[0], 0)],
-                                                     [max(interval[1] - welfare, 0)]],
-                            color=INK, capsize=3, linewidth=1, zorder=4)
+                ax.errorbar(position + WELFARE_OFFSET, welfare,
+                            yerr=[[max(welfare - interval[0], 0)],
+                                  [max(interval[1] - welfare, 0)]],
+                            color=INK, capsize=2.5, linewidth=1, zorder=4)
+            ax.plot(position + WELFARE_OFFSET, welfare, **WELFARE_MARKER, zorder=5)
             share = results["share_of_first_best_gain"].get(mechanism)
             # value and share of the first-best gain only (the note names them)
             text = compact(welfare) + (f"\n{_percent(share)}"
@@ -783,8 +792,7 @@ def expected_outcomes(results, path):
         ax.legend(handles=[Patch(**_part_style(p), label=METRIC_LABELS[p]
                                  + (" (first best)" if p == "valuation_welfare"
                                     and not _PAPER["on"] else "")) for p in parts]
-                  + [Line2D([], [], marker="D", color=INK, linestyle="none",
-                            label="welfare W (sum)")],
+                  + [Line2D([], [], **WELFARE_MARKER, label="welfare W (sum)")],
                   loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2)
 
         ax = axes[0, 1]
