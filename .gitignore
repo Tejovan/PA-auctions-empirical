@@ -47,3 +47,9 @@ Thumbs.db
 *.pkl
 # Experiment runs (python run.py ...): outputs, not source
 runs/
+
+# Raw Community Notes / X API data (never commit)
+*.sql
+*.sql.gz
+*.sql.tar.gz
+raw_data/
