@@ -346,27 +346,38 @@ def fig_normalizations(table):
         ("$\\beta$ (rating as harm per view)", beta),
         ("$\\beta$ / ratings (mean score)", beta / table.n_ratings.clip(lower=1).to_numpy(float)),
     ]
-    fig, axes = plt.subplots(2, 3, figsize=(9.3, 5.2))
+    fig, axes = plt.subplots(2, 3, figsize=(9.3, 5.8))
+    negative, positive = beta < 0, beta > 0
     for column, (label, e) in enumerate(candidates):
-        ax = axes[0, column]
-        scatter(ax, eta, -e)
-        neg = e < 0
-        binned_median(ax, eta[neg], -e[neg])
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.set_xlabel("impressions $\\eta$")
-        ax.set_ylabel(f"$-$({label.split(' (')[0]})")
-        ax.set_title(f"({'abc'[column]}) {label}\nSpearman with $\\eta$: {rho(eta, e):.2f}",
-                     loc="left")
-        ax = axes[1, column]
-        scatter(ax, v, -e)
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.set_xlabel("actions per view $\\alpha/\\eta$")
-        ax.set_ylabel(f"$-$({label.split(' (')[0]})")
-        ax.set_title(f"({'def'[column]}) vs valuation per view\nSpearman: {rho(v, e):.2f}",
-                     loc="left")
-    fig.tight_layout()
+        symbol = label.split(" (")[0]
+        for row, (x, xlabel) in enumerate(((eta, "impressions $\\eta$"),
+                                           (v, "actions per view $\\alpha/\\eta$"))):
+            ax = axes[row, column]
+            ax.scatter(x[negative], -e[negative], s=3, alpha=0.25, color=INK_SECONDARY,
+                       linewidths=0, rasterized=True, label="$\\beta < 0$ (harmful)")
+            ax.scatter(x[positive], e[positive], s=4, alpha=0.6, color=CATEGORY_COLORS[2],
+                       linewidths=0, rasterized=True, label="$\\beta > 0$ (beneficial)")
+            if row == 0:
+                binned_median(ax, x[negative], -e[negative])
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(f"$|${symbol}$|$")
+            letter = "abcdef"[3 * row + column]
+            if row == 0:
+                ax.set_title(f"({letter}) {label}\nSpearman with $\\eta$: {rho(eta, e):.2f}",
+                             loc="left")
+            else:
+                ax.set_title(f"({letter}) vs valuation per view\nSpearman: {rho(v, e):.2f}",
+                             loc="left")
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    labels[0] = labels[0] + f" ({negative.mean():.1%} of posts)"
+    labels[1] = labels[1] + f" ({positive.mean():.1%})"
+    fig.legend([matplotlib.lines.Line2D([], [], color=h.get_facecolor()[0], marker="o",
+                                        linestyle="none", alpha=1) for h in handles[:2]]
+               + [handles[2]], labels[:2] + [labels[2] + ", harmful posts"],
+               loc="lower center", ncol=3, bbox_to_anchor=(0.5, -0.02))
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
     save(fig, "5_externality_normalizations")
 
 
@@ -735,9 +746,11 @@ FIGURES = {
     "4_beta_composition": "Composition of the aggregate rating. (a) |beta| by number of notes; "
     "(b) |beta| against the number of ratings (dashed: equality); (c) helpful share of a note's "
     "ratings (Helpful 1, Somewhat 0.5, Not helpful 0), notes on posts of our data.",
-    "5_externality_normalizations": "Candidate externality per view. Top: against impressions; "
-    "bottom: against actions per view (valuation per view at theta = 1). Sign flipped so "
-    "harmful posts are positive; posts with beta >= 0 are not shown on the log axes.",
+    "5_externality_normalizations": "Candidate externality per view, absolute value on a log "
+    "axis: gray = posts with beta < 0 (harmful), magenta = beta > 0 (beneficial); posts with "
+    "beta = 0 are not shown. Top: against impressions (black: median of harmful posts in 12 "
+    "bins); bottom: against actions per view (valuation per view at theta = 1). Spearman "
+    "correlations use signed values.",
     "6_post_age": "Post age. (a) Post dates; (b) delay from post to its first note; "
     "(c) impressions against age in months at the pull date 2025-02-02.",
     "7_ratings_by_sign_and_level": "Which ratings grow with reach. (a) Median ratings on a "
