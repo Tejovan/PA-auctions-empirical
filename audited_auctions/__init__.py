@@ -1,6 +1,6 @@
 """
 audited_auctions: exact computation and simulation of auctions with participant
-audits (VCG-PA, IVCG-PA) and the first-best recipient audit, for a common
+audits (VCG-PA, IVCG-PA) and the first-best allocation, for a common
 participation threshold function τ(e). See audited_auctions/README.md.
 """
 

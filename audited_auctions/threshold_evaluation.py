@@ -10,9 +10,11 @@ Main entry point: given a type distribution H and a common threshold function
                 positive bids win.
   "ivcg_pa"     IVCG-PA: same participants; the k highest positive ironed
                 welfare contributions ω̄^τ(b) win, ties broken uniformly.
-  "first_best"  The optimal recipient audit (penalty -e on winners): every
-                bidder participates and the k highest positive welfare
-                contributions w = v + e win. This attains the first best.
+  "first_best"  The first best: the allocation that maximizes welfare given all
+                types, i.e. the k highest positive welfare contributions
+                w = v + e win. A welfare benchmark, not an auction: it has
+                no payments or penalties, so it reports no revenue,
+                penalties or bidder utility (PAYMENT_METRICS).
 
 Exact computation and the welfare objective used for optimizing τ
 (expected_welfare) work on the type distribution itself; simulation is used
@@ -64,7 +66,7 @@ MECHANISM_LABELS = {
     "vcg": "VCG (no audit)",
     "vcg_pa": "VCG-PA",
     "ivcg_pa": "IVCG-PA",
-    "first_best": "First best (recipient audit)",
+    "first_best": "First best",
 }
 
 PARTICIPANT_AUDIT_MECHANISMS = ("vcg_pa", "ivcg_pa")
@@ -79,8 +81,10 @@ class ThresholdEvaluation:
 
     exact          : mechanism -> {metric -> expected value}; metrics are those
                      of ScoreAuctionModel.expected_outcomes plus "penalty_paid"
-    penalty_curves : {"externality_grid", "threshold", "vcg_pa", "ivcg_pa",
-                      "recipient"} -> arrays over the externality grid;
+                     and "bidder_utility" (first best: no revenue, penalties or
+                     bidder utility)
+    penalty_curves : {"externality_grid", "threshold", "vcg_pa", "ivcg_pa"}
+                     -> arrays over the externality grid;
                      "threshold" is τ(e) (may contain ±inf)
     welfare_contribution_curves :
                      IVCG-PA segments: bid_start/end, welfare_start/end (ŵ^τ),
@@ -231,6 +235,8 @@ def tau_independent_outcomes(type_distribution, mechanism, num_bidders, num_good
     if outcomes_key not in cache:
         outcomes = build_mechanism_model(mechanism, type_distribution, None, num_bidders,
                                          num_goods).expected_outcomes()
+        if mechanism == "first_best":  # an allocation: no payments
+            outcomes.pop("revenue")
         cache[outcomes_key] = outcomes
         cache[welfare_key] = outcomes["welfare"]
     return dict(cache[outcomes_key])
@@ -296,9 +302,16 @@ def default_externality_grid(type_distribution, num_points=400, tail_probability
 # Expected outcomes reported per mechanism: those of ScoreAuctionModel.expected_outcomes,
 # the penalty paid, and the bidders' net utility. The accounting identity
 #   valuation_welfare = bidder_utility + revenue + penalty_paid
-# holds for every mechanism (welfare = valuation_welfare + externality_welfare).
+# holds for every auction (welfare = valuation_welfare + externality_welfare). The first
+# best is an allocation, not an auction: only the metrics of ALLOCATION_METRICS.
 OUTCOME_METRICS = ("welfare", "valuation_welfare", "externality_welfare", "revenue",
                    "penalty_paid", "bidder_utility", "num_participants", "num_allocated")
+PAYMENT_METRICS = ("revenue", "penalty_paid", "bidder_utility")
+
+
+def has_metric(mechanism, metric):
+    """Whether the mechanism reports the metric (the first best has no payment metrics)."""
+    return not (mechanism == "first_best" and metric in PAYMENT_METRICS)
 
 
 def _exact_outcomes_and_models(type_distribution, threshold_function, num_bidders, num_goods,
@@ -326,9 +339,9 @@ def _exact_outcomes_and_models(type_distribution, threshold_function, num_bidder
         externalities, masses = models[mechanism].participation_points
         penalties = penalty_from_table(penalty_tables[mechanism], threshold_function(externalities))
         exact[mechanism]["penalty_paid"] = num_bidders * float(np.sum(masses * penalties))
-    # The recipient penalty −e is charged to winners: n E[x (−e)].
-    exact["first_best"]["penalty_paid"] = -exact["first_best"]["externality_welfare"]
-    for outcomes in exact.values():
+    for mechanism, outcomes in exact.items():
+        if mechanism == "first_best":
+            continue
         outcomes["bidder_utility"] = (outcomes["valuation_welfare"] - outcomes["revenue"]
                                       - outcomes["penalty_paid"])
     return exact, models, penalty_tables
@@ -388,7 +401,6 @@ def evaluate_threshold(
         "threshold": threshold_function(externality_grid),
         "vcg_pa": penalty_function("vcg_pa")(externality_grid),
         "ivcg_pa": penalty_function("ivcg_pa")(externality_grid),
-        "recipient": -externality_grid,
     }
 
     # Simulation ----------------------------------------------------------------
@@ -445,7 +457,7 @@ def simulate_mechanisms(
             valuations + externalities,
             IdentityScore(),
             num_goods,
-            "recipient",
+            None,
         ),
     }
     for mechanism in PARTICIPANT_AUDIT_MECHANISMS:

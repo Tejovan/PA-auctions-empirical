@@ -70,23 +70,24 @@ PAPER_FIGURES = (*LEAF_FIGURES, "tau-by", "welfare-vs-zeta")
 FIGURE_INFO = {
     "types": ("Types, τ and penalties",
               "(a) type distribution, τ(e), abstention region, excluded externalities, "
-              "first-best boundary v = −e (also the recipient penalty −e), penalties r(e) of "
+              "zero-welfare line v = −e, penalties r(e) of "
               "VCG-PA and IVCG-PA, bids pooled by IVCG-PA, linear valuation axis; (b) the "
               "same on a logarithmic valuation axis.", "always"),
     "outcomes": ("Expected outcomes",
                  "(a) expected welfare W = bidder net utility + revenue + penalties + "
-                 "externality welfare, per mechanism, with the share of the first-best gain; "
+                 "externality welfare, per mechanism (first best: valuation welfare + "
+                 "externality welfare, no payments), with the share of the first-best gain; "
                  "(b) change of each component over VCG, with bootstrap intervals (empirical "
-                 "data).", "always"),
+                 "data). Paper panels: no revenue or bidder utility.", "always"),
     "distributions": ("Per-auction distributions",
                       "Rows: W, valuation welfare Σvx, externality welfare Σex, revenue, "
-                      "penalties. Left: distribution over the simulated auctions, per "
-                      "mechanism. Right: paired difference from VCG in the same auction, with "
-                      "the share of exact zeros.", "always"),
+                      "penalties (paper panels: no revenue row). Left: distribution over the "
+                      "simulated auctions, per mechanism. Right: paired difference from VCG in "
+                      "the same auction, with the share of exact zeros.", "always"),
     "scatter": ("Per-auction gain scatter",
                 "Per simulated auction, for VCG-PA and IVCG-PA: captured gain (mechanism − "
                 "VCG) against achievable gain (first best − VCG); revenue change against "
-                "welfare change.", "always"),
+                "welfare change (not in paper panels).", "always"),
     "ironing": ("IVCG-PA ironing",
                 "In quantile space: expected welfare contribution ŵ and ironed welfare "
                 "contribution ω̄, Ψ and its convex hull, their gap; scores against bids; "
@@ -197,6 +198,14 @@ def _identity_columns(summary, kind):
     columns = ["distribution", "zeta", "num_bidders", "num_goods"]
     columns += ["objective", "threshold_form", "optimizer"] if kind == "optimize" else ["tau_label"]
     return [c for c in columns if c in summary]
+
+
+def _payment_cell(row, key):
+    """Revenue or penalties of a mechanism; "—" for the first best (no payments)."""
+    value = row.get(key)
+    if value is None or (isinstance(value, float) and not np.isfinite(value)):
+        return "—"
+    return figures.compact(value)
 
 
 def _share_label(row, mechanism):
@@ -609,8 +618,8 @@ def _leaf_readme(folder, row, files):
     for mechanism in figures.MECHANISMS:
         share = _share_label(row, mechanism) if mechanism != "vcg" else "0%"
         lines.append(f"| {figures.SHORT[mechanism]} | {figures.compact(row[f'welfare_{mechanism}'])}"
-                     f" | {share} | {figures.compact(row[f'revenue_{mechanism}'])} | "
-                     f"{figures.compact(row[f'penalty_paid_{mechanism}'])} |")
+                     f" | {share} | {_payment_cell(row, f'revenue_{mechanism}')} | "
+                     f"{_payment_cell(row, f'penalty_paid_{mechanism}')} |")
     binds = row.get("ironing_binds")
     lines += ["", f"Ironing binds: {'yes' if binds else 'no'}. All statistics: results.json.", "",
               "## Files", "",

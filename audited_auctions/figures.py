@@ -9,12 +9,13 @@ semi-transparent type distribution in the background; legends outside busy
 axes; one shared legend for panels with the same series).
 
 Per combination:
-  types_tau_penalties       types, τ, abstention region, first-best boundary v = −e,
+  types_tau_penalties       types, τ, abstention region, zero-welfare line v = −e,
                             penalties r(e), IVCG-PA pooled bids: (a) linear and
                             (b) logarithmic valuation axis
   expected_outcomes         (a) expected welfare split into bidder net utility,
-                            revenue, penalties and externality part; (b) changes
-                            over VCG with bootstrap intervals
+                            revenue, penalties and externality part (first best:
+                            valuation and externality part); (b) changes over
+                            VCG with bootstrap intervals
   outcome_distributions     per-auction distributions (left) and paired
                             differences from VCG (right) of welfare, its
                             valuation and externality parts, revenue, penalties
@@ -34,7 +35,10 @@ README gallery (draw_distributions.py):
 
 Paper mode (set_paper(True); python run.py --report RUN --paper): the same
 functions export each panel as its own PDF in a paper/ folder next to the
-figure, for multi-panel figures built in LaTeX. Panels are drawn at printed
+figure, for multi-panel figures built in LaTeX. Paper panels show no revenue
+(the paper does not report it): (a) of expected_outcomes splits W into its
+valuation and externality parts, (b) drops Σp and Σu, outcome_distributions
+drops the revenue row and gain_scatter the revenue column. Panels are drawn at printed
 size in cells of fixed size with fixed margins, so panels of one size align
 side by side; there is no title and no note. Legends outside the axes and
 colorbars go to their own PDFs; <figure>.caption.txt holds the caption draft,
@@ -68,7 +72,7 @@ MECHANISMS = ("vcg", "vcg_pa", "ivcg_pa", "first_best")
 AUDITED = ("vcg_pa", "ivcg_pa", "first_best")
 PARTICIPANT_AUDITS = ("vcg_pa", "ivcg_pa")
 LABELS = {"vcg": "VCG (no audit)", "vcg_pa": "VCG-PA", "ivcg_pa": "IVCG-PA",
-          "first_best": "First best (recipient audit)"}
+          "first_best": "First best"}
 SHORT = {"vcg": "VCG", "vcg_pa": "VCG-PA", "ivcg_pa": "IVCG-PA", "first_best": "First best"}
 MECHANISM_COLORS = {"vcg": "#7a7974", "vcg_pa": "#2a78d6", "ivcg_pa": "#c0392b",
                     "first_best": "#19a170"}
@@ -81,6 +85,28 @@ COMPONENT_COLORS = {"bidder_utility": "#bb7a03", "revenue": "#5e3c99",
                     "penalty_paid": "#be538e", "externality_welfare": "#3b3b3b"}
 COMPONENT_HATCHES = {"bidder_utility": "", "revenue": "", "penalty_paid": "",
                      "externality_welfare": "xx"}
+# Bars split W into valuation and externality parts only (first best; paper mode): the
+# valuation part as a light tint (a fill, not a series) with a dark edge.
+VALUATION_PART = {"facecolor": "#d6d4cf", "edgecolor": "#52514e", "hatch": ""}
+# The metrics a mechanism reports: the first best is an allocation, without payments.
+PAYMENT_METRICS = ("revenue", "penalty_paid", "bidder_utility")
+
+
+def has_metric(mechanism, metric):
+    return not (mechanism == "first_best" and metric in PAYMENT_METRICS)
+
+
+def _zero_welfare_line(ax, e_values, zorder=3):
+    """The zero-welfare line v = −e (welfare contribution w = v + e = 0), a reference line."""
+    e_values = np.asarray(e_values, dtype=float)
+    ax.plot(e_values, np.where(-e_values > 0, -e_values, np.nan), color=INK_SECONDARY,
+            linewidth=1.0, linestyle=(0, (4, 2)), zorder=zorder)
+
+
+ZERO_WELFARE_HANDLE = {"color": "#52514e", "linewidth": 1.0, "linestyle": (0, (4, 2)),
+                       "label": "zero-welfare line v = −e"}
+SYMBOLS = {"welfare": "W", "valuation_welfare": "Σvx", "externality_welfare": "Σex",
+           "revenue": "Σp", "penalty_paid": "Σr", "bidder_utility": "Σu"}
 METRIC_LABELS = {"welfare": "welfare W", "valuation_welfare": "valuation part Σvx",
                  "externality_welfare": "externality part Σex", "revenue": "revenue Σp",
                  "penalty_paid": "penalties Σr", "bidder_utility": "bidder net utility Σu"}
@@ -638,7 +664,7 @@ def _visible_pooled_intervals(data, types, minimum_share=0.002):
 
 
 def _types_panel(ax, data, types):
-    """Types, abstention region, τ(e), the line v = −e and the penalties r(e) in one axes."""
+    """Types, abstention region, τ(e), the zero-welfare line v = −e and the penalties r(e)."""
     draw_types(ax, types)
     v_low, v_high = types["v_limits"]
     e_grid, tau = data["e_grid"], data["tau_grid"]
@@ -647,10 +673,7 @@ def _types_panel(ax, data, types):
     pooled = _visible_pooled_intervals(data, types)
     for low, high in pooled:
         ax.axhspan(low, high, linewidth=0, **REGION_QTY, zorder=1)
-    dense_e = np.linspace(*types["e_limits"], 800)
-    boundary = np.where(-dense_e > 0, -dense_e, np.nan)
-    ax.plot(dense_e, boundary, color=MECHANISM_COLORS["first_best"],
-            linestyle=MECHANISM_LINESTYLES["first_best"], linewidth=1.4, zorder=3)
+    _zero_welfare_line(ax, np.linspace(*types["e_limits"], 800))
     for mechanism in PARTICIPANT_AUDITS:
         penalty = np.asarray(data[f"penalty_{mechanism}"], dtype=float)
         if types["scale"] == "log":
@@ -681,8 +704,7 @@ def types_tau_penalties(results, data, types, path):
                    Patch(**REGION_OUT, label="abstain: v < τ(e)"),
                    Line2D([], [], color=THRESHOLD_COLOR, linewidth=5,
                           label=r"excluded e ($\tau = \bar{v}^{+}$)"),
-                   Line2D([], [], color=MECHANISM_COLORS["first_best"], linestyle="-.",
-                          label="v = −e: first-best boundary and recipient penalty −e"),
+                   Line2D([], [], **ZERO_WELFARE_HANDLE),
                    mechanism_line("vcg_pa", label="penalty r(e) in VCG-PA"),
                    mechanism_line("ivcg_pa", label="penalty r(e) in IVCG-PA")]
         if pooled:
@@ -695,13 +717,27 @@ def types_tau_penalties(results, data, types, path):
         return _finish(fig, path, context_line(combination), note)
 
 
-def _bar_stack(ax, position, components, width=0.6):
+def _bar_parts(mechanism):
+    """Stacked parts of a welfare bar: the four components, or (first best, paper mode)
+    the valuation part and the externality part."""
+    if _PAPER["on"] or mechanism == "first_best":
+        return ("valuation_welfare", "externality_welfare")
+    return COMPONENTS
+
+
+def _part_style(part):
+    if part == "valuation_welfare":
+        return {**VALUATION_PART, "linewidth": 0.8}
+    return {"facecolor": COMPONENT_COLORS[part], "hatch": COMPONENT_HATCHES[part],
+            "edgecolor": "white", "linewidth": 1.0}
+
+
+def _bar_stack(ax, position, outcomes, parts, width=0.6):
     positive, negative = 0.0, 0.0
-    for component in COMPONENTS:
-        value = components[component]
+    for part in parts:
+        value = outcomes[part]
         bottom = positive if value >= 0 else negative
-        ax.bar(position, value, width, bottom=bottom, color=COMPONENT_COLORS[component],
-               hatch=COMPONENT_HATCHES[component], edgecolor="white", linewidth=1.0, zorder=2)
+        ax.bar(position, value, width, bottom=bottom, zorder=2, **_part_style(part))
         if value >= 0:
             positive += value
         else:
@@ -716,7 +752,7 @@ def expected_outcomes(results, path):
         ax = axes[0, 0]
         positions = np.arange(len(MECHANISMS))
         for position, mechanism in zip(positions, MECHANISMS):
-            _bar_stack(ax, position, exact[mechanism])
+            _bar_stack(ax, position, exact[mechanism], _bar_parts(mechanism))
             welfare = exact[mechanism]["welfare"]
             ax.plot(position, welfare, marker="D", color=INK, markersize=6, zorder=4,
                     markeredgecolor="white")
@@ -730,44 +766,50 @@ def expected_outcomes(results, path):
             # value and share of the first-best gain only (the note names them)
             text = compact(welfare) + (f"\n{_percent(share)}"
                                        if mechanism in ("vcg_pa", "ivcg_pa") else "")
-            stack_top = sum(max(exact[mechanism][c], 0.0) for c in COMPONENTS)
+            stack_top = sum(max(exact[mechanism][c], 0.0) for c in _bar_parts(mechanism))
             label_at = max(stack_top, interval[1] if interval else welfare)
             ax.annotate(text, (position, label_at), xytext=(0, 4), textcoords="offset points",
                         ha="center", va="bottom", fontsize=7, color=INK, zorder=5)
         ax.axhline(0, **REFERENCE, zorder=1)
-        top = max(sum(max(exact[m][c], 0.0) for c in COMPONENTS) for m in MECHANISMS)
+        top = max(sum(max(exact[m][c], 0.0) for c in _bar_parts(m)) for m in MECHANISMS)
         ax.set_ylim(top=1.3 * top)
-        ax.set_xticks(positions, ["VCG", "VCG-PA", "IVCG-PA", "First\nbest"])
+        ax.set_xticks(positions, ["VCG", "VCG-\nPA", "IVCG-\nPA", "First\nbest"])
         ax.grid(axis="x", visible=False)
         ax.set_ylabel("expected value per auction")
         _compact_axes(ax, x=False)
         ax.set_title("(a) Welfare W and its components", loc="left")
-        ax.legend(handles=[Patch(facecolor=COMPONENT_COLORS[c], hatch=COMPONENT_HATCHES[c],
-                                 edgecolor="white", label=METRIC_LABELS[c]) for c in COMPONENTS]
+        parts = [p for p in COMPONENTS if p != "externality_welfare"] if not _PAPER["on"] else []
+        parts += ["valuation_welfare", "externality_welfare"]
+        ax.legend(handles=[Patch(**_part_style(p), label=METRIC_LABELS[p]
+                                 + (" (first best)" if p == "valuation_welfare"
+                                    and not _PAPER["on"] else "")) for p in parts]
                   + [Line2D([], [], marker="D", color=INK, linestyle="none",
                             label="welfare W (sum)")],
                   loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2)
 
         ax = axes[0, 1]
-        metrics = ("welfare", "valuation_welfare", "externality_welfare", "revenue",
-                   "penalty_paid", "bidder_utility")
+        metrics = (("welfare", "valuation_welfare", "externality_welfare", "penalty_paid")
+                   if _PAPER["on"] else
+                   ("welfare", "valuation_welfare", "externality_welfare", "revenue",
+                    "penalty_paid", "bidder_utility"))
         width = 0.26
         for offset, mechanism in zip((-width, 0.0, width), AUDITED):
-            values = [results["change_over_vcg"][metric][mechanism] for metric in metrics]
-            positions = np.arange(len(metrics)) + offset
+            shown = [i for i, metric in enumerate(metrics) if has_metric(mechanism, metric)]
+            values = [results["change_over_vcg"][metrics[i]][mechanism] for i in shown]
+            positions = np.array(shown) + offset
             ax.bar(positions, values, width, color=MECHANISM_COLORS[mechanism],
                    hatch=MECHANISM_HATCHES[mechanism], edgecolor="white", linewidth=1.0,
                    label=SHORT[mechanism], zorder=2)
             if bootstrap:
-                intervals = [bootstrap["change_intervals"].get(metric, {}).get(mechanism)
-                             for metric in metrics]
+                intervals = [bootstrap["change_intervals"].get(metrics[i], {}).get(mechanism)
+                             for i in shown]
                 for position, value, interval in zip(positions, values, intervals):
                     if interval:
                         ax.errorbar(position, value, yerr=[[max(value - interval[0], 0)],
                                                            [max(interval[1] - value, 0)]],
                                     color=INK, capsize=2, linewidth=0.9, zorder=3)
         ax.axhline(0, **REFERENCE, zorder=1)
-        ax.set_xticks(np.arange(len(metrics)), ["W", "Σvx", "Σex", "Σp", "Σr", "Σu"])
+        ax.set_xticks(np.arange(len(metrics)), [SYMBOLS[m] for m in metrics])
         ax.grid(axis="x", visible=False)
         ax.set_ylabel("change over VCG per auction")
         _compact_axes(ax, x=False)
@@ -779,10 +821,16 @@ def expected_outcomes(results, path):
                     f"{bootstrap['num_resamples']} bootstrap resamples of the test rows.")
         else:
             note = "Exact expected values; the distribution is known, so there is no sampling error."
-        note += " W = Σu + Σp + Σr + Σex and Σvx = Σu + Σp + Σr."
-        note += (" Numbers above the bars: expected welfare W and, for VCG-PA and IVCG-PA, "
-                 "the share of the first-best gain over VCG. Σp: revenue; Σr: penalties; "
-                 "Σu: bidder net utility; Σvx: valuation part; Σex: externality part.")
+        if _PAPER["on"]:
+            note += (" W = Σvx + Σex. Numbers above the bars: expected welfare W and, for "
+                     "VCG-PA and IVCG-PA, the share of the first-best gain over VCG. Σvx: "
+                     "valuation part; Σex: externality part; Σr: penalties.")
+        else:
+            note += (" W = Σvx + Σex, and Σvx = Σu + Σp + Σr for the auctions; the first best "
+                     "is an allocation without payments, so only its Σvx and Σex are shown.")
+            note += (" Numbers above the bars: expected welfare W and, for VCG-PA and IVCG-PA, "
+                     "the share of the first-best gain over VCG. Σp: revenue; Σr: penalties; "
+                     "Σu: bidder net utility; Σvx: valuation part; Σex: externality part.")
         return _finish(fig, path, context_line(combination), note)
 
 
@@ -836,10 +884,13 @@ def outcome_distributions(results, data, path):
     combination, exact = results["combination"], results["exact"]
     bootstrap = results.get("bootstrap") or {}
     metrics = ("welfare", "valuation_welfare", "externality_welfare", "revenue", "penalty_paid")
+    if _PAPER["on"]:
+        metrics = tuple(m for m in metrics if m != "revenue")
     with plt.rc_context(STYLE):
         fig, axes = _new_figure(6.5, 2.2 * len(metrics), len(metrics), 2)
         for row, metric in enumerate(metrics):
-            mechanisms = [m for m in MECHANISMS if not (metric == "penalty_paid" and m == "vcg")]
+            mechanisms = [m for m in MECHANISMS if has_metric(m, metric)
+                          and not (metric == "penalty_paid" and m == "vcg")]
             draws = {m: data[f"sim_{m}_{metric}"] for m in mechanisms}
             ax = axes[row, 0]
             grid = np.linspace(*_range(draws.values()), 200)
@@ -865,13 +916,14 @@ def outcome_distributions(results, data, path):
                         "differences from VCG.", transform=ax.transAxes, ha="center",
                         va="center", fontsize=8, color=INK_SECONDARY)
                 continue
+            audited = [m for m in AUDITED if has_metric(m, metric)]
             differences = {m: data[f"sim_{m}_{metric}"] - data[f"sim_vcg_{metric}"]
-                           for m in AUDITED}
+                           for m in audited}
             tolerance = 1e-9 * max(1.0, float(np.abs(data[f"sim_vcg_{metric}"]).max()))
             nonzero = {m: d[np.abs(d) > tolerance] for m, d in differences.items()}
             grid = np.linspace(*_range([v for v in nonzero.values() if len(v)]), 200)
             lines = []
-            for mechanism in AUDITED:
+            for mechanism in audited:
                 share_zero = 1 - len(nonzero[mechanism]) / len(differences[mechanism])
                 _density(ax, nonzero[mechanism], grid, MECHANISM_COLORS[mechanism],
                          MECHANISM_LINESTYLES[mechanism], scale=1 - share_zero)
@@ -882,9 +934,9 @@ def outcome_distributions(results, data, path):
             ax.axvline(0, **REFERENCE, zorder=1)
             ax.set_xlim(grid[0], grid[-1])
             ax.set_ylim(bottom=0, top=max(ax.get_ylim()[1], 1e-300) * 1.45)
-            changes = {m: results["change_over_vcg"][metric][m] for m in AUDITED}
+            changes = {m: results["change_over_vcg"][metric][m] for m in audited}
             _mean_strip(ax, changes, bootstrap.get("change_intervals", {}).get(metric, {}),
-                        AUDITED)
+                        audited)
             _text_box(ax, lines)
             ax.set_xlabel(f"change of {METRIC_LABELS[metric]} over VCG in the same auction")
             ax.set_ylabel("share × density (nonzero part)")
@@ -897,14 +949,17 @@ def outcome_distributions(results, data, path):
         note += (f"; bars: {100 * bootstrap['confidence_level']:g}% bootstrap intervals."
                  if bootstrap else " (no sampling error).")
         note += " Right column: density of the nonzero differences, scaled by their share."
+        if "revenue" in metrics:
+            note += " The first best is an allocation without payments: no revenue or penalties."
         return _finish(fig, path, context_line(combination), note)
 
 
 def gain_scatter(results, data, path):
     combination = results["combination"]
     first_best_gain = data["sim_first_best_welfare"] - data["sim_vcg_welfare"]
+    columns = 1 if _PAPER["on"] else 2  # the paper reports no revenue
     with plt.rc_context(STYLE):
-        fig, axes = _new_figure(6.5, 5.6, 2, 2)
+        fig, axes = _new_figure(6.5 if columns == 2 else 3.25, 5.6, 2, columns)
         for row, mechanism in enumerate(PARTICIPANT_AUDITS):
             gain = data[f"sim_{mechanism}_welfare"] - data["sim_vcg_welfare"]
             revenue = data[f"sim_{mechanism}_revenue"] - data["sim_vcg_revenue"]
@@ -913,7 +968,8 @@ def gain_scatter(results, data, path):
                     (first_best_gain, gain, "first best − VCG (achievable gain)",
                      f"{SHORT[mechanism]} − VCG (captured gain)", "captured vs achievable gain"),
                     (gain, revenue, f"welfare: {SHORT[mechanism]} − VCG",
-                     f"revenue: {SHORT[mechanism]} − VCG", "revenue change vs welfare change"))):
+                     f"revenue: {SHORT[mechanism]} − VCG",
+                     "revenue change vs welfare change"))[:columns]):
                 ax = axes[row, column]
                 zero = (np.abs(x) <= tolerance) & (np.abs(y) <= tolerance)
                 ax.scatter(x[~zero], y[~zero], s=6, color=MECHANISM_COLORS[mechanism],
@@ -936,9 +992,9 @@ def gain_scatter(results, data, path):
                 ax.set_xlabel(x_label)
                 ax.set_ylabel(y_label)
                 _compact_axes(ax)
-                ax.set_title(f"({chr(97 + 2 * row + column)}) {SHORT[mechanism]}: {title}",
+                ax.set_title(f"({chr(97 + columns * row + column)}) {SHORT[mechanism]}: {title}",
                              loc="left")
-        for column in range(2):  # panels of the same quantity share their limits
+        for column in range(columns):  # panels of the same quantity share their limits
             limits = [axes[row, column] for row in range(2)]
             for getter, setter in (("get_xlim", "set_xlim"), ("get_ylim", "set_ylim")):
                 low = min(getattr(ax, getter)()[0] for ax in limits)
@@ -1292,28 +1348,25 @@ def threshold_overlay(entries, types, title, path, note=None):
         fig, axes = _new_figure(3.9, 3.3)
         ax = axes[0, 0]
         draw_types(ax, types, alpha=0.45)
-        ax.plot(types["e_grid"], -types["e_grid"], color=MECHANISM_COLORS["first_best"],
-                linestyle="-.", linewidth=1.2, zorder=2, alpha=0.8)
+        _zero_welfare_line(ax, types["e_grid"], zorder=2)
         handles = []
         for order, entry in enumerate(entries):
             line = draw_threshold(ax, entry["e_grid"], entry["tau_grid"], types,
                                   color=entry["color"], linestyle=entry["linestyle"],
                                   label=entry["label"], linewidth=1.9, zorder=5 + order)
             handles.append(line)
-        handles.append(Line2D([], [], color=MECHANISM_COLORS["first_best"], linestyle="-.",
-                              label="v = −e (first best)"))
+        handles.append(Line2D([], [], **ZERO_WELFARE_HANDLE))
         _shared_legend(fig, handles, columns=1)
         return _finish(fig, path, title, note)
 
 
 def distribution_preview(types, title, path):
-    """Type density with the line v = −e (welfare contribution w = 0), saved as WebP only."""
+    """Type density with the zero-welfare line v = −e (w = 0), saved as WebP only."""
     with plt.rc_context(STYLE):
         fig, axes = _new_figure(3.1, 2.4)
         ax = axes[0, 0]
         draw_types(ax, types, alpha=0.9)
-        ax.plot(types["e_grid"], -types["e_grid"], color=MECHANISM_COLORS["first_best"],
-                linestyle="-.", linewidth=1.2, zorder=2)
+        _zero_welfare_line(ax, types["e_grid"], zorder=2)
         ax.set_title(title, loc="left")
         fig.savefig(path, dpi=DISTRIBUTION_PREVIEW_DPI, pil_kwargs={"quality": 80})
         plt.close(fig)

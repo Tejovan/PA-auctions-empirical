@@ -9,8 +9,8 @@ allocates only to positive scores, and breaks ties uniformly at random.
   * IVCG-PA ranks by ironed welfare contribution:   score(b) = ω̄^τ(b), a
     nondecreasing function of the bid (see exact_computation.py): linear with
     slope one where not ironed, constant on ironing (pooling) intervals.
-  * The first-best auction (recipient audit with penalty −e) ranks all bidders
-    by effective bid w = v + e:                     score(w) = w.
+  * The first best (an allocation benchmark, not an auction) ranks all bidders
+    by welfare contribution w = v + e:              score(w) = w.
 
 Payments are critical-value (Myerson) payments, so each auction is DSIC. They
 need the generalized inverse of the score function, which each scoring rule

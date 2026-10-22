@@ -90,9 +90,11 @@ def test_synthetic_combination_files_and_accounting(tmp_path):
         assert (folder / name).exists(), name
     results = json.loads((folder / "results.json").read_text())
     assert results["share_of_first_best_gain"]["first_best"] == pytest.approx(1.0)
-    for outcomes in results["exact"].values():
-        assert outcomes["valuation_welfare"] == pytest.approx(
-            outcomes["bidder_utility"] + outcomes["revenue"] + outcomes["penalty_paid"])
+    assert "revenue" not in results["exact"]["first_best"]  # an allocation: no payments
+    for mechanism, outcomes in results["exact"].items():
+        if mechanism != "first_best":
+            assert outcomes["valuation_welfare"] == pytest.approx(
+                outcomes["bidder_utility"] + outcomes["revenue"] + outcomes["penalty_paid"])
         assert outcomes["welfare"] == pytest.approx(
             outcomes["valuation_welfare"] + outcomes["externality_welfare"])
     verdicts = {c["check"]: c["verdict"] for c in checks}

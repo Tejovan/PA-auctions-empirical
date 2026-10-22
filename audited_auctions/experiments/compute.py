@@ -59,6 +59,7 @@ from ..threshold_evaluation import (
     PARTICIPANT_AUDIT_MECHANISMS,
     build_mechanism_model,
     evaluate_threshold,
+    has_metric,
     exact_outcomes,
     grid_refinement_check,
     penalty_from_table,
@@ -362,14 +363,15 @@ def _tried_thresholds(result, e_grid, max_curves):
 
 def _comparisons(exact):
     """Changes over VCG of every metric, share of the first-best gain, relative revenue change."""
-    change = {metric: {m: exact[m][metric] - exact["vcg"][metric] for m in AUDITED_MECHANISMS}
+    change = {metric: {m: exact[m][metric] - exact["vcg"][metric] for m in AUDITED_MECHANISMS
+                       if has_metric(m, metric)}
               for metric in OUTCOME_METRICS}
     first_best_gain = change["welfare"]["first_best"]
     share = {m: (change["welfare"][m] / first_best_gain if abs(first_best_gain) > 1e-15
                  else None) for m in AUDITED_MECHANISMS}
     vcg_revenue = exact["vcg"]["revenue"]
     revenue_relative = {m: (change["revenue"][m] / vcg_revenue if abs(vcg_revenue) > 1e-15
-                            else None) for m in AUDITED_MECHANISMS}
+                            else None) for m in PARTICIPANT_AUDIT_MECHANISMS}
     return {"change_over_vcg": change, "share_of_first_best_gain": share,
             "revenue_relative_change": revenue_relative}
 
@@ -399,10 +401,12 @@ def _bootstrap(prepared, threshold, combination, config, ivcg_rule):
         return [float(np.quantile(values, tail)), float(np.quantile(values, 1 - tail))]
 
     metrics = [m for m in VALUE_METRICS if f"{m}_vcg" in resamples]
-    levels = {metric: {m: interval(resamples[f"{metric}_{m}"]) for m in MECHANISMS}
+    levels = {metric: {m: interval(resamples[f"{metric}_{m}"]) for m in MECHANISMS
+                       if has_metric(m, metric)}
               for metric in metrics}
     changes = {metric: {m: interval(resamples[f"{metric}_{m}"] - resamples[f"{metric}_vcg"])
-                        for m in AUDITED_MECHANISMS} for metric in metrics}
+                        for m in AUDITED_MECHANISMS if has_metric(m, metric)}
+               for metric in metrics}
     shares = {m: interval(resamples[f"share_{m}"]) for m in AUDITED_MECHANISMS}
     summary = {"num_resamples": int(len(resamples)),
                "confidence_level": evaluation["confidence_level"],
@@ -503,6 +507,8 @@ def _checks(combination, config, prepared, threshold, evaluation, first_order, s
         worst = 0.0
         for mechanism in MECHANISMS:
             for metric in ("welfare", "revenue"):
+                if not has_metric(mechanism, metric):
+                    continue
                 draws = simulated[mechanism][metric]
                 error = draws.std(ddof=1) / np.sqrt(len(draws))
                 difference = draws.mean() - evaluation.exact[mechanism][metric]
@@ -511,7 +517,8 @@ def _checks(combination, config, prepared, threshold, evaluation, first_order, s
                 worst = max(worst, z)
         checks.append(_check(path, "monte_carlo_vs_exact", worst, tolerances["monte_carlo_z"],
                              "pass" if worst < tolerances["monte_carlo_z"] else "fail",
-                             "largest |z| of simulated mean − exact (welfare, revenue; "
+                             "largest |z| of simulated mean − exact (welfare of 4 mechanisms, "
+                             "revenue of 3; "
                              "4 mechanisms)"))
 
     # First-order condition at interior thresholds.
@@ -773,10 +780,12 @@ def summary_row(results):
     exact = results["exact"]
     for metric in VALUE_METRICS + ("num_participants",):
         for mechanism in MECHANISMS:
-            row[f"{metric}_{mechanism}"] = exact[mechanism][metric]
+            if has_metric(mechanism, metric):
+                row[f"{metric}_{mechanism}"] = exact[mechanism][metric]
     for mechanism in AUDITED_MECHANISMS:
         row[f"welfare_gain_{mechanism}"] = results["change_over_vcg"]["welfare"][mechanism]
         row[f"share_{mechanism}"] = results["share_of_first_best_gain"][mechanism]
+    for mechanism in PARTICIPANT_AUDIT_MECHANISMS:
         row[f"revenue_change_{mechanism}"] = results["change_over_vcg"]["revenue"][mechanism]
     bootstrap = results["bootstrap"]
     if bootstrap is not None:

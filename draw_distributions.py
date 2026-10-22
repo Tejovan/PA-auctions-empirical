@@ -40,8 +40,7 @@ def harmful_middle_options_grid(path):
             prepared = prepare_distributions("harmful_middle", family_options=options)
             types = type_background(prepared, plot_geometry(prepared))
             figures.draw_types(ax, types, alpha=0.9)
-            ax.plot(types["e_grid"], -types["e_grid"], color=figures.MECHANISM_COLORS["first_best"],
-                    linestyle="-.", linewidth=1.0)
+            figures._zero_welfare_line(ax, types["e_grid"], zorder=2)
             ax.set_xlim(-3.2, 2.4)
             ax.set_ylim(0, 2.5)
             is_default = all(defaults[key] == value for key, value in options.items())

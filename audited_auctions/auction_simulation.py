@@ -32,11 +32,14 @@ DRAW_METRICS = (
     "valuation_welfare",  # Σ_i x_i v_i
     "externality_welfare",  # Σ_i x_i e_i
     "revenue",  # Σ_i p_i (auction payments only)
-    "penalty_paid",  # participant audit: Σ_{participants} r(e_i); recipient audit: Σ_i x_i (-e_i)
+    "penalty_paid",  # Σ_{participants} r(e_i)
     "bidder_utility",  # Σ_i (v_i x_i − p_i − penalty_i): bidders' net utility
     "num_participants",
     "num_allocated",  # Σ_i x_i
 )
+# Metrics of an allocation benchmark (the first best), which has no payments or penalties.
+ALLOCATION_METRICS = ("welfare", "valuation_welfare", "externality_welfare", "num_participants",
+                      "num_allocated")
 
 
 def allocation_probabilities(scores, num_goods):
@@ -107,13 +110,15 @@ def simulate_score_auction(
 
     externalities, valuations, bids : (num_draws, num_bidders)
     participates       : (num_draws, num_bidders) bool
-    penalty_per_bidder : participant audit: (num_draws, num_bidders) array of
-                         penalties r(e_i), charged to participants only;
-                         recipient audit: the string "recipient", which charges
-                         -e_i to each winner in proportion to its allocation.
+    penalty_per_bidder : (num_draws, num_bidders) array of penalties r(e_i),
+                         charged to participants only; None for an allocation
+                         benchmark (the first best): no payments or penalties,
+                         so the metrics are those of ALLOCATION_METRICS only.
     """
     num_draws = externalities.shape[0]
-    metrics = {name: np.empty(num_draws) for name in DRAW_METRICS}
+    benchmark = penalty_per_bidder is None
+    metrics = {name: np.empty(num_draws)
+               for name in (ALLOCATION_METRICS if benchmark else DRAW_METRICS)}
 
     for start in range(0, num_draws, chunk_size):
         rows = slice(start, min(start + chunk_size, num_draws))
@@ -122,24 +127,25 @@ def simulate_score_auction(
             participates[rows], scoring_rule.score_of_bid(draw_bids), -np.inf
         )
         allocation = allocation_probabilities(scores, num_goods)
-        payments = critical_value_payments(
-            draw_bids, scores, allocation, scoring_rule, num_goods
-        )
         metrics["valuation_welfare"][rows] = (allocation * valuations[rows]).sum(axis=1)
         metrics["externality_welfare"][rows] = (allocation * externalities[rows]).sum(
             axis=1
         )
-        metrics["revenue"][rows] = payments.sum(axis=1)
         metrics["num_participants"][rows] = participates[rows].sum(axis=1)
         metrics["num_allocated"][rows] = allocation.sum(axis=1)
-        if isinstance(penalty_per_bidder, str) and penalty_per_bidder == "recipient":
-            metrics["penalty_paid"][rows] = (allocation * -externalities[rows]).sum(axis=1)
-        else:
-            metrics["penalty_paid"][rows] = np.where(
-                participates[rows], penalty_per_bidder[rows], 0.0
-            ).sum(axis=1)
+        if benchmark:
+            continue
+        payments = critical_value_payments(
+            draw_bids, scores, allocation, scoring_rule, num_goods
+        )
+        metrics["revenue"][rows] = payments.sum(axis=1)
+        metrics["penalty_paid"][rows] = np.where(
+            participates[rows], penalty_per_bidder[rows], 0.0
+        ).sum(axis=1)
 
     metrics["welfare"] = metrics["valuation_welfare"] + metrics["externality_welfare"]
+    if benchmark:
+        return metrics
     metrics["bidder_utility"] = (metrics["valuation_welfare"] - metrics["revenue"]
                                  - metrics["penalty_paid"])
     return metrics

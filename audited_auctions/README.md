@@ -7,9 +7,9 @@ Given a joint distribution H of bidder types (e, v) and a common participation t
 | `vcg` | VCG without audits | all bidders | bid v | none |
 | `vcg_pa` | VCG-PA | types with v ≥ τ(e) | bid v | r(e) inducing τ, charged to participants |
 | `ivcg_pa` | IVCG-PA | types with v ≥ τ(e) | ironed welfare contribution ω̄^τ(v) | r(e) inducing τ, charged to participants |
-| `first_best` | optimal recipient audit | all bidders | w = v + e | −e, charged to winners |
+| `first_best` | first best (welfare benchmark) | all bidders | w = v + e | none (no payments) |
 
-All four are score-based auctions: the k participants with the highest positive scores win, ties are broken uniformly at random, and payments are critical-value (Myerson) payments, so each auction is DSIC. The notation follows the paper (`WEB27/arxiv_WEB/arxiv_WEB_v1.tex` of the paper repository); citations give the v1 number and the stable LaTeX label in brackets.
+All four allocate to the k participants with the highest positive scores, with ties broken uniformly at random. VCG, VCG-PA and IVCG-PA charge critical-value (Myerson) payments, so each is DSIC. The first best is the welfare-maximizing allocation given all types, a benchmark rather than an auction: it reports welfare and its valuation and externality parts, but no revenue, penalties or bidder utility. The notation follows the paper (`WEB27/arxiv_WEB/arxiv_WEB_v1.tex` of the paper repository); citations give the v1 number and the stable LaTeX label in brackets.
 
 The penalties are outputs, not inputs: since τ is given, the package computes the penalty function that induces τ in each participant-audit auction. It also searches for the τ that maximizes exact expected welfare, in a polynomial, knot, bin or per-node form, by genetic search or best-response ascent. Whole experiments (sets of distributions, markets and designs, with saved data, checks and figures) run from configuration files through `run.py` and the `experiments` subpackage; see the top-level README.
 
@@ -126,8 +126,7 @@ The mixtures a–f and h are those of `legacy/alternate_distributions.ipynb` wit
     welfare             n ∫ ŵ^τ(q) X(q) dq                (valuation and externality parts likewise)
     R(b)                ∫_0^b X(t) dt                     (tabulated at the knots of X)
     revenue             n [∫ b(q) X(q) dq − ∫_0^∞ X(t) Pr(bid > t) dt]
-    penalty paid (PA)   n Σ_j Pr[cell j, participate] r(e_j)
-    penalty paid (RA)   n E[x (−e)] = −(externality welfare of the first best)
+    penalty paid        n Σ_j Pr[cell j, participate] r(e_j)   (VCG-PA, IVCG-PA)
     participants        n P
 
 **Penalties.** With the normalized DSIC payment (zero bid pays zero), the penalty inducing τ is
@@ -143,8 +142,6 @@ This replaces the old estimator R(e) = A(e)(τ(e) − P(e)) built from realized 
 **Caching of τ-independent results.** Everyone participates in VCG and the first best, so their outcomes do not depend on τ. `tau_independent_outcomes` computes them once per (distribution, n, k) and stores them in `distribution.cache`; every τ evaluated on the same distribution object (all designs of a run with the same distribution and ζ, in the same worker process) reuses them. The bootstrap does the same per resample: resamples are determined by the seed, so VCG and first-best welfare of each resample are stored in `sample.cache` and reused for every τ bootstrapped with that seed (about 5× faster for the second and later τ). Transformed distributions (`with_externality_scale`, `dataclasses.replace`) start with an empty cache.
 
 **Simulation.** Used only for per-auction welfare distributions and as a check of the exact values. Each draw is one auction; allocations are probabilities (the tie-breaking lottery is averaged out); payments are critical-value payments given the realized rival bids. All mechanisms run on the same draws (common random numbers). For piecewise-uniform cells, valuations are drawn uniformly within the cell; for continuous versions, from the cell's piecewise-linear density, with the externality uniform on the cell's interval.
-
-**Revenue units.** For the first best, revenue is the critical payment in effective-valuation units (w = v + e); the transfer −e of winners is reported separately as penalty paid.
 
 ## Optimizing τ
 
@@ -217,7 +214,9 @@ and in both cases one simulation of `num_simulated_draws` auctions on the evalua
 
 `figures.py` draws the figures of a run from the files that `experiments/compute.py` saves; the list of figures, the folder layout and the checks are in the top-level README. Exact expected values are marked in every distribution figure; bootstrap percentile intervals over test rows (empirical data) give the uncertainty of the expected values, and simulated auctions (the same auctions for every mechanism) give the per-auction distributions. Paired differences from VCG are exactly zero in many auctions (same winners); the figures show the density of the nonzero differences scaled by their share and state the share of zeros.
 
-Accounting identity used in the expected-outcomes figure, for every mechanism and auction: valuation part Σvx = bidder net utility Σu + revenue Σp + penalties Σr, and welfare W = Σvx + Σex. For the first best, revenue is the critical payment in effective-valuation units and the penalty is −e per unit of allocation, so the identity holds there too.
+Accounting identity used in the expected-outcomes figure: welfare W = Σvx + Σex for every mechanism, and valuation part Σvx = bidder net utility Σu + revenue Σp + penalties Σr for VCG, VCG-PA and IVCG-PA. The first best is an allocation without payments, so its bar shows Σvx and Σex only.
+
+Paper panels (`--paper`) show no revenue, since the paper does not report it: the expected-outcomes bars split W into Σvx and Σex for every mechanism, the changes over VCG show W, Σvx, Σex and Σr, the per-auction distributions drop the revenue row, and the gain scatter drops the revenue column.
 
 ## Tests
 

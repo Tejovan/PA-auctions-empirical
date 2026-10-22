@@ -8,8 +8,9 @@ type_distributions.py): atoms, or cells with a uniform valuation.
 Setting (as in the paper, arxiv_WEB v1): n bidders with i.i.d. types (e, v) ~ H,
 k identical goods, unit demand. Under the participant-truthful threshold (TPT)
 strategy a bidder participates iff v >= τ(e) and then bids v. The first best
-(recipient audit with penalty −e) is the same kind of auction in which every
-bidder participates and bids w = v + e.
+(the welfare-maximizing allocation given all types) is computed as the same kind
+of auction in which every bidder participates and bids w = v + e; only its
+allocation is used.
 
 Quantile representation
 -----------------------

@@ -61,6 +61,9 @@ def test_continuous_exact_matches_simulation_and_accounting():
         draws = evaluation.simulated[mechanism]["welfare"]
         error = draws.std(ddof=1) / np.sqrt(len(draws))
         assert abs(draws.mean() - outcomes["welfare"]) < 4 * error, mechanism
+        if mechanism == "first_best":  # an allocation: no payments
+            assert "revenue" not in outcomes and "penalty_paid" not in outcomes
+            continue
         assert outcomes["valuation_welfare"] == pytest.approx(
             outcomes["bidder_utility"] + outcomes["revenue"] + outcomes["penalty_paid"])
 

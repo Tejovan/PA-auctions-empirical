@@ -104,6 +104,9 @@ def test_exact_matches_simulation(distribution_factory, threshold, num_bidders, 
     )
     for mechanism in MECHANISMS:
         for metric in ("welfare", "revenue", "penalty_paid", "num_participants", "num_allocated"):
+            if metric not in evaluation.exact[mechanism]:  # the first best has no payments
+                assert metric not in evaluation.simulated[mechanism]
+                continue
             draws = evaluation.simulated[mechanism][metric]
             standard_error = draws.std(ddof=1) / np.sqrt(len(draws))
             exact_value = evaluation.exact[mechanism][metric]

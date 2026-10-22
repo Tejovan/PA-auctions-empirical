@@ -339,7 +339,7 @@ A comparison figure goes in the `compare/` folder of the deepest level above eve
 
 ### 4.2 Tables and data files
 
-Mechanisms: VCG, VCG-PA, IVCG-PA, first best. Metrics: welfare W, valuation welfare Σvx, externality welfare Σex, revenue (payments only), penalties paid, bidder utility, number of participants, number allocated.
+Mechanisms: VCG, VCG-PA, IVCG-PA, first best (the welfare-maximizing allocation given all types; a benchmark without payments). Metrics: welfare W, valuation welfare Σvx, externality welfare Σex, revenue (payments only), penalties paid, bidder utility, number of participants, number allocated; the first best has only W, Σvx, Σex and the two counts.
 
 | File | Contents |
 |---|---|
@@ -361,10 +361,10 @@ Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves
 
 | Link name | File | Panels | Drawn |
 |---|---|---|---|
-| `types` | `1_types-tau-penalties.pdf` | (a) type distribution, τ(e), abstention region, excluded externalities, first-best boundary v = −e (also the recipient penalty −e), penalties r(e) of VCG-PA and IVCG-PA, bids pooled by IVCG-PA, linear valuation axis; (b) the same on a logarithmic valuation axis | always |
-| `outcomes` | `2_expected-outcomes.pdf` | (a) W split into bidder net utility + revenue + penalties + externality welfare, with the share of the first-best gain; (b) change of each component over VCG, with bootstrap intervals | always |
-| `distributions` | `3_outcome-distributions.pdf` | rows W, Σvx, Σex, revenue, penalties; left: per-auction distribution per mechanism; right: paired difference from VCG in the same auction | always |
-| `scatter` | `4_gain-scatter.pdf` | per auction, for VCG-PA and IVCG-PA: captured gain vs achievable gain (first best − VCG); revenue change vs welfare change | always |
+| `types` | `1_types-tau-penalties.pdf` | (a) type distribution, τ(e), abstention region, excluded externalities, zero-welfare line v = −e, penalties r(e) of VCG-PA and IVCG-PA, bids pooled by IVCG-PA, linear valuation axis; (b) the same on a logarithmic valuation axis | always |
+| `outcomes` | `2_expected-outcomes.pdf` | (a) W split into bidder net utility + revenue + penalties + externality welfare (first best: valuation + externality welfare), with the share of the first-best gain; (b) change of each component over VCG, with bootstrap intervals. Paper panels: W split into valuation + externality welfare; no revenue or bidder utility | always |
+| `distributions` | `3_outcome-distributions.pdf` | rows W, Σvx, Σex, revenue, penalties (paper panels: no revenue row); left: per-auction distribution per mechanism; right: paired difference from VCG in the same auction | always |
+| `scatter` | `4_gain-scatter.pdf` | per auction, for VCG-PA and IVCG-PA: captured gain vs achievable gain (first best − VCG); revenue change vs welfare change (not in paper panels) | always |
 | `ironing` | `5_ironing.pdf` | IVCG-PA design in quantile space: expected welfare contribution ŵ and ironed ω̄, Ψ and its convex hull, their gap, scores against bids, interim allocations | only when ironing binds |
 | `marginal` | `6_marginal-contribution.pdf` | maps of marginal contribution M(e, v) for VCG-PA and IVCG-PA; penalty r(e) vs Pigouvian charge; M at the threshold types | always |
 | `tried` | `search/tried-taus.pdf` | thresholds tried by the search, behind the best one | optimize runs |

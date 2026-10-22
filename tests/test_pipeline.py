@@ -130,8 +130,10 @@ def test_tau_independent_results_are_cached_and_unchanged():
     models, _ = build_mechanism_models(distribution, polynomial_threshold([0.1]), 5, 2)
     for mechanism in ("vcg", "first_best"):
         assert second.exact[mechanism] == first.exact[mechanism]
-        assert first.exact[mechanism]["revenue"] == pytest.approx(
-            models[mechanism].expected_outcomes()["revenue"], rel=1e-12)
+        assert first.exact[mechanism]["welfare"] == pytest.approx(
+            models[mechanism].expected_outcomes()["welfare"], rel=1e-12)
+    assert first.exact["vcg"]["revenue"] == pytest.approx(
+        models["vcg"].expected_outcomes()["revenue"], rel=1e-12)
     # A rescaled distribution starts with an empty cache.
     assert distribution.with_externality_scale(2.0).cache == {}
 

@@ -205,7 +205,8 @@ def _bootstrap_rows(job):
         row = {f"welfare_{m}": welfare[m] for m in MECHANISMS}
         if all_outcomes:
             row.update({f"{metric}_{m}": outcomes[m][metric]
-                        for metric in OUTCOME_METRICS for m in MECHANISMS})
+                        for metric in OUTCOME_METRICS for m in MECHANISMS
+                        if metric in outcomes[m]})
         first_best_gain = welfare["first_best"] - welfare["vcg"]
         for mechanism in AUDITED_MECHANISMS:
             gain = welfare[mechanism] - welfare["vcg"]
