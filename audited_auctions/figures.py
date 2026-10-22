@@ -732,12 +732,40 @@ def _part_style(part):
             "edgecolor": "white", "linewidth": 1.0}
 
 
-# Expected-outcomes bars: welfare W drawn as a filled ink circle beside each bar, so that
-# it differs from the hatched externality fill and keeps its interval clear of the stack.
-BAR_WIDTH = 0.52
-WELFARE_OFFSET = 0.38
-WELFARE_MARKER = {"marker": "o", "color": INK, "markersize": 5, "markeredgecolor": "white",
-                  "markeredgewidth": 0.8, "linestyle": "none"}
+# Expected-outcomes bars: welfare W as a right-pointing ink triangle on the bar, with a
+# white outline so it stands out from the hatched externality fill; its interval is a
+# vertical bar at the triangle's tip. Both have a white halo.
+BAR_WIDTH = 0.6
+WELFARE_STYLE = (-0.06, 0.07)  # x offsets from the bar center: marker, interval
+WELFARE_MARKER = {"marker": ">", "color": INK, "markersize": 7, "markeredgecolor": "white",
+                  "markeredgewidth": 1.0, "linestyle": "none"}
+HALO = [path_effects.withStroke(linewidth=3.2, foreground="white")]
+
+
+def _welfare_level(ax, position, welfare, interval):
+    """W at the bar: the marker, and the interval at the marker's tip."""
+    marker_x, interval_x = (position + offset for offset in WELFARE_STYLE)
+    if interval:
+        bars = ax.errorbar(interval_x, welfare, yerr=[[max(welfare - interval[0], 0)],
+                                                      [max(interval[1] - welfare, 0)]],
+                           color=INK, capsize=2.5, linewidth=1.1, capthick=1.1, zorder=4)
+        for artist in bars.lines[1] + bars.lines[2]:
+            artist.set_path_effects(HALO)
+    ax.plot(marker_x, welfare, **WELFARE_MARKER, zorder=5)
+
+
+def _fit_labels(fig, ax, labels, pad_points=2.0):
+    """Lowest top of the y axis that leaves room for labels drawn above data anchors:
+    labels = [(anchor in data units, label height in points)]."""
+    ax.autoscale_view()
+    fig.canvas.draw()
+    bottom = ax.get_ylim()[0]
+    height = ax.get_window_extent().height * 72 / fig.dpi  # axes height in points
+    top = max(ax.get_ylim()[1], 0.0)
+    for anchor, points in labels:
+        share = min((points + pad_points) / height, 0.6)
+        top = max(top, (anchor - share * bottom) / (1 - share))
+    ax.set_ylim(bottom, top)
 
 
 def _bar_stack(ax, position, outcomes, parts, width=0.6):
@@ -759,29 +787,23 @@ def expected_outcomes(results, path):
         fig, axes = _new_figure(6.5, 3.2, 1, 2, gridspec_kw={"width_ratios": [0.85, 1.15]})
         ax = axes[0, 0]
         positions = np.arange(len(MECHANISMS))
+        labels = []  # (label anchor in data units, label height in points)
         for position, mechanism in zip(positions, MECHANISMS):
             _bar_stack(ax, position, exact[mechanism], _bar_parts(mechanism), width=BAR_WIDTH)
-            # W (and its interval) beside the bar, clear of the hatched externality fill
             welfare = exact[mechanism]["welfare"]
             interval = (bootstrap or {}).get("level_intervals", {}).get("welfare", {}).get(
                 mechanism)
-            if interval:
-                ax.errorbar(position + WELFARE_OFFSET, welfare,
-                            yerr=[[max(welfare - interval[0], 0)],
-                                  [max(interval[1] - welfare, 0)]],
-                            color=INK, capsize=2.5, linewidth=1, zorder=4)
-            ax.plot(position + WELFARE_OFFSET, welfare, **WELFARE_MARKER, zorder=5)
+            _welfare_level(ax, position, welfare, interval)
             share = results["share_of_first_best_gain"].get(mechanism)
             # value and share of the first-best gain only (the note names them)
             text = compact(welfare) + (f"\n{_percent(share)}"
                                        if mechanism in ("vcg_pa", "ivcg_pa") else "")
             stack_top = sum(max(exact[mechanism][c], 0.0) for c in _bar_parts(mechanism))
             label_at = max(stack_top, interval[1] if interval else welfare)
-            ax.annotate(text, (position, label_at), xytext=(0, 4), textcoords="offset points",
+            ax.annotate(text, (position, label_at), xytext=(0, 3), textcoords="offset points",
                         ha="center", va="bottom", fontsize=7, color=INK, zorder=5)
+            labels.append((label_at, 3 + 8.6 * (text.count("\n") + 1)))
         ax.axhline(0, **REFERENCE, zorder=1)
-        top = max(sum(max(exact[m][c], 0.0) for c in _bar_parts(m)) for m in MECHANISMS)
-        ax.set_ylim(top=1.3 * top)
         ax.set_xticks(positions, ["VCG", "VCG-\nPA", "IVCG-\nPA", "First\nbest"])
         ax.grid(axis="x", visible=False)
         ax.set_ylabel("expected value per auction")
@@ -794,6 +816,7 @@ def expected_outcomes(results, path):
                                     and not _PAPER["on"] else "")) for p in parts]
                   + [Line2D([], [], **WELFARE_MARKER, label="welfare W (sum)")],
                   loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2)
+        _fit_labels(fig, ax, labels)
 
         ax = axes[0, 1]
         metrics = (("welfare", "valuation_welfare", "externality_welfare", "penalty_paid")
