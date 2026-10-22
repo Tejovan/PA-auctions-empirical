@@ -87,7 +87,7 @@ COMPONENT_HATCHES = {"bidder_utility": "", "revenue": "", "penalty_paid": "",
                      "externality_welfare": "xx"}
 # Bars split W into valuation and externality parts only (first best; paper mode): the
 # valuation part as a light tint (a fill, not a series) with a dark edge.
-VALUATION_PART = {"facecolor": "#d6d4cf", "edgecolor": "#52514e", "hatch": ""}
+VALUATION_PART = {"facecolor": "#d6d4cf", "hatch": ""}
 # The metrics a mechanism reports: the first best is an allocation, without payments.
 PAYMENT_METRICS = ("revenue", "penalty_paid", "bidder_utility")
 
@@ -726,34 +726,35 @@ def _bar_parts(mechanism):
 
 
 def _part_style(part):
+    """Every part has the same white border, so all bars look equally wide."""
+    border = {"edgecolor": "white", "linewidth": 1.0}
     if part == "valuation_welfare":
-        return {**VALUATION_PART, "linewidth": 0.8}
+        return {**VALUATION_PART, **border}
     if part == "externality_welfare":
-        return dict(EXTERNALITY_PART)
-    return {"facecolor": COMPONENT_COLORS[part], "hatch": COMPONENT_HATCHES[part],
-            "edgecolor": "white", "linewidth": 1.0}
+        return {**EXTERNALITY_PART, **border}
+    return {"facecolor": COMPONENT_COLORS[part], "hatch": COMPONENT_HATCHES[part], **border}
 
 
-# Expected-outcomes bars: welfare W as a thick ink level line across the bar, its interval
-# a vertical bar through the line's middle (mean ± interval); both have a white halo. The
-# externality part is a light hatch (dark lines on white), so the ink line stands out.
+# Expected-outcomes bars: welfare W as a wide, flat ink diamond (white edge) at the bar's
+# center; its interval as an error bar just right of the bar, clear of the marker. The
+# externality part is a light tint with dark hatching, so the ink marker stands out.
 BAR_WIDTH = 0.6
-HALO = [path_effects.withStroke(linewidth=3.6, foreground="white")]
-EXTERNALITY_PART = {"facecolor": "white", "edgecolor": "#3b3b3b", "hatch": "///",
-                    "linewidth": 0.8}
+INTERVAL_OFFSET = 0.5 * BAR_WIDTH + 0.09
+FLAT_DIAMOND = matplotlib.path.Path([(-1, 0), (0, 0.32), (1, 0), (0, -0.32), (-1, 0)],
+                                    closed=True)
+WELFARE_MARKER = {"marker": FLAT_DIAMOND, "color": INK, "markersize": 15,
+                  "markeredgecolor": "white", "markeredgewidth": 0.9, "linestyle": "none"}
+EXTERNALITY_PART = {"facecolor": "#ecebe8", "hatchcolor": "#3b3b3b", "hatch": "///"}
 
 
-def _welfare_level(ax, position, welfare, interval, width=BAR_WIDTH):
-    """W at the bar: a level line across it, and the interval through its middle."""
+def _welfare_level(ax, position, welfare, interval):
+    """W at the bar center; its interval beside the bar."""
     if interval:
-        bars = ax.errorbar(position, welfare, yerr=[[max(welfare - interval[0], 0)],
-                                                    [max(interval[1] - welfare, 0)]],
-                           color=INK, capsize=3, linewidth=1.1, capthick=1.1, zorder=5)
-        for artist in bars.lines[1] + bars.lines[2]:
-            artist.set_path_effects(HALO)
-    half = 0.5 * width
-    ax.plot([position - half, position + half], [welfare, welfare], color=INK, linewidth=2.2,
-            solid_capstyle="butt", path_effects=HALO, zorder=6)
+        ax.errorbar(position + INTERVAL_OFFSET, welfare,
+                    yerr=[[max(welfare - interval[0], 0)], [max(interval[1] - welfare, 0)]],
+                    color=INK, capsize=2.5, linewidth=1.0, capthick=1.0, marker="_",
+                    markersize=5, zorder=5)
+    ax.plot(position, welfare, **WELFARE_MARKER, zorder=6)
 
 
 def _fit_labels(fig, ax, labels, pad_points=2.0):
@@ -816,8 +817,7 @@ def expected_outcomes(results, path):
         ax.legend(handles=[Patch(**_part_style(p), label=METRIC_LABELS[p]
                                  + (" (first best)" if p == "valuation_welfare"
                                     and not _PAPER["on"] else "")) for p in parts]
-                  + [Line2D([], [], color=INK, linewidth=2.2, path_effects=HALO,
-                            label="welfare W (sum)" + (", with interval" if bootstrap else ""))],
+                  + [Line2D([], [], **WELFARE_MARKER, label="welfare W (sum)")],
                   loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2)
         _fit_labels(fig, ax, labels)
 
@@ -851,7 +851,8 @@ def expected_outcomes(results, path):
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=3)
         if bootstrap:
             note = (f"Exact expected values on the evaluation distribution (test half). Error "
-                    f"bars: {100 * bootstrap['confidence_level']:g}% percentile intervals over "
+                    f"bars (in (a), right of each bar): {100 * bootstrap['confidence_level']:g}% "
+                    f"percentile intervals over "
                     f"{bootstrap['num_resamples']} bootstrap resamples of the test rows.")
         else:
             note = "Exact expected values; the distribution is known, so there is no sampling error."
