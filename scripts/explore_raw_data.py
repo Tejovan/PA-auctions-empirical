@@ -599,6 +599,50 @@ def fig_truncation(ours, table):
     return slopes
 
 
+def fig_selection_paths(ours, table):
+    """Top-note Helpful counts against reach, split by which note selected the post and by sign."""
+    top = top_helpful(ours, table).fillna(0)
+    top["beta"] = table.set_index("id").beta.reindex(top.index)
+    via_not_misleading = top.not_misleading > top.misleading
+    positive = top.beta > 0
+    cut = 400
+    panels = (
+        ("not_misleading", via_not_misleading, "a", "Top not-misleading note",
+         ("selected via a misleading note", "selected via a not-misleading note")),
+        ("not_misleading", positive, "b", "Top not-misleading note",
+         ("$\\beta \\leq 0$", "$\\beta > 0$")),
+        ("misleading", via_not_misleading, "c", "Top misleading note",
+         ("selected via a misleading note", "selected via a not-misleading note")),
+    )
+    fig, axes = plt.subplots(1, 3, figsize=(9.8, 3.9), sharey=True)
+    for ax, (column, split, letter, title, names) in zip(axes, panels):
+        frame = top[top[column] > 0]
+        flag = split.reindex(frame.index).to_numpy()
+        x = np.log10(frame.eta.to_numpy(float))
+        y = np.log10(frame[column].to_numpy(float))
+        grid = np.linspace(x.min(), x.max(), 50)
+        for value, color, line, name in ((False, INK_SECONDARY, "--", names[0]),
+                                         (True, CATEGORY_COLORS[2], "-", names[1])):
+            keep = flag == value
+            ax.scatter(10 ** x[keep], 10 ** y[keep], s=3 if not value else 5,
+                       alpha=0.25 if not value else 0.6, color=color, linewidths=0,
+                       rasterized=True)
+            slope, intercept = np.polyfit(x[keep], y[keep], 1)
+            ax.plot(10 ** grid, 10 ** (intercept + slope * grid), color=color if value else INK,
+                    linestyle=line, linewidth=1.6, path_effects=HALO,
+                    label=f"{name} ({keep.sum():,}): slope {slope:.2f}")
+        ax.axhline(cut, **REFERENCE)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_ylim(0.8, 3e4)
+        ax.set_xlabel("impressions $\\eta$")
+        ax.set_title(f"({letter}) {title}", loc="left")
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), fontsize=7)
+    axes[0].set_ylabel("Helpful ratings of the top note")
+    fig.tight_layout()
+    save(fig, "15_selection_paths")
+
+
 # ---------------------------------------------------------------- our posts vs all noted posts
 
 GROUPS = (("ours", "our posts", "-"), ("unfetched", "> 400 Helpful, not fetched", "--"),
@@ -900,6 +944,12 @@ FIGURES = {
     "dashed: slope without a cut; diamond: misleading notes above 400. (d) Share of posts "
     "with a top note at most 1.5 times the cut, by fifth of reach. (e, f) Distribution of the "
     "top note's Helpful ratings in the lowest and highest fifth of reach.",
+    "15_selection_paths": "Which note selected the post. A post enters our data through its "
+    "most-Helpful note (> 400 Helpful). (a) Helpful ratings of the top not-misleading note "
+    "against impressions; magenta: posts selected through that not-misleading note; gray: "
+    "posts selected through a misleading note. (b) The same, split by the sign of beta. "
+    "(c) Helpful ratings of the top misleading note, split as in (a). Lines: log-log "
+    "least-squares fits per group; dashed horizontal: 400.",
     "8_groups_notes_and_ratings": "Our posts against all noted posts. Groups by the number of "
     "Helpful ratings of the post's most-helpful note: our posts; > 400 but not in our data; "
     "100-400; < 100. (a) Notes per post and (b) ratings per note, as the share of posts or "
@@ -935,6 +985,7 @@ def main():
     fig_signs(table, ours)
     fig_beta_colored(table)
     fig_truncation(ours, table)
+    fig_selection_paths(ours, table)
     per = post_groups(all_notes, post_frame.id)
     notes_grouped = note_scores(all_notes.merge(note_extras(), on="noteId", how="left")).merge(
         per[["group"]], left_on="tweetId", right_index=True)
