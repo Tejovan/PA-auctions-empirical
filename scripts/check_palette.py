@@ -5,7 +5,7 @@
    deutan and tritan vision (Machado et al. 2009, severity 1). Target: at least 8 in every row.
 3. Grayscale lightness L* of each color (information): colors with close L* are distinct in
    grayscale print only by line style or marker.
-Usage: python check_palette.py "#bb7a03" "#5e3c99" ...
+Usage: python scripts/check_palette.py "#bb7a03" "#5e3c99" ...
 """
 import numpy as np, itertools, sys
 # Machado et al. (2009) severity-1.0 matrices (linear RGB)

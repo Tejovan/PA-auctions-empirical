@@ -7,19 +7,21 @@ type-plane geometry of the run figures, and a grid of harmful_middle over its
 wiggle options (harmful_middle_options.webp).
 
 Usage:
-    python draw_distributions.py
+    python scripts/draw_distributions.py
 """
 
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-from PA_auctions import SYNTHETIC_FAMILIES, figures
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from PA_auctions import SYNTHETIC_FAMILIES, figures  # noqa: E402
 from PA_auctions.experiments.compute import plot_geometry, type_background
 from PA_auctions.experiments.config import family_options
 from PA_auctions.pipeline import prepare_distributions
 
-FOLDER = Path(__file__).resolve().parent / "docs" / "distributions"
+FOLDER = Path(__file__).resolve().parents[1] / "docs" / "distributions"
 
 # harmful_middle option grid: rows vary wiggle_width, columns wiggle_spread; the last row
 # varies wiggle_amplitude at the default width and spread.

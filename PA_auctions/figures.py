@@ -112,7 +112,7 @@ METRIC_LABELS = {"welfare": "welfare W", "valuation_welfare": "valuation part Σ
                  "penalty_paid": "penalties Σr", "bidder_utility": "bidder net utility Σu"}
 # Categorical series that are not mechanisms (forms, optimizers, given thresholds).
 # Non-mechanism series; mechanism hues are reserved (CLAUDE_files/figure_style.md).
-# All eight colors (with MECHANISM_COLORS) pass check_palette.py: contrast >= 3:1 on white,
+# All eight colors (with MECHANISM_COLORS) pass scripts/check_palette.py: contrast >= 3:1 on white,
 # CIEDE2000 >= 8.5 under simulated color-vision deficiency.
 CATEGORY_COLORS = ("#bb7a03", "#5e3c99", "#be538e", "#3b3b3b")
 CATEGORY_LINESTYLES = ("-", "--", "-.", ":", (0, (6, 2)), (0, (3, 1, 1, 1)), (0, (1, 1)))
@@ -1237,7 +1237,7 @@ def search_history(results, data, types, path_tried, path_trace):
                  else f"{len(tried):,} of {search['num_tried']:,} tried τ (random subset)")
         handles = [Line2D([], [], color="#9a9a9a", linewidth=0.8, label=shown),
                    Line2D([], [], color=THRESHOLD_COLOR, linewidth=2, label="best τ found")]
-        ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=2)
+        _shared_legend(fig, handles, columns=2)
         _finish(fig, path_tried, context_line(combination))
 
         fig, axes = _new_figure(3.9, 3.0)
@@ -1265,7 +1265,7 @@ def search_history(results, data, types, path_tried, path_trace):
         ax.set_ylabel("(best W − W so far) / (FB − W_VCG)" if gain > 0
                       else "(best W − W so far) / |best W|")
         ax.set_title("Convergence of the search (training objective)", loc="left")
-        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=2)
+        _shared_legend(fig, ax.get_legend_handles_labels()[0], columns=2)
         note = (f"Best training welfare {compact(best)} after {search['seconds']:.1f} s; values "
                 f"below 1e-13 are drawn at 1e-13.")
         return _finish(fig, path_trace, context_line(combination), note)

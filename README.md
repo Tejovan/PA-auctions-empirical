@@ -515,7 +515,7 @@ Login nodes are for light work only (e.g. the smoke test, `--report`); submit ev
 
 ![harmful_middle options](docs/distributions/harmful_middle_options.webp)
 
-[draw_distributions.py](draw_distributions.py) redraws these previews into [docs/distributions/](docs/distributions/) (about 2 s).
+[scripts/draw_distributions.py](scripts/draw_distributions.py) redraws these previews into [docs/distributions/](docs/distributions/) (about 2 s).
 
 Every family is a piecewise-uniform distribution on a grid: externalities on nodes, valuations uniform within cells. All quantities are exact for that distribution. Definitions and options: [§3.2](#family-options); grid accuracy: [PA_auctions/README.md](PA_auctions/README.md#synthetic-families).
 
@@ -569,7 +569,7 @@ The set has 11,811 tweets created between 2022-12-16 and 2025-01-18, each with a
 - normalization by the mean externality per impression;
 - an outlier filter on actions per impression.
 
-[create_descriptive_stats.py](create_descriptive_stats.py) writes summary tables and figures of the data to `output/descriptive_stats/`. [csv_to_latex.py](csv_to_latex.py) turns the tables into LaTeX.
+[scripts/create_descriptive_stats.py](scripts/create_descriptive_stats.py) writes summary tables and figures of the data to `output/descriptive_stats/`. [scripts/csv_to_latex.py](scripts/csv_to_latex.py) turns the tables into LaTeX.
 
 ## 7. Python interface
 
@@ -598,11 +598,11 @@ The set has 11,811 tweets created between 2022-12-16 and 2025-01-18, each with a
 | [PA_auctions/](PA_auctions/) | the package: distributions, exact computation, simulation, optimizers, figures |
 | [PA_auctions/experiments/](PA_auctions/experiments/) | runs: configuration, computation of combinations, run records, report |
 | [scc/](scc/) | BU SCC scripts |
-| [draw_distributions.py](draw_distributions.py), [docs/distributions/](docs/distributions/) | previews of the synthetic families (§6) |
+| [docs/distributions/](docs/distributions/) | previews of the synthetic families (§6), drawn by `scripts/draw_distributions.py` |
 | [tests/](tests/) | unit tests |
 | [supplement/](supplement/) | code supplement (`code_supplement_v5`: package layout, running experiments, outputs); the methods and additional results are in the separate empirical supplement |
-| [scripts/](scripts/) | `web27_paper_data.py` and `empirical_supplement_data.py` (tables and figure data of the paper and the empirical supplement from the runs of `configs/synthetic_run.toml` and `configs/shapes_run.toml`); `explore_raw_data.py` (raw Community Notes data) |
-| `data/samples/`, `full_tweets.csv` | the tweet data |
+| [scripts/](scripts/) | `web27_paper_data.py` and `empirical_supplement_data.py` (tables and figure data of the paper and the empirical supplement from the runs of `configs/synthetic_run.toml` and `configs/shapes_run.toml`); `explore_raw_data.py` (raw Community Notes data); `create_distribution.ipynb` and `get_tweets.ipynb` (how the tweet data were fetched and built), `create_descriptive_stats.py` and `csv_to_latex.py` (descriptive statistics), `draw_distributions.py` (family previews), `check_palette.py` (accessibility of figure colors) |
+| `data/samples/` | the tweet data (`g_full_tweets.csv`) |
 | `raw_data/` | raw X / Community Notes dumps and downloads (gitignored, never committed) |
 | [legacy/](legacy/) | superseded scripts, notebooks, outputs and documents of the EC 2025 / EAAMO 2026 workflow ([legacy/README.md](legacy/README.md)) |
 

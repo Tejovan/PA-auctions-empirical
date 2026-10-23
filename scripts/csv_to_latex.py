@@ -8,9 +8,9 @@ Writes a single .tex file containing one table environment per CSV.
 Paste individual tables into your document or \\input{} the whole file.
 
 Usage:
-    python csv_to_latex.py
-    python csv_to_latex.py --input-dir output/descriptive_stats/tables
-    python csv_to_latex.py --input-dir output/descriptive_stats/tables --output tables.tex
+    python scripts/csv_to_latex.py
+    python scripts/csv_to_latex.py --input-dir output/descriptive_stats/tables
+    python scripts/csv_to_latex.py --input-dir output/descriptive_stats/tables --output tables.tex
 """
 
 import argparse
@@ -61,7 +61,7 @@ _HELPFULNESS_LABELS = {
 _STAT_LABELS = {
     "count": r"$N$",
     "mean": "Mean",
-    "std": "Std.\ Dev.",
+    "std": r"Std.\ Dev.",
     "min": "Min",
     "p10": "p10",
     "p25": "p25",
