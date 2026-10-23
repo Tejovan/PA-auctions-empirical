@@ -206,6 +206,55 @@ def write_family_curves(shapes, family, view):
                header="e " + " ".join(f"n{n}" for n in SHAPE_BIDDERS), comments="", fmt="%.5g")
 
 
+def _harm_parts(summary, n, k, key):
+    """Valuation lost and harm avoided relative to VCG, as % of the first-best gain, for VCG-PA
+    with threshold function key, and for the first best."""
+    row = summary[(summary.num_bidders == n) & (summary.num_goods == k) & (summary.key == key)].iloc[0]
+    gain = row.welfare_first_best - row.welfare_vcg
+    parts = {}
+    for mechanism in ("vcg_pa", "first_best"):
+        lost = 100 * (row.valuation_welfare_vcg - row[f"valuation_welfare_{mechanism}"]) / gain
+        avoided = 100 * (row[f"externality_welfare_{mechanism}"] - row.externality_welfare_vcg) / gain
+        parts[mechanism] = (lost, avoided)
+    return parts
+
+
+HARM_FORMS = [("zero-welfare", "o"), ("vcg_pa_cutoff", "triangle*"), ("vcg_pa_poly1", "square*"),
+              ("vcg_pa_nodes", "*")]
+
+
+def _harm_commands(summary, markets, colors):
+    """pgfplots commands: per market, a thin path through the forms in HARM_FORMS (those present)
+    and the first best, with one marker per form."""
+    lines = []
+    for (n, k), color in zip(markets, colors):
+        points = []
+        for key, mark in HARM_FORMS:
+            if (summary[(summary.num_bidders == n) & (summary.num_goods == k)].key == key).any():
+                points.append((_harm_parts(summary, n, k, key)["vcg_pa"], mark))
+        best = _harm_parts(summary, n, k, "vcg_pa_nodes")["first_best"]
+        path = " ".join(f"({x:.2f},{y:.2f})" for (x, y), _ in points) + f" ({best[0]:.2f},{best[1]:.2f})"
+        lines.append(rf"\addplot[{color},thin,forget plot] coordinates {{{path}}};")
+        for (x, y), mark in points:
+            lines.append(rf"\addplot[{color},only marks,mark={mark},mark size=1.8pt,forget plot] coordinates {{({x:.2f},{y:.2f})}};")
+        lines.append(rf"\addplot[{color},only marks,mark=star,mark size=2.6pt,forget plot] coordinates {{({best[0]:.2f},{best[1]:.2f})}};")
+    return "\n".join(lines) + "\n"
+
+
+def harm_figures(synthetic, shapes):
+    summary = keyed(synthetic)
+    markets = [(n, 1) for n in (2, 4, 8, 16, 32)]
+    (DATA / "harm_markets.tex").write_text(
+        _harm_commands(summary, markets, ["fiveA", "fiveB", "fiveC", "fiveD", "fiveE"]))
+    summary = keyed(shapes)
+    families = list(web27_paper_data.FAMILY_NAMES)
+    parts = []
+    for family, color in zip(families, ["seriesA", "seriesB", "seriesC", "seriesD"]):
+        part = summary[summary.distribution == family]
+        parts.append(_harm_commands(part, [(8, 1)], [color]))
+    (DATA / "harm_families.tex").write_text("".join(parts))
+
+
 def main(synthetic, shapes, out):
     global DATA, FIGURES
     DATA, FIGURES = out / "data", out / "figures"
@@ -215,6 +264,7 @@ def main(synthetic, shapes, out):
     synthetic_tables(synthetic)
     shapes_table(shapes)
     curves(synthetic, shapes)
+    harm_figures(synthetic, shapes)
     runs = {"synthetic": synthetic, "shapes": shapes}
     for run, path, name in COPIED:
         shutil.copyfile(runs[run] / path, FIGURES / name)
