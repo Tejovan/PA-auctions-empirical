@@ -1,0 +1,38 @@
+# WEB27 empirical section, synthetic part: given-τ benchmarks on the markets of
+# configs/synthetic_run.toml (zero-welfare threshold τ⁰, ex ante welfare cutoff τ*, relaxation τ).
+# Evaluation only (no search): fast. synthetic_run.toml already evaluates these three τ as
+# [[thresholds]]; run this config only if you take them out of synthetic_run.toml.
+#   python run.py configs/synthetic_benchmarks.toml --dry-run
+#   python run.py configs/synthetic_benchmarks.toml --yes
+
+kind = "evaluate"
+name = "synthetic-benchmarks"
+description = "Given-τ benchmarks for the synthetic part of the WEB27 empirical section: zero-welfare threshold, ex ante welfare cutoff and relaxation τ on harmful_middle, the markets of synthetic_run.toml."
+
+[[distributions]]
+source = "harmful_middle"
+
+[markets]
+pairs = [[2, 1], [4, 1], [8, 1], [16, 1], [32, 1],
+         [4, 2], [8, 2], [16, 2], [32, 2],
+         [8, 4], [16, 4], [32, 4],
+         [16, 8], [32, 8],
+         [4, 4]]                 # k = n: no-competition check (τ⁰ optimal, share 100%)
+
+[[thresholds]]
+label = "zero-welfare"           # τ⁰(e) = max(0, −e): participate iff v + e ≥ 0
+cutoff = 0.0
+
+[[thresholds]]
+label = "ex-ante"                # τ*(e) = max(0, w* − e), Pr[v + e > w*] = min{k/n, Pr[v + e > 0]}
+cutoff = "ex_ante"               # not in the submission's table (deferred item 1)
+
+[[thresholds]]
+label = "relaxation"             # τ read off the symmetric relaxation (skipped where k ≥ n)
+relaxation = true
+
+[evaluation]
+num_simulated_auctions = 5000
+
+[checks]
+grid_refinement = true

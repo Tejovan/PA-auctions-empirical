@@ -4,21 +4,23 @@
 #   python run.py configs/synthetic_run.toml --dry-run
 #   python run.py configs/synthetic_run.toml --yes
 #
-# Markets: the cells with k < n of n ∈ {2, 4, 8, 16, 32} × k ∈ {1, 2, 4, 8} (14 markets).
+# Markets: the cells with k < n of n ∈ {2, 4, 8, 16, 32} × k ∈ {1, 2, 4, 8} (14 markets), plus
+# n = k = 4 as a no-competition check (τ⁰ optimal; the relaxation is skipped there).
 # Fixed ratios n/k ∈ {2, 4, 8} lie on diagonals: (2,1) (4,2) (8,4) (16,8); (4,1) (8,2) (16,4)
 # (32,8); (8,1) (16,2) (32,4).
 #
 # Given τ (folders tau-<label>; one class each in gap-decomposition.csv):
 #   zero-welfare  τ⁰(e) = max(0, −e): participate iff v + e ≥ 0
 #   ex-ante       τ*(e) = max(0, w* − e), Pr[v + e > w*] = min{k/n, Pr[v + e > 0]};
-#                 paper use needs the ex ante approximation (deferred item 1)
+#                 not in the submission's table (needs the ex ante approximation, deferred
+#                 item 1); kept in the run for reference
 #   relaxation    τ read off the symmetric relaxation: the ascent's "relaxation" start
 # The relaxation value J and its threshold-rule flag come from the symmetric_relaxation check
 # (default on), for every combination.
 
 kind = "optimize"
 name = "synthetic-run"
-description = "Synthetic part of the WEB27 empirical section: harmful_middle, 14 markets with k < n (n ≤ 32, k ≤ 8), VCG-PA and IVCG-PA objectives; nodes by best-response ascent, common welfare cutoff by genetic search; given τ⁰, ex ante cutoff τ* and relaxation τ."
+description = "Synthetic part of the WEB27 empirical section: harmful_middle, 14 markets with k < n (n ≤ 32, k ≤ 8) plus n = k = 4, VCG-PA and IVCG-PA objectives; nodes by best-response ascent, common welfare cutoff by genetic search; given τ⁰, ex ante cutoff τ* and relaxation τ."
 
 [[distributions]]
 source = "harmful_middle"        # default options and grid (151 × 150)
@@ -27,18 +29,19 @@ source = "harmful_middle"        # default options and grid (151 × 150)
 pairs = [[2, 1], [4, 1], [8, 1], [16, 1], [32, 1],
          [4, 2], [8, 2], [16, 2], [32, 2],
          [8, 4], [16, 4], [32, 4],
-         [16, 8], [32, 8]]
+         [16, 8], [32, 8],
+         [4, 4]]                 # k = n: no-competition check (τ⁰ optimal, share 100%)
 
 [design]
 objectives = ["vcg_pa", "ivcg_pa"]
 
 [[optimizers]]
-label = "br"                     # starts: zero, zero_welfare, short_genetic, relaxation, 3 random
-method = "best_response"
+label = "br"                     # starts: zero, zero_welfare, relaxation, 3 random (no genetic
+method = "best_response"         # start: genetic search only on the cutoff form below)
 threshold_forms = ["nodes"]
+starts = ["zero", "zero_welfare", "relaxation"]
 max_iterations = 100
 num_random_starts = 3
-short_genetic_generations = 20
 polish_rounds = 3
 
 [[optimizers]]

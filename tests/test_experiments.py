@@ -93,6 +93,22 @@ def test_market_pairs_and_given_thresholds_in_optimize_runs():
         resolve_config(optimize_config(thresholds=[{"label": "r", "relaxation": 1}]))
 
 
+def test_market_comparisons_one_direction_at_a_time():
+    summary = pd.DataFrame([{"distribution": "d", "zeta": 1.0, "num_bidders": n, "num_goods": k,
+                             "objective": "vcg_pa", "threshold_form": "nodes", "optimizer": "br",
+                             "tau_label": np.nan, "path": f"d/z1/n{n}-k{k}/vcgpa_nodes_br"}
+                            for n, k in [(4, 1), (8, 1), (8, 2), (4, 2), (16, 4)]])
+    targets = {job[1][3].rsplit("/", 1)[1] for job in report.comparison_jobs("x", summary,
+                                                                              "optimize")
+               if job[0] == "overlay"}
+    assert {"tau-by-bidders_k1_vcgpa_nodes_br.pdf", "tau-by-bidders_k2_vcgpa_nodes_br.pdf",
+            "tau-by-goods_n8_vcgpa_nodes_br.pdf", "tau-by-goods_n4_vcgpa_nodes_br.pdf",
+            "tau-by-goods-at-fixed-ratio_nk4_vcgpa_nodes_br.pdf",
+            "tau-by-market_vcgpa_nodes_br.pdf"} <= targets
+    # single-market groups get no figure
+    assert not any(tag in t for t in targets for tag in ("_k4_", "_n16_", "_nk2_", "_nk8_"))
+
+
 def test_toml_writer_round_trip():
     config = resolve_config(optimize_config())
     record = {"run": {"name": "x", "seconds": {"total": 1.5}}, "config": config}

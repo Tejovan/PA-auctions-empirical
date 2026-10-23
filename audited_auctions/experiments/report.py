@@ -109,8 +109,10 @@ FIGURE_INFO = {
 COMPARE_INFO = {
     "tau-by": ("τ across one varied input",
                "τ of the combinations that differ in one input (market, form, optimizer, "
-               "objective or threshold), other inputs fixed; the legend gives each τ's welfare "
-               "and share of the first-best gain.", "two or more such combinations"),
+               "objective or threshold), other inputs fixed; markets also one direction at a "
+               "time: bidders n at fixed k, goods k at fixed n, and goods k at fixed n/k "
+               "(colors: viridis in n or k). The legend gives each τ's welfare and share of the "
+               "first-best gain.", "two or more such combinations"),
     "welfare-vs-zeta": ("Welfare against ζ",
                         "(a) expected welfare of the four mechanisms and (b) gains over VCG, "
                         "against the externality scale ζ.", "a distribution with several ζ"),
@@ -123,7 +125,11 @@ COMPARE_INFO = {
 OVERLAY_INPUTS = {"optimize": ("market", "threshold_form", "optimizer", "objective", "tau_label"),
                   "evaluate": ("market", "tau_label")}
 INPUT_NAMES = {"market": "market", "threshold_form": "form", "optimizer": "optimizer",
-               "objective": "objective", "tau_label": "threshold"}
+               "objective": "objective", "tau_label": "threshold", "bidders": "bidders",
+               "goods": "goods", "ratio": "goods-at-fixed-ratio"}
+# Markets varied one direction at a time: varied input → the market quantity held fixed
+# (n bidders at fixed k; k goods at fixed n; k goods at fixed n/k).
+MARKET_DIRECTIONS = {"bidders": "num_goods", "goods": "num_bidders", "ratio": "ratio"}
 
 
 def _load_types(folder, results):
@@ -184,7 +190,13 @@ def leaf_figures(folder, path, select=None):
 
 def _fixed_label(row, varied):
     parts = []
-    if varied != "market":
+    if varied == "bidders":
+        parts.append(f"k{int(row['num_goods'])}")
+    elif varied == "goods":
+        parts.append(f"n{int(row['num_bidders'])}")
+    elif varied == "ratio":
+        parts.append(f"nk{row['num_bidders'] / row['num_goods']:g}")
+    elif varied != "market":
         parts.append(f"n{int(row['num_bidders'])}-k{int(row['num_goods'])}")
     if "objective" in row and isinstance(row.get("objective"), str) and varied != "objective":
         parts.append(OBJECTIVE_SHORT[row["objective"]])
@@ -232,6 +244,18 @@ def comparison_jobs(folder, summary, kind):
             name = f"tau-by-{INPUT_NAMES[varied]}_{_fixed_label(first, varied)}.pdf"
             target = f"{first['distribution']}/z{first['zeta']:g}/compare/{name}"
             jobs.append(("overlay", (str(folder), varied, group.to_dict("records"), target)))
+    # Markets one direction at a time (n at fixed k, k at fixed n, k at fixed n/k)
+    rest = [c for c in identity if c not in ("num_bidders", "num_goods")]
+    with_ratio = summary.assign(ratio=summary.num_bidders / summary.num_goods)
+    for varied, fixed_column in MARKET_DIRECTIONS.items():
+        for _, group in with_ratio.groupby(rest + [fixed_column], dropna=False):
+            if len(group) < 2:
+                continue
+            first = group.iloc[0].to_dict()
+            name = f"tau-by-{INPUT_NAMES[varied]}_{_fixed_label(first, varied)}.pdf"
+            target = f"{first['distribution']}/z{first['zeta']:g}/compare/{name}"
+            jobs.append(("overlay", (str(folder), varied,
+                                     group.drop(columns="ratio").to_dict("records"), target)))
     if summary.groupby("distribution").zeta.nunique().max() > 1:
         fixed = [c for c in identity if c != "zeta"]
         for _, group in summary.groupby(fixed, dropna=False):
@@ -256,9 +280,18 @@ def _overlay(folder, varied, rows, target):
         span = np.log(ratios.max() / ratios.min()) if ratios.max() > ratios.min() else 1.0
         colormap = figures.plt.get_cmap("viridis")
         goods = sorted({r["num_goods"] for r in rows})
+    if varied in MARKET_DIRECTIONS:  # color by the varied quantity (n, or k)
+        quantity = (lambda r: r["num_bidders"]) if varied == "bidders" else (  # noqa: E731
+            lambda r: r["num_goods"])
+        values = np.array([quantity(r) for r in rows], dtype=float)
+        span = np.log(values.max() / values.min()) if values.max() > values.min() else 1.0
+        colormap = figures.plt.get_cmap("viridis")
+        rows = sorted(rows, key=quantity)
+    else:
+        rows = sorted(rows, key=lambda r: (r["num_bidders"] / r["num_goods"],
+                                           str(r.get(varied, ""))))
     objective_of = lambda r: r.get("objective") if isinstance(r.get("objective"), str) else None  # noqa: E731
-    for index, row in enumerate(sorted(rows, key=lambda r: (r["num_bidders"] / r["num_goods"],
-                                                            str(r.get(varied, ""))))):
+    for index, row in enumerate(rows):
         data = _load_data(folder / row["path"])
         mechanism = objective_of(row) or "vcg_pa"
         welfare = f"W = {figures.compact(row[f'welfare_{mechanism}'])}, " \
@@ -269,6 +302,10 @@ def _overlay(folder, varied, rows, target):
             linestyle = figures.CATEGORY_LINESTYLES[goods.index(row["num_goods"]) % 7]
             label = (f"n = {row['num_bidders']}, k = {row['num_goods']} (n/k = {ratio:g}): "
                      f"{welfare}")
+        elif varied in MARKET_DIRECTIONS:
+            color = colormap(0.1 + 0.8 * np.log(quantity(row) / values.min()) / span)
+            linestyle = figures.CATEGORY_LINESTYLES[index % 7]
+            label = f"n = {row['num_bidders']}, k = {row['num_goods']}: {welfare}"
         elif varied == "objective":
             color = figures.MECHANISM_COLORS[row["objective"]]
             linestyle = figures.MECHANISM_LINESTYLES[row["objective"]]
