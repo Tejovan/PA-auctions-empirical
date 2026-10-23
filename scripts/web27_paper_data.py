@@ -43,12 +43,12 @@ MAIN_HEADER = r"""\begin{tabular}{@{}rrrrrrr@{}}
 \toprule
  & & \multicolumn{4}{c}{VCG-PA with $\tau$} & IVCG-PA\\
 \cmidrule(lr){3-6}
-$n$ & $k$ & $\tau^0$ & cutoff & optimized & relax.\ bound & optimized\\
+$n$ & $k$ & $\tau^0$ & best cutoff & optimized & relax.\ bound & optimized\\
 \midrule
 """
 SHAPES_HEADER = r"""\begin{tabular}{@{}lrrrrrrr@{}}
 \toprule
-distribution & $n$ & $k$ & $\tau^0$ & cutoff & line & optimized & gap\\
+distribution & $n$ & $k$ & $\tau^0$ & best cutoff & best line & optimized & gap\\
 \midrule
 """
 FOOTER = "\\bottomrule\n\\end{tabular}\n"
