@@ -7,6 +7,15 @@ and writes figures and a README with summary statistics to output/raw_data_explo
     mariadb tweets < <(tar -xzOf tweets.sql.tar.gz)      # once
     .venv/bin/python scripts/explore_raw_data.py
 
+Post selection (gabemgem/XAnalysis, v1/database_queries.ipynb, which wrote top_tweetIds.pkl
+for get_tweets.ipynb): posts with a note that has more than 400 HELPFUL ratings,
+
+    SELECT r.noteId, n.tweetId, COUNT(r.noteId) FROM note_ratings r JOIN notes n
+    ON r.noteId = n.noteId WHERE r.helpfulnessLevel = 'HELPFUL'
+    GROUP BY r.noteId, n.tweetId HAVING COUNT(r.noteId) > 400
+
+(20,558 notes on 13,683 posts; 11,934 of them returned by the X API).
+
 The post-level aggregate rating reproduces create_distribution.ipynb: rating scores
 HELPFUL 1, SOMEWHAT_HELPFUL 0.5, NOT_HELPFUL 0 (ratings without a helpfulness level are
 dropped), +1 per note for its author, note sign -1 (misleading) or +1 (not misleading),
@@ -643,6 +652,70 @@ def fig_selection_paths(ours, table):
     save(fig, "15_selection_paths")
 
 
+def hill_index(values, k):
+    """Hill estimator of the tail index from the k largest values."""
+    values = np.sort(np.asarray(values, float))[::-1]
+    return 1 / np.mean(np.log(values[:k] / values[k]))
+
+
+def fig_tails(all_notes, post_frame, table):
+    """Is the upper tail of the misleading rating mass kept by the selection?"""
+    scored = note_scores(all_notes.copy())
+    scored = scored[scored.sign.notna()]
+    grouped = scored.groupby("tweetId")
+    population = pd.DataFrame({
+        "mass": grouped.score_nb.apply(lambda x: -x[x < 0].sum()),
+        "top": grouped.n_h.max()})
+    population = population[population.mass > 0]
+    in_data = population.index.isin(post_frame.id)
+    fig, axes = plt.subplots(1, 3, figsize=(9.8, 3.4))
+    ax = axes[0]
+    for values, color, line, label in (
+            (population.mass, CATEGORY_COLORS[3], "--", "all noted posts"),
+            (population.mass[in_data], CATEGORY_COLORS[0], "-", "our posts")):
+        ccdf(ax, values, color=color, linestyle=line, linewidth=1.4,
+             label=f"{label} ({len(values):,}); tail index {hill_index(values, 2000):.2f}")
+    x = np.array([1600, 12000])
+    ax.plot(x, 2e-3 * (x / 1600) ** -2.0, **REFERENCE, label="slope $-2$")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("misleading rating mass $-\\beta^-$")
+    ax.set_ylabel("share of posts with at least")
+    ax.set_title("(a) Tail of the misleading rating mass", loc="left")
+    ax.legend(loc="lower left", fontsize=6.5)
+    ax = axes[1]
+    thresholds = np.logspace(1.5, 4, 25)
+    selected = [(population.top[population.mass >= x] > 400).mean() for x in thresholds]
+    kept = [in_data[population.mass.to_numpy() >= x].mean() for x in thresholds]
+    ax.plot(thresholds, selected, color=CATEGORY_COLORS[1], linestyle="--", linewidth=1.4,
+            label="meets the rule (> 400 Helpful)")
+    ax.plot(thresholds, kept, color=CATEGORY_COLORS[0], linewidth=1.4,
+            label="in our data (also fetched)")
+    ax.set_xscale("log")
+    ax.set_ylim(0, 1.02)
+    ax.set_xlabel("misleading rating mass at least x")
+    ax.set_ylabel("share of those posts")
+    ax.set_title("(b) Share of the tail we kept", loc="left")
+    ax.legend(loc="lower right", fontsize=6.5)
+    ax = axes[2]
+    v = (table.action_count / table.impression_count).to_numpy(float)
+    mass = -table.beta_minus.to_numpy(float)
+    top_decile = mass >= np.quantile(mass, 0.9)
+    for keep, color, line, label in ((~top_decile, CATEGORY_COLORS[3], "--", "other 90%"),
+                                     (top_decile, CATEGORY_COLORS[2], "-",
+                                      "top 10% by misleading mass")):
+        ccdf(ax, v[keep], color=color, linestyle=line, linewidth=1.4,
+             label=f"{label}; tail index {hill_index(v[keep], 100):.2f}")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("actions per view $\\alpha/\\eta$")
+    ax.set_ylabel("share of posts with at least")
+    ax.set_title("(c) Valuation tail, our posts", loc="left")
+    ax.legend(loc="lower left", fontsize=6.5)
+    fig.tight_layout()
+    save(fig, "16_tails")
+
+
 # ---------------------------------------------------------------- our posts vs all noted posts
 
 GROUPS = (("ours", "our posts", "-"), ("unfetched", "> 400 Helpful, not fetched", "--"),
@@ -950,6 +1023,13 @@ FIGURES = {
     "posts selected through a misleading note. (b) The same, split by the sign of beta. "
     "(c) Helpful ratings of the top misleading note, split as in (a). Lines: log-log "
     "least-squares fits per group; dashed horizontal: 400.",
+    "16_tails": "Upper tail of the misleading rating mass (Helpful 1, Somewhat 0.5, +1 per note, "
+    "summed over a post's misleading notes; computable for every noted post without "
+    "impressions). (a) Share of posts with at least that mass, all noted posts and our posts; "
+    "tail index = Hill estimator from the 2,000 largest values; dashed: slope -2. (b) Among "
+    "all noted posts with mass at least x: share meeting the selection rule and share in our "
+    "data. (c) Our posts: tail of actions per view (valuation per view at theta = 1) for the "
+    "10% with the largest misleading mass and the rest; Hill estimator from the 100 largest.",
     "8_groups_notes_and_ratings": "Our posts against all noted posts. Groups by the number of "
     "Helpful ratings of the post's most-helpful note: our posts; > 400 but not in our data; "
     "100-400; < 100. (a) Notes per post and (b) ratings per note, as the share of posts or "
@@ -986,6 +1066,7 @@ def main():
     fig_beta_colored(table)
     fig_truncation(ours, table)
     fig_selection_paths(ours, table)
+    fig_tails(all_notes, post_frame, table)
     per = post_groups(all_notes, post_frame.id)
     notes_grouped = note_scores(all_notes.merge(note_extras(), on="noteId", how="left")).merge(
         per[["group"]], left_on="tweetId", right_index=True)
