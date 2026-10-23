@@ -41,9 +41,9 @@ MAIN_MARKETS = [(2, 1), (8, 1), (32, 1), (8, 2), (16, 4), (32, 8)]
 SHAPE_BIDDERS = [2, 4, 8, 16]
 MAIN_HEADER = r"""\begin{tabular}{@{}rrrrrrr@{}}
 \toprule
- & & \multicolumn{3}{c}{VCG-PA with $\tau$} & IVCG-PA & relax.\\
-\cmidrule(lr){3-5}
-$n$ & $k$ & $\tau^0$ & cutoff & optimized & optimized & bound\\
+ & & \multicolumn{4}{c}{VCG-PA with $\tau$} & IVCG-PA\\
+\cmidrule(lr){3-6}
+$n$ & $k$ & $\tau^0$ & cutoff & optimized & relax.\ bound & optimized\\
 \midrule
 """
 SHAPES_HEADER = r"""\begin{tabular}{@{}lrrrrrrr@{}}
@@ -161,7 +161,7 @@ def main(synthetic, shapes, out):
         for n, k in MAIN_MARKETS:
             row = main_table[(n, k)]
             file.write(f"{n} & {k} & " + " & ".join(percent(row.get(c)) for c in
-                       ("tau0", "cutoff", "vcgpa", "ivcgpa", "bound")) + r" \\" + "\n")
+                       ("tau0", "cutoff", "vcgpa", "bound", "ivcgpa")) + r" \\" + "\n")
         file.write(FOOTER)
 
     with open(out / "table_shapes.tex", "w") as file:
@@ -197,9 +197,14 @@ def main(synthetic, shapes, out):
         np.savetxt(out / f"tau_{family}.dat", np.column_stack([e_grid] + columns),
                    header="e " + " ".join(f"n{n}" for n in SHAPE_BIDDERS), comments="", fmt="%.5g")
 
+    # Type-plane figure: valuation axis up to the top of the support, so that τ is drawn up to
+    # the externality at which it reaches the top and the penalty becomes constant.
     leaf = synthetic / "harmful-middle" / "z1" / "n4-k1" / "ivcgpa_nodes_br"
     data, types = load_data(leaf), load_types(synthetic, "harmful-middle")
-    view = figures.default_view(types)
+    view = dict(figures.default_view(types))
+    view["v_limits"] = np.array([float(view["v_limits"][0]), float(types["maximum_valuation"])])
+    background(view, out / "bg_hm_full.png")
+    limits.append(rf"\def\vmaxFull{{{float(types['maximum_valuation']):.4f}}}")
     tau = shown_threshold(data, view)
     penalty = np.minimum(np.asarray(data["penalty_ivcg_pa"], dtype=float), float(view["v_limits"][1]))
     np.savetxt(out / "types_hm.dat", np.column_stack([data["e_grid"], tau, penalty]),

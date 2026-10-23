@@ -170,6 +170,8 @@ def curves(synthetic, shapes):
                           rf"\def\vmin{macro}{{{v_low:.5g}}}\def\vmax{macro}{{{v_high:.4f}}}")
             if run is shapes:
                 write_family_curves(shapes, family, view)
+    maximum = float(load_types(synthetic, "harmful-middle")["maximum_valuation"])
+    limits.append(rf"\def\vmaxFull{{{maximum:.4f}}}")
     (DATA / "limits.tex").write_text("\n".join(limits) + "\n")
 
     view = load_types(synthetic, "harmful-middle")
