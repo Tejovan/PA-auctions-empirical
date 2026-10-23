@@ -1,5 +1,5 @@
 """
-Tests for the audited_auctions package. Run from WEB27/code with
+Tests for the PA_auctions package. Run from WEB27/code with
 
     .venv/bin/python -m pytest tests -q
 
@@ -20,7 +20,7 @@ Ground truths:
 import numpy as np
 import pytest
 
-from audited_auctions import (
+from PA_auctions import (
     MECHANISMS,
     build_mechanism_models,
     evaluate_threshold,
@@ -30,15 +30,15 @@ from audited_auctions import (
     population_distribution,
     synthetic_distribution,
 )
-from audited_auctions.auction_simulation import (
+from PA_auctions.auction_simulation import (
     allocation_probabilities,
     critical_value_payments,
 )
-from audited_auctions.exact_computation import (
+from PA_auctions.exact_computation import (
     iron_quantile_function,
     ironed_welfare_contributions,
 )
-from audited_auctions.scoring_rules import PiecewiseLinearScore
+from PA_auctions.scoring_rules import PiecewiseLinearScore
 
 
 def example_t_distribution():

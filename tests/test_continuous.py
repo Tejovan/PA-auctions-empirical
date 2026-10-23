@@ -7,11 +7,11 @@ and of the relaxation optimizer method.
 import numpy as np
 import pytest
 
-from audited_auctions import synthetic_distribution
-from audited_auctions.exact_computation import iron_quantile_function
-from audited_auctions.pipeline import optimize_threshold
-from audited_auctions.threshold_evaluation import evaluate_threshold, exact_outcomes
-from audited_auctions.threshold_forms import ThresholdForm
+from PA_auctions import synthetic_distribution
+from PA_auctions.exact_computation import iron_quantile_function
+from PA_auctions.pipeline import optimize_threshold
+from PA_auctions.threshold_evaluation import evaluate_threshold, exact_outcomes
+from PA_auctions.threshold_forms import ThresholdForm
 
 
 def cutoff(distribution, welfare_cutoff):

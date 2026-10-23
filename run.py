@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-run.py — run experiments of the audited_auctions package from configuration files.
+run.py — run experiments of the PA_auctions package from configuration files.
 
     python run.py CONFIG.toml                 run (asks to proceed after the time estimate)
     python run.py CONFIG.toml --dry-run       print the plan and the time estimate only
@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 def list_options():
-    from audited_auctions.experiments.config import (
+    from PA_auctions.experiments.config import (
         BEST_RESPONSE_DEFAULTS,
         DATA_SETS,
         EMPIRICAL_DEFAULTS,
@@ -38,7 +38,7 @@ def list_options():
         THRESHOLD_SOURCES,
         family_options,
     )
-    from audited_auctions.type_distributions import SYNTHETIC_FAMILIES
+    from PA_auctions.type_distributions import SYNTHETIC_FAMILIES
 
     print("Synthetic families:", ", ".join(sorted(SYNTHETIC_FAMILIES)))
     print("Data sets:", ", ".join(f"{name} = {path}" for name, path in DATA_SETS.items()),
@@ -84,7 +84,7 @@ def main():
     if args.paper is not None and not args.report:
         parser.error("--paper needs --report RUN_FOLDER")
     if args.report:
-        from audited_auctions.experiments.report import make_paper_figures, make_report
+        from PA_auctions.experiments.report import make_paper_figures, make_report
 
         if args.paper is not None:
             names = [n.strip() for n in args.paper.split(",") if n.strip()] or None
@@ -94,7 +94,7 @@ def main():
         return
     if not args.config:
         parser.error("give a configuration file, --report RUN_FOLDER or --options")
-    from audited_auctions.experiments.runner import run
+    from PA_auctions.experiments.runner import run
 
     run(args.config, workers=args.workers, dry_run=args.dry_run, assume_yes=args.yes,
         report=False if args.no_report else None)

@@ -1,10 +1,10 @@
 """Exploration of the raw Community Notes / X data behind data/samples/g_full_tweets.csv.
 
 Reads the MariaDB database `tweets` (tables note_ratings, notes, tweets; loaded from the
-untracked dump tweets.sql.tar.gz), caches per-note and per-post aggregates in raw_data/cache/,
+untracked dump raw_data/tweets.sql.tar.gz), caches per-note and per-post aggregates in raw_data/cache/,
 and writes figures and a README with summary statistics to output/raw_data_exploration/.
 
-    mariadb tweets < <(tar -xzOf tweets.sql.tar.gz)      # once
+    mariadb tweets < <(tar -xzOf raw_data/tweets.sql.tar.gz)      # once
     .venv/bin/python scripts/explore_raw_data.py
 
 Post selection (gabemgem/XAnalysis, v1/database_queries.ipynb, which wrote top_tweetIds.pkl
@@ -39,7 +39,7 @@ from scipy.stats import spearmanr
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from audited_auctions.figures import (CATEGORY_COLORS, HALO, INK, INK_SECONDARY,  # noqa: E402
+from PA_auctions.figures import (CATEGORY_COLORS, HALO, INK, INK_SECONDARY,  # noqa: E402
                                      REFERENCE, STYLE)
 
 CACHE = ROOT / "raw_data" / "cache"

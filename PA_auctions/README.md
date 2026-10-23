@@ -1,4 +1,4 @@
-# `audited_auctions` — exact computation, simulation and τ optimization for a common threshold
+# `PA_auctions` — exact computation, simulation and τ optimization for a common threshold
 
 Given a joint distribution H of bidder types (e, v) and a common participation threshold function τ(e), this package computes the outcomes of four mechanisms with n exchangeable bidders and k identical goods (unit demand):
 
@@ -16,7 +16,7 @@ The penalties are outputs, not inputs: since τ is given, the package computes t
 ## Quick start
 
 ```python
-from audited_auctions import evaluate_threshold, synthetic_distribution, polynomial_threshold
+from PA_auctions import evaluate_threshold, synthetic_distribution, polynomial_threshold
 
 distribution = synthetic_distribution("harm_rises")      # piecewise-uniform, v ∈ [0, v̄]
 threshold = polynomial_threshold([0.5, -1.0])            # τ(e) = 0.5 − e
@@ -224,7 +224,7 @@ Paper panels (`--paper`) show no revenue, since the paper does not report it: th
 .venv/bin/python -m pytest tests -q
 ```
 
-`tests/test_audited_auctions.py`: Example T (ironing pools valuations 2 and 3; IVCG-PA welfare 40/16; first best 41/16; VCG-PA ≤ 39/16); the second-price penalty τ² (exact for uniform valuations); Example N welfare and penalty (exact); exact ironing of piecewise-linear ŵ^τ against ironing of a fine atomic discretization; ironing binds and helps in `harmful_middle`; exact expectations equal simulated means for all mechanisms and metrics (atomic and piecewise-uniform); a threshold type is indifferent (its simulated auction-utility equals r(e)); IVCG-PA ≥ VCG-PA; inverses of the piecewise-linear score; negative valuations are rejected.
+`tests/test_PA_auctions.py`: Example T (ironing pools valuations 2 and 3; IVCG-PA welfare 40/16; first best 41/16; VCG-PA ≤ 39/16); the second-price penalty τ² (exact for uniform valuations); Example N welfare and penalty (exact); exact ironing of piecewise-linear ŵ^τ against ironing of a fine atomic discretization; ironing binds and helps in `harmful_middle`; exact expectations equal simulated means for all mechanisms and metrics (atomic and piecewise-uniform); a threshold type is indifferent (its simulated auction-utility equals r(e)); IVCG-PA ≥ VCG-PA; inverses of the piecewise-linear score; negative valuations are rejected.
 
 `tests/test_pipeline.py`: every family has bounded non-negative continuous valuations; variance-preserving smoothing keeps the moments; the split is deterministic; bootstrap gains are paired; smoothed and atomic VCG welfare agree; the genetic search recovers the Example N optimum t* = 4c/3 (to 10⁻⁴ in τ and 10⁻¹⁰ in welfare with Nelder–Mead refinement); an IVCG-PA scoring rule designed on a distribution and applied to the same distribution reproduces its ironing exactly (welfare, revenue, penalties; atomic and piecewise uniform); cached VCG and first-best results equal fresh ones and are reused across τ and in the bootstrap.
 

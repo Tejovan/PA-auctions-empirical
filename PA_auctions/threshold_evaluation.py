@@ -30,8 +30,8 @@ allocation of the respective auction), and reports it for plotting.
 
 Usage
 -----
-    from audited_auctions import evaluate_threshold, synthetic_distribution
-    from audited_auctions import polynomial_threshold
+    from PA_auctions import evaluate_threshold, synthetic_distribution
+    from PA_auctions import polynomial_threshold
 
     evaluation = evaluate_threshold(
         type_distribution=synthetic_distribution("h"),

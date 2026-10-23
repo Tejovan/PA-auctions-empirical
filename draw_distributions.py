@@ -14,10 +14,10 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-from audited_auctions import SYNTHETIC_FAMILIES, figures
-from audited_auctions.experiments.compute import plot_geometry, type_background
-from audited_auctions.experiments.config import family_options
-from audited_auctions.pipeline import prepare_distributions
+from PA_auctions import SYNTHETIC_FAMILIES, figures
+from PA_auctions.experiments.compute import plot_geometry, type_background
+from PA_auctions.experiments.config import family_options
+from PA_auctions.pipeline import prepare_distributions
 
 FOLDER = Path(__file__).resolve().parent / "docs" / "distributions"
 

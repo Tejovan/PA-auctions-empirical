@@ -1,5 +1,5 @@
 """
-experiments: runs of the audited_auctions package from configuration files.
+experiments: runs of the PA_auctions package from configuration files.
 
   config.py      read, complete and validate a TOML configuration; expand it
                  into combinations

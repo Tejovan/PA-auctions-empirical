@@ -1,11 +1,11 @@
 # Legacy material
 
-Files from the original EC 2025 / EAAMO 2026 workflow that the WEB27 code (`audited_auctions/`, `run_sweep_genetic2.py`, `post_optimization_analysis.py`) no longer uses. Kept for reference; paths inside these files assume they sit at the repository root, so they do not run from here without edits.
+Files from the original EC 2025 / EAAMO 2026 workflow that the WEB27 code (`PA_auctions/`, `run_sweep_genetic2.py`, `post_optimization_analysis.py`) no longer uses. Kept for reference; paths inside these files assume they sit at the repository root, so they do not run from here without edits.
 
 | Path | What it is | Why it is legacy |
 |------|------------|------------------|
 | `output/sweep_genetic2_*` | May 2026 sweeps (Community Notes data, synthetic samples a–f, h) | Simulated GA objective, biased penalty estimator, no IVCG-PA, records without `evaluation`/`type_sample`; `post_optimization_analysis.py` no longer reads them |
-| `data/samples/*.csv` (a–f, h) | Synthetic samples of `alternate_distributions.ipynb` | Contain negative valuations; replaced by the parametric families in `audited_auctions/type_distributions.py` (shifted by +1 and truncated at 0) |
+| `data/samples/*.csv` (a–f, h) | Synthetic samples of `alternate_distributions.ipynb` | Contain negative valuations; replaced by the parametric families in `PA_auctions/type_distributions.py` (shifted by +1 and truncated at 0) |
 | `data/figures/` | Plots of those samples | As above |
 | `alternate_distributions.ipynb` | Generates the samples a–f, h | As above (its parameters are reproduced in `type_distributions.py`) |
 | `alternate_optimization_algorithms/` | Grid search, SGD, first-generation GA, SGE cluster scripts | Superseded before EC 2025 |

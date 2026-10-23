@@ -64,7 +64,7 @@ Bidders are exchangeable: all n bidders draw their types independently from
 the same distribution.
 
 Synthetic families (SYNTHETIC_FAMILIES, synthetic_distribution) are documented
-in audited_auctions/README.md, section "Type distributions".
+in PA_auctions/README.md, section "Type distributions".
 """
 
 from dataclasses import dataclass, field, replace

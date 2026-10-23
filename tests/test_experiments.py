@@ -1,5 +1,5 @@
 """
-Tests of the experiment runs (audited_auctions/experiments): configuration
+Tests of the experiment runs (PA_auctions/experiments): configuration
 validation and expansion, the files of one combination, evaluate runs that
 reuse a saved τ, and a whole small run with figures and README.
 """
@@ -12,11 +12,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from audited_auctions.experiments import report
-from audited_auctions.experiments.compute import compute_combination, load_threshold_file
-from audited_auctions.experiments.config import ConfigError, expand, resolve_config
-from audited_auctions.experiments.provenance import to_toml
-from audited_auctions.experiments.runner import run
+from PA_auctions.experiments import report
+from PA_auctions.experiments.compute import compute_combination, load_threshold_file
+from PA_auctions.experiments.config import ConfigError, expand, resolve_config
+from PA_auctions.experiments.provenance import to_toml
+from PA_auctions.experiments.runner import run
 
 SMALL = {"num_externality_nodes": 31, "num_valuation_cells": 40}
 SHORT_GENETIC = {"label": "ga", "method": "genetic", "threshold_forms": ["poly1", "knots3"],
@@ -214,8 +214,8 @@ def test_whole_runs_with_figures_and_reused_thresholds(tmp_path):
     assert record["run"]["num_combinations"] == 6 and "commit" in record["code"]
 
     # paper mode: one PDF per panel at the fixed cell size, legend, caption and snippet
-    from audited_auctions.experiments.report import make_paper_figures
-    from audited_auctions.figures import PAPER_CELL
+    from PA_auctions.experiments.report import make_paper_figures
+    from PA_auctions.figures import PAPER_CELL
     make_paper_figures(folder, ["outcomes", "tau-by"], workers=1)
     paper = leaf / "paper"
     for name in ("2_expected-outcomes_a.pdf", "2_expected-outcomes_b.pdf",
@@ -250,7 +250,7 @@ def test_whole_runs_with_figures_and_reused_thresholds(tmp_path):
 
 
 def test_ex_ante_cutoff_meets_the_paper_guarantee_and_gaps_are_reported(tmp_path):
-    from audited_auctions.threshold_forms import ex_ante_guarantee
+    from PA_auctions.threshold_forms import ex_ante_guarantee
     # β_{n,k} table of the paper (Thm 8.9 [thm:k-goods]); the bound is max{β, 1 − 1/e}.
     for (n, k), beta in {(2, 1): 0.750, (10, 5): 0.877, (20, 10): 0.912}.items():
         assert ex_ante_guarantee(n, k) == pytest.approx(beta, abs=5e-4)

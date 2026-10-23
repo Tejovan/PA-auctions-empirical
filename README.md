@@ -11,7 +11,7 @@ It also simulates per-auction outcomes, computes bootstrap intervals for empiric
 
 Further documentation:
 
-- methods and modules: [audited_auctions/README.md](audited_auctions/README.md);
+- methods and modules: [PA_auctions/README.md](PA_auctions/README.md);
 - methodology and output formats: the supplement `WEB27/drafting/code_supplement/` of the paper repository.
 
 **Contents**
@@ -399,7 +399,7 @@ Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves
 | Check | Value | Verdict |
 |---|---|---|
 | `monte_carlo_vs_exact` | largest \|z\| of a simulated mean against the exact value (welfare, revenue, four mechanisms) | pass if < `monte_carlo_z` |
-| `first_order` | largest first-order violation / v̄ on the training grid (the search's distribution): \|M(e, τ(e))\| at interior thresholds, M < 0 at τ = 0, M > 0 at exclusion; only nodes where moving τ(e) changes W ([details](audited_auctions/README.md#first-order-check)) | pass if < `first_order_tolerance` for `nodes`; info for restricted forms, given τ and atomic training data |
+| `first_order` | largest first-order violation / v̄ on the training grid (the search's distribution): \|M(e, τ(e))\| at interior thresholds, M < 0 at τ = 0, M > 0 at exclusion; only nodes where moving τ(e) changes W ([details](PA_auctions/README.md#first-order-check)) | pass if < `first_order_tolerance` for `nodes`; info for restricted forms, given τ and atomic training data |
 | `search_starts_spread` | welfare spread of the final points of the starts, in units of FB − W_VCG (training) | info; large means local optima (the best start is kept) |
 | `search_stop` | number of search stages stopped by the time limit or an iteration cap | pass if all converged; info if an iteration cap was hit; fail if the time limit was hit |
 | `grid_refinement` | largest relative change of a gain over VCG on a finer grid, τ fixed | pass if < `grid_relative_tolerance` |
@@ -410,12 +410,12 @@ Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves
 
 `results.json` stores these under `sufficiency` (also `wrong_sign_mass_*`, the probability of types whose marginal contribution has the wrong sign, and the gap for IVCG-PA with its scores held fixed, for which no sufficiency theorem holds). `summary.csv` has `participation_gap_share_*`, `relaxation_share_attained`, `relaxation_threshold_rule`, `relaxation_value_training` (J) and `training_welfare_vcg_pa` (W^VCG(τ) on the training grid). `gap-decomposition.csv` reports J as `relaxation_vcg` and its gap `relaxation_minus_opt_vcg` to the best VCG-PA welfare found. `relaxation_basis` says where both are measured: `evaluation` when the evaluation distribution is the training grid itself (synthetic data, `continuous = false`), else `training grid` (J and the best training welfare; J is then not comparable with the evaluation welfare in the other columns).
 
-**Ironing on the grid.** On a gridded distribution (`continuous = false`), IVCG-PA irons in many small bands, at node thresholds and cell edges; they are a discretization effect, and their welfare effect shrinks like the squared spacing. On the continuous version (the default), IVCG-PA irons only where ŵ^τ decreases, as at the wiggle of `harmful_middle`. Mechanism and measurements: [audited_auctions/README.md](audited_auctions/README.md#grid-ironing-bands).
+**Ironing on the grid.** On a gridded distribution (`continuous = false`), IVCG-PA irons in many small bands, at node thresholds and cell edges; they are a discretization effect, and their welfare effect shrinks like the squared spacing. On the continuous version (the default), IVCG-PA irons only where ŵ^τ decreases, as at the wiggle of `harmful_middle`. Mechanism and measurements: [PA_auctions/README.md](PA_auctions/README.md#grid-ironing-bands).
 
 ### 4.5 Reusing results
 
 - **Evaluate a saved τ:** `tau_file = "runs/<run>/<path>/tau.json"` or `from_run = "runs/<run>"` in `[[thresholds]]`.
-- **Load a τ in Python:** `audited_auctions.experiments.compute.load_threshold_file`.
+- **Load a τ in Python:** `PA_auctions.experiments.compute.load_threshold_file`.
 - **Redraw figures** after a plotting change: `python run.py --report runs/<run>`.
 
 ### 4.6 Figures for a paper
@@ -517,7 +517,7 @@ Login nodes are for light work only (e.g. the smoke test, `--report`); submit ev
 
 [draw_distributions.py](draw_distributions.py) redraws these previews into [docs/distributions/](docs/distributions/) (about 2 s).
 
-Every family is a piecewise-uniform distribution on a grid: externalities on nodes, valuations uniform within cells. All quantities are exact for that distribution. Definitions and options: [§3.2](#family-options); grid accuracy: [audited_auctions/README.md](audited_auctions/README.md#synthetic-families).
+Every family is a piecewise-uniform distribution on a grid: externalities on nodes, valuations uniform within cells. All quantities are exact for that distribution. Definitions and options: [§3.2](#family-options); grid accuracy: [PA_auctions/README.md](PA_auctions/README.md#synthetic-families).
 
 <a id="continuous-evaluation"></a>**Continuous evaluation** (`[evaluation] continuous = true`, the default). The grid has jumps a continuous density does not have: each externality node is a point mass in e, and the valuation density jumps at cell edges. Under a continuous τ, a whole node enters at its threshold, which makes IVCG-PA iron in many small bands ([§4.4](#44-checks)). The run therefore uses two versions of each gridded distribution:
 
@@ -526,7 +526,7 @@ Every family is a piecewise-uniform distribution on a grid: externalities on nod
 | search (genetic objective, best responses, gradient polish), `first_order` check, symmetric relaxation | the grid, where per-node best responses and gradients are exact |
 | exact outcomes, penalties, simulated auctions, bootstrap of smoothed resamples, IVCG-PA scoring rule, ironing figure, marginal-contribution maps, `sufficient_condition` check | the continuous version: each node's mass spread uniformly over its externality interval (midpoint to midpoint), and the valuation density piecewise linear between cell midpoints |
 
-The continuous version differs from the grid by an error of the same order as the grid's own (second order in the spacing); the exact computation on it is accurate to second order in the piece widths instead of exact, and takes about 5× as long per evaluation. τ is used between the nodes as its form defines it (the `nodes` form interpolates linearly). Atomic data (the test rows by default) and `example_n` (two externality values) keep their externalities. Methods: [audited_auctions/README.md](audited_auctions/README.md#continuous-versions).
+The continuous version differs from the grid by an error of the same order as the grid's own (second order in the spacing); the exact computation on it is accurate to second order in the piece widths instead of exact, and takes about 5× as long per evaluation. τ is used between the nodes as its form defines it (the `nodes` form interpolates linearly). Atomic data (the test rows by default) and `example_n` (two externality values) keep their externalities. Methods: [PA_auctions/README.md](PA_auctions/README.md#continuous-versions).
 
 **Empirical data:** any CSV with columns `e_score`, `v_score`; e = ζ · e_score and v = `valuation_scale` · v_score. Processing:
 
@@ -563,7 +563,7 @@ The set has 11,811 tweets created between 2022-12-16 and 2025-01-18, each with a
 | `v_score` | `actions_per_month`: the valuation score (engagement per month) |
 | `e_score` | `agg_rating_per_month`: the externality score (note signal per month; 9.7% positive) |
 
-[value_externality_definitions/](value_externality_definitions/) documents an earlier definition of the scores, which differs from this file:
+[legacy/value_externality_definitions/](legacy/value_externality_definitions/) documents an earlier definition of the scores, which differs from this file:
 
 - rating levels −1/0/+1;
 - normalization by the mean externality per impression;
@@ -595,12 +595,15 @@ The set has 11,811 tweets created between 2022-12-16 and 2025-01-18, each with a
 |---|---|
 | [run.py](run.py) | command-line entry point |
 | [configs/](configs/) | run configurations |
-| [audited_auctions/](audited_auctions/) | the package: distributions, exact computation, simulation, optimizers, figures |
-| [audited_auctions/experiments/](audited_auctions/experiments/) | runs: configuration, computation of combinations, run records, report |
+| [PA_auctions/](PA_auctions/) | the package: distributions, exact computation, simulation, optimizers, figures |
+| [PA_auctions/experiments/](PA_auctions/experiments/) | runs: configuration, computation of combinations, run records, report |
 | [scc/](scc/) | BU SCC scripts |
 | [draw_distributions.py](draw_distributions.py), [docs/distributions/](docs/distributions/) | previews of the synthetic families (§6) |
 | [tests/](tests/) | unit tests |
+| [supplement/](supplement/) | code supplement (`code_supplement_v5`: package layout, running experiments, outputs); the methods and additional results are in the separate empirical supplement |
+| [scripts/](scripts/) | `web27_paper_data.py` and `empirical_supplement_data.py` (tables and figure data of the paper and the empirical supplement from the runs of `configs/synthetic_run.toml` and `configs/shapes_run.toml`); `explore_raw_data.py` (raw Community Notes data) |
 | `data/samples/`, `full_tweets.csv` | the tweet data |
-| [legacy/](legacy/) | superseded scripts, notebooks and outputs of the EC 2025 / EAAMO 2026 workflow ([legacy/README.md](legacy/README.md)) |
+| `raw_data/` | raw X / Community Notes dumps and downloads (gitignored, never committed) |
+| [legacy/](legacy/) | superseded scripts, notebooks, outputs and documents of the EC 2025 / EAAMO 2026 workflow ([legacy/README.md](legacy/README.md)) |
 
-**Tests:** `python -m pytest tests -q` (77 tests). After a code change, run the smallest config covering the change, starting with `configs/smoke_test.toml`; `configs/standard_test.toml` exercises every feature.
+**Tests:** `python -m pytest tests -q` (80 tests). After a code change, run the smallest config covering the change, starting with `configs/smoke_test.toml`; `configs/standard_test.toml` exercises every feature.

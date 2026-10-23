@@ -1,7 +1,7 @@
 """
-audited_auctions: exact computation and simulation of auctions with participant
+PA_auctions: exact computation and simulation of auctions with participant
 audits (VCG-PA, IVCG-PA) and the first-best allocation, for a common
-participation threshold function τ(e). See audited_auctions/README.md.
+participation threshold function τ(e). See PA_auctions/README.md.
 """
 
 from .threshold_evaluation import (

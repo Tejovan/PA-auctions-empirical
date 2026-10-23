@@ -8,17 +8,17 @@ the exact-objective genetic search. Run from WEB27/code with
 import numpy as np
 import pytest
 
-from audited_auctions import SYNTHETIC_FAMILIES, synthetic_distribution
-from audited_auctions.empirical import (
+from PA_auctions import SYNTHETIC_FAMILIES, synthetic_distribution
+from PA_auctions.empirical import (
     EmpiricalSample,
     bootstrap_welfare,
     sample_distribution,
     split_sample,
 )
-from audited_auctions.genetic_search import run_genetic_search
-from audited_auctions.pipeline import prepare_distributions
-from audited_auctions.smoothing import kernel_density_distribution
-from audited_auctions.threshold_functions import polynomial_threshold
+from PA_auctions.genetic_search import run_genetic_search
+from PA_auctions.pipeline import prepare_distributions
+from PA_auctions.smoothing import kernel_density_distribution
+from PA_auctions.threshold_functions import polynomial_threshold
 
 
 @pytest.mark.parametrize("family", sorted(SYNTHETIC_FAMILIES))
@@ -77,7 +77,7 @@ def test_bootstrap_gains_are_paired():
 def test_atomic_and_smoothed_vcg_welfare_are_close():
     sample = lognormal_sample(6000)
     threshold = polynomial_threshold([-1.0])  # everyone participates
-    from audited_auctions.empirical import exact_welfare_by_mechanism
+    from PA_auctions.empirical import exact_welfare_by_mechanism
     atomic = exact_welfare_by_mechanism(sample_distribution(sample, "none"), threshold, 8, 1)
     smoothed = exact_welfare_by_mechanism(sample_distribution(sample, "kernel"), threshold, 8, 1)
     assert smoothed["vcg"] == pytest.approx(atomic["vcg"], rel=0.03)
@@ -101,7 +101,7 @@ def test_genetic_search_recovers_example_n_optimum():
 
 @pytest.mark.parametrize("family_or_population", ["harmful_middle", "population"])
 def test_fixed_ivcg_rule_from_same_distribution_reproduces_ironing(family_or_population):
-    from audited_auctions import evaluate_threshold, ivcg_scoring_rule_for, population_distribution
+    from PA_auctions import evaluate_threshold, ivcg_scoring_rule_for, population_distribution
     if family_or_population == "population":
         rng = np.random.default_rng(4)
         distribution = population_distribution(rng.normal(-0.3, 0.6, 300).round(2),
@@ -121,7 +121,7 @@ def test_fixed_ivcg_rule_from_same_distribution_reproduces_ironing(family_or_pop
 
 
 def test_tau_independent_results_are_cached_and_unchanged():
-    from audited_auctions import build_mechanism_models, evaluate_threshold
+    from PA_auctions import build_mechanism_models, evaluate_threshold
     distribution = synthetic_distribution("harm_rises", num_externality_nodes=61,
                                           num_valuation_cells=120)
     first = evaluate_threshold(distribution, polynomial_threshold([0.4, -1.0]), 5, 2)

@@ -8,16 +8,16 @@ gradient polish. Run from WEB27/code with
 import numpy as np
 import pytest
 
-from audited_auctions import synthetic_distribution
-from audited_auctions.best_response_ascent import (
+from PA_auctions import synthetic_distribution
+from PA_auctions.best_response_ascent import (
     first_order_check,
     run_best_response_ascent,
     welfare_and_gradient,
 )
-from audited_auctions.marginal_contribution import RivalWelfareLoss
-from audited_auctions.pipeline import optimize_threshold, prepare_distributions
-from audited_auctions.threshold_evaluation import build_mechanism_model, expected_welfare
-from audited_auctions.threshold_forms import (
+from PA_auctions.marginal_contribution import RivalWelfareLoss
+from PA_auctions.pipeline import optimize_threshold, prepare_distributions
+from PA_auctions.threshold_evaluation import build_mechanism_model, expected_welfare
+from PA_auctions.threshold_forms import (
     build_threshold_form,
     externality_nodes,
     parse_form_label,
@@ -176,9 +176,9 @@ def test_time_limit_stops_gracefully():
 
 
 def test_participation_gap_and_relaxation():
-    from audited_auctions.best_response_ascent import participation_gap
-    from audited_auctions.symmetric_relaxation import symmetric_relaxation
-    from audited_auctions.threshold_functions import polynomial_threshold, tabulated_threshold
+    from PA_auctions.best_response_ascent import participation_gap
+    from PA_auctions.symmetric_relaxation import symmetric_relaxation
+    from PA_auctions.threshold_functions import polynomial_threshold, tabulated_threshold
 
     distribution = synthetic_distribution("example_n", num_valuation_cells=60)
     # Example N with n = 2, k = 1: the best τ(−c) is 4c/3 and τ(0) = 0 (paper Ex. 7.11).
