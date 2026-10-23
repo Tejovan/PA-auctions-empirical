@@ -50,7 +50,7 @@ import pandas as pd
 
 from .. import figures
 from .compute import read_json
-from .config import OBJECTIVE_SHORT, SECTION_DEFAULTS
+from .config import OBJECTIVE_SHORT, SECTION_DEFAULTS, markets_text
 
 LEAF_FIGURES = {
     "types": "1_types-tau-penalties.pdf",
@@ -120,7 +120,7 @@ COMPARE_INFO = {
 }
 
 # Inputs that comparison figures vary; "market" stands for (n, k).
-OVERLAY_INPUTS = {"optimize": ("market", "threshold_form", "optimizer", "objective"),
+OVERLAY_INPUTS = {"optimize": ("market", "threshold_form", "optimizer", "objective", "tau_label"),
                   "evaluate": ("market", "tau_label")}
 INPUT_NAMES = {"market": "market", "threshold_form": "form", "optimizer": "optimizer",
                "objective": "objective", "tau_label": "threshold"}
@@ -196,7 +196,9 @@ def _fixed_label(row, varied):
 
 def _identity_columns(summary, kind):
     columns = ["distribution", "zeta", "num_bidders", "num_goods"]
-    columns += ["objective", "threshold_form", "optimizer"] if kind == "optimize" else ["tau_label"]
+    # Optimize runs may also evaluate given τ (tau_label set, objective/form/optimizer empty)
+    columns += (["objective", "threshold_form", "optimizer", "tau_label"] if kind == "optimize"
+                else ["tau_label"])
     return [c for c in columns if c in summary]
 
 
@@ -379,7 +381,15 @@ def gap_decomposition(summary, kind):
     "training grid" (both on the gridded training distribution; relaxation_vcg is then not
     comparable with the evaluation welfare in the other columns).
     """
-    class_column = "threshold_form" if kind == "optimize" else "tau_label"
+    summary = summary.copy()
+    if kind == "optimize":  # a given τ of an optimize run is its own class, "tau-<label>"
+        given = "tau-" + summary.get("tau_label", pd.Series(index=summary.index, dtype=object)
+                                     ).astype(str)
+        summary["threshold_class"] = summary.threshold_form.where(summary.threshold_form.notna(),
+                                                                  given)
+    else:
+        summary["threshold_class"] = summary.tau_label
+    class_column = "threshold_class"
     market = ["distribution", "zeta", "num_bidders", "num_goods"]
     rows = []
     for keys, group in summary.groupby(market):
@@ -440,8 +450,7 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
                      f"source {distribution['source']}): ζ ∈ {distribution['externality_scales']},"
                      f" grid {distribution['num_externality_nodes']} externality nodes × "
                      f"{distribution['num_valuation_cells']} valuation cells")
-    lines.append(f"- **markets:** n ∈ {config['markets']['num_bidders']}, "
-                 f"k ∈ {config['markets']['num_goods']}")
+    lines.append(f"- **markets:** {markets_text(config)}")
     if run["kind"] == "optimize":
         lines.append(f"- **objectives:** {', '.join(config['design']['objectives'])}")
         for optimizer in config["optimizers"]:
@@ -449,10 +458,10 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
             forms = optimizer.get("threshold_forms", config["design"].get("threshold_forms", []))
             lines.append(f"- **optimizer {optimizer['label']}:** {optimizer['method']}, "
                          f"forms {', '.join(forms)}")
-    else:
-        for threshold in config["thresholds"]:
-            lines.append(f"- **threshold {threshold.get('label') or ''}:** "
-                         f"{threshold['source']} = {threshold['value']}")
+    for threshold in config.get("thresholds", []):
+        lines.append(f"- **{'given ' if run['kind'] == 'optimize' else ''}threshold "
+                     f"{threshold.get('label') or ''}:** {threshold['source']} = "
+                     f"{threshold['value']}")
     evaluation = config["evaluation"]
     lines += [f"- **evaluation:** {evaluation['num_simulated_auctions']:,} simulated auctions; "
               f"{evaluation['num_bootstrap']} bootstrap resamples (empirical data)",
@@ -669,7 +678,8 @@ def _market_readme(folder, market, rows, leaf_files):
         if isinstance(objective, str):
             grid[(figures.SHORT[objective], name.removeprefix(OBJECTIVE_SHORT[objective] + "_"))] = row
         else:
-            grid[("", name)] = row
+            optimized = any(isinstance(r.get("objective"), str) for r in rows)
+            grid[("given τ" if optimized else "", name)] = row
     order = list(figures.SHORT.values())
     row_labels = sorted(dict.fromkeys(label for label, _ in grid),
                         key=lambda label: order.index(label) if label in order else -1)

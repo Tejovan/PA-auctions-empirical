@@ -1,30 +1,33 @@
-# WEB27 empirical section, synthetic part: harmful_middle (ironing binds) over a grid of
-# markets, both objectives, nodes form by best-response ascent, plus the best common welfare
-# cutoff as a one-parameter benchmark.
+# WEB27 empirical section, synthetic part: harmful_middle (ironing binds), markets with
+# competition (k < n), both objectives; nodes by best-response ascent, the best common welfare
+# cutoff by genetic search, and three given benchmark τ evaluated in the same run.
 #   python run.py configs/synthetic_run.toml --dry-run
 #   python run.py configs/synthetic_run.toml --yes
-# Benchmarks with given τ (zero-welfare τ⁰, ex ante cutoff τ*): configs/synthetic_benchmarks.toml.
 #
-# Markets: n ∈ {2, 4, 8, 16, 32} × k ∈ {1, 2, 4, 8}. Fixed ratios n/k ∈ {2, 4, 8} lie on the
-# diagonals: (2,1) (4,2) (8,4) (16,8); (4,1) (8,2) (16,4) (32,8); (8,1) (16,2) (32,4).
-# The 6 cells with k ≥ n are the no-competition case (τ⁰ optimal); they are cheap and serve as
-# a check. The symmetric relaxation needs k < n and is skipped there.
+# Markets: the cells with k < n of n ∈ {2, 4, 8, 16, 32} × k ∈ {1, 2, 4, 8} (14 markets).
+# Fixed ratios n/k ∈ {2, 4, 8} lie on diagonals: (2,1) (4,2) (8,4) (16,8); (4,1) (8,2) (16,4)
+# (32,8); (8,1) (16,2) (32,4).
 #
-# No separate relaxation optimizer: the relaxation's τ is a default start of the ascent
-# (its welfare is recorded in results.json → search.starts), and the check
-# symmetric_relaxation (default on) records the relaxation value J and the threshold-rule flag
-# for every combination with k < n.
+# Given τ (folders tau-<label>; one class each in gap-decomposition.csv):
+#   zero-welfare  τ⁰(e) = max(0, −e): participate iff v + e ≥ 0
+#   ex-ante       τ*(e) = max(0, w* − e), Pr[v + e > w*] = min{k/n, Pr[v + e > 0]};
+#                 paper use needs the ex ante approximation (deferred item 1)
+#   relaxation    τ read off the symmetric relaxation: the ascent's "relaxation" start
+# The relaxation value J and its threshold-rule flag come from the symmetric_relaxation check
+# (default on), for every combination.
 
 kind = "optimize"
 name = "synthetic-run"
-description = "Synthetic part of the WEB27 empirical section: harmful_middle, n ∈ {2,4,8,16,32} × k ∈ {1,2,4,8}, VCG-PA and IVCG-PA objectives; nodes by best-response ascent, common welfare cutoff by genetic search."
+description = "Synthetic part of the WEB27 empirical section: harmful_middle, 14 markets with k < n (n ≤ 32, k ≤ 8), VCG-PA and IVCG-PA objectives; nodes by best-response ascent, common welfare cutoff by genetic search; given τ⁰, ex ante cutoff τ* and relaxation τ."
 
 [[distributions]]
 source = "harmful_middle"        # default options and grid (151 × 150)
 
 [markets]
-num_bidders = [2, 4, 8, 16, 32]
-num_goods = [1, 2, 4, 8]
+pairs = [[2, 1], [4, 1], [8, 1], [16, 1], [32, 1],
+         [4, 2], [8, 2], [16, 2], [32, 2],
+         [8, 4], [16, 4], [32, 4],
+         [16, 8], [32, 8]]
 
 [design]
 objectives = ["vcg_pa", "ivcg_pa"]
@@ -45,6 +48,18 @@ threshold_forms = ["cutoff"]
 num_generations = 200
 num_restarts = 2
 num_local_starts = 2
+
+[[thresholds]]
+label = "zero-welfare"
+cutoff = 0.0
+
+[[thresholds]]
+label = "ex-ante"
+cutoff = "ex_ante"
+
+[[thresholds]]
+label = "relaxation"
+relaxation = true
 
 [evaluation]
 num_simulated_auctions = 5000

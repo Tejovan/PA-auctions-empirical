@@ -41,7 +41,7 @@ from .compute import (
     rescaled_threshold,
     type_background,
 )
-from .config import CODE_ROOT, expand, load_config
+from .config import CODE_ROOT, expand, load_config, markets_text
 from .provenance import (
     code_version,
     file_sha256,
@@ -208,12 +208,13 @@ def describe_plan(config, combinations, skipped):
                      f"source {distribution['source']}): ζ ∈ {distribution['externality_scales']}, "
                      f"grid {distribution['num_externality_nodes']} × "
                      f"{distribution['num_valuation_cells']}")
-    lines.append(f"  n ∈ {config['markets']['num_bidders']}, k ∈ {config['markets']['num_goods']}")
+    lines.append(f"  {markets_text(config)}")
     if config["kind"] == "optimize":
         lines.append(f"  objectives {config['design']['objectives']}, optimizers "
                      f"{[o['label'] + ' (' + o['method'] + ': ' + ', '.join(o['threshold_forms']) + ')' for o in config['optimizers']]}")
-    else:
-        lines.append(f"  thresholds {[t['label'] or t['value'] for t in config['thresholds']]}")
+    if config.get("thresholds"):
+        lines.append(f"  {'given ' if config['kind'] == 'optimize' else ''}thresholds "
+                     f"{[t['label'] or t['value'] for t in config['thresholds']]}")
     for description, reason in skipped:
         lines.append(f"  skipped: {description}: {reason}")
     return lines

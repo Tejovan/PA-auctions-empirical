@@ -90,7 +90,7 @@ OPTIMIZER_OTHER_DEFAULTS = {
     "time_limit_minutes": 60,  # per combination's search; 0 = no limit
 }
 SECTION_DEFAULTS = {
-    "markets": {"num_bidders": [8], "num_goods": [1]},
+    "markets": {"num_bidders": [8], "num_goods": [1], "pairs": []},
     "design": {"objectives": ["vcg_pa"]},
     "evaluation": {"num_simulated_auctions": 2000, "num_bootstrap": 200,
                    "confidence_level": 0.95, "bootstrap_all_outcomes": True,
@@ -207,11 +207,12 @@ def resolve_optimizer(table):
             "best_response": best_response, **other}
 
 
-THRESHOLD_SOURCES = ("polynomial", "constant", "tabulated", "cutoff", "tau_file", "from_run")
+THRESHOLD_SOURCES = ("polynomial", "constant", "tabulated", "cutoff", "relaxation", "tau_file",
+                     "from_run")
 
 
 def resolve_threshold(table):
-    """A [[thresholds]] table (evaluate runs): a label and exactly one source of τ."""
+    """A [[thresholds]] table: a label and exactly one source of τ."""
     table = dict(table)
     _check_keys(table, ("label",) + THRESHOLD_SOURCES, "[[thresholds]]")
     sources = [key for key in THRESHOLD_SOURCES if key in table]
@@ -221,6 +222,9 @@ def resolve_threshold(table):
     if source == "cutoff" and not (table["cutoff"] == "ex_ante"
                                    or isinstance(table["cutoff"], (int, float))):
         raise ConfigError('cutoff must be a number (welfare cutoff w) or "ex_ante"')
+    if source == "relaxation" and table["relaxation"] is not True:
+        raise ConfigError("relaxation = true is the only value (τ read off the symmetric "
+                          "relaxation)")
     if source != "from_run" and "label" not in table:
         raise ConfigError("[[thresholds]] tables need a label (used in folder names)")
     return {"label": table.get("label"), "source": source, "value": table[source]}
@@ -247,6 +251,17 @@ def resolve_config(raw):
         config[section] = _merge(defaults, raw.get(section, {}), f"[{section}]")
     for key in ("num_bidders", "num_goods"):
         config["markets"][key] = [int(v) for v in _as_list(config["markets"][key])]
+    pairs = config["markets"]["pairs"]
+    if pairs:
+        if {"num_bidders", "num_goods"} & set(raw.get("markets", {})):
+            raise ConfigError("[markets]: give either pairs or num_bidders/num_goods")
+        if not all(isinstance(p, (list, tuple)) and len(p) == 2 for p in pairs):
+            raise ConfigError("[markets] pairs must be a list of [n, k] pairs")
+        config["markets"]["pairs"] = [[int(n), int(k)] for n, k in pairs]
+        if any(n < 1 or k < 1 for n, k in config["markets"]["pairs"]):
+            raise ConfigError("[markets] pairs: n and k must be at least 1")
+        config["markets"]["num_bidders"] = sorted({n for n, _ in config["markets"]["pairs"]})
+        config["markets"]["num_goods"] = sorted({k for _, k in config["markets"]["pairs"]})
     config["design"]["objectives"] = _as_list(config["design"]["objectives"])
     for objective in config["design"]["objectives"]:
         if objective not in OBJECTIVES:
@@ -267,8 +282,8 @@ def resolve_config(raw):
         raise ConfigError(f"distribution labels must differ (set label = ...): {labels}")
 
     if kind == "optimize":
-        if raw.get("thresholds"):
-            raise ConfigError("[[thresholds]] belong to evaluate runs")
+        # Given τ are evaluated next to the optimized ones (benchmarks)
+        config["thresholds"] = [resolve_threshold(t) for t in raw.get("thresholds", [])]
         optimizers = raw.get("optimizers") or [{"method": "best_response"}]
         config["optimizers"] = [resolve_optimizer(t) for t in optimizers]
         labels = [o["label"] for o in config["optimizers"]]
@@ -345,16 +360,36 @@ def _thresholds_from_run(run_folder, distribution_label, zeta, n, k):
     return entries
 
 
+def market_list(config):
+    """The markets (n, k) of a configuration: [markets] pairs, else every n × k."""
+    if config["markets"].get("pairs"):
+        return [tuple(pair) for pair in config["markets"]["pairs"]]
+    return list(itertools.product(config["markets"]["num_bidders"],
+                                  config["markets"]["num_goods"]))
+
+
+def markets_text(config):
+    """The markets of a configuration for plans and READMEs."""
+    if config["markets"].get("pairs"):
+        return "(n, k) ∈ {" + ", ".join(f"({n}, {k})" for n, k in market_list(config)) + "}"
+    return f"n ∈ {config['markets']['num_bidders']}, k ∈ {config['markets']['num_goods']}"
+
+
+def _relaxation_undefined(distribution, n, k):
+    atomic = distribution["kind"] == "empirical" and distribution["smoothing"] == "none"
+    return k >= n or atomic
+
+
 def expand(config):
     """(combinations, skipped): every combination of the configuration's sets.
 
     skipped lists (description, reason) for combinations that cannot run: the
-    relaxation method with k >= n or an atomic training distribution, and
-    from_run thresholds without a match.
+    relaxation method or relaxation thresholds with k >= n or an atomic training
+    distribution, and from_run thresholds without a match.
     """
     combinations, skipped = [], []
-    markets = list(itertools.product(config["markets"]["num_bidders"],
-                                     config["markets"]["num_goods"]))
+    markets = market_list(config)
+    relaxation_reason = "the relaxation needs k < n and a piecewise-uniform training distribution"
     for distribution in config["distributions"]:
         for zeta in distribution["externality_scales"]:
             for n, k in markets:
@@ -363,29 +398,28 @@ def expand(config):
                 if config["kind"] == "optimize":
                     for objective, optimizer in itertools.product(
                             config["design"]["objectives"], config["optimizers"]):
-                        if optimizer["method"] == "relaxation":
-                            atomic = (distribution["kind"] == "empirical"
-                                      and distribution["smoothing"] == "none")
-                            if k >= n or atomic:
-                                skipped.append((f"{optimizer['label']} for {distribution['label']} "
-                                                f"n{n}-k{k}",
-                                                "the relaxation needs k < n and a piecewise-"
-                                                "uniform training distribution"))
-                                continue
+                        if (optimizer["method"] == "relaxation"
+                                and _relaxation_undefined(distribution, n, k)):
+                            skipped.append((f"{optimizer['label']} for {distribution['label']} "
+                                            f"n{n}-k{k}", relaxation_reason))
+                            continue
                         for form in optimizer["threshold_forms"]:
                             combinations.append(Combination(**base, objective=objective,
                                                             threshold_form=form,
                                                             optimizer=optimizer))
-                else:
-                    for entry in config["thresholds"]:
-                        entries = ([entry] if entry["source"] != "from_run" else
-                                   _thresholds_from_run(entry["value"], distribution["label"],
-                                                        zeta, n, k))
-                        if not entries:
-                            skipped.append((f"from_run {entry['value']}",
-                                            f"no τ for {distribution['label']} z{zeta:g} "
-                                            f"n{n}-k{k}"))
-                        combinations.extend(Combination(**base, threshold=e) for e in entries)
+                for entry in config.get("thresholds", []):
+                    if (entry["source"] == "relaxation"
+                            and _relaxation_undefined(distribution, n, k)):
+                        skipped.append((f"thresholds {entry['label']} for {distribution['label']} "
+                                        f"n{n}-k{k}", relaxation_reason))
+                        continue
+                    entries = ([entry] if entry["source"] != "from_run" else
+                               _thresholds_from_run(entry["value"], distribution["label"],
+                                                    zeta, n, k))
+                    if not entries:
+                        skipped.append((f"from_run {entry['value']}",
+                                        f"no τ for {distribution['label']} z{zeta:g} n{n}-k{k}"))
+                    combinations.extend(Combination(**base, threshold=e) for e in entries)
     unique_skipped = list(dict.fromkeys(skipped))
     return combinations, unique_skipped
 

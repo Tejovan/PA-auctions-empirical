@@ -73,6 +73,26 @@ def test_expansion_runs_every_valid_combination():
     assert len(paths) == len(combinations)
 
 
+def test_market_pairs_and_given_thresholds_in_optimize_runs():
+    config = resolve_config(optimize_config(
+        markets={"pairs": [[4, 1], [8, 2], [2, 2]]},
+        optimizers=[{"method": "best_response", "threshold_forms": ["knots3"]}],
+        thresholds=[{"label": "zero-welfare", "cutoff": 0.0},
+                    {"label": "relaxation", "relaxation": True}]))
+    combinations, skipped = expand(config)
+    # 3 markets × (br knots3 + τ⁰) + relaxation τ in the two markets with k < n
+    assert len(combinations) == 3 * 2 + 2
+    assert {(c.num_bidders, c.num_goods) for c in combinations} == {(4, 1), (8, 2), (2, 2)}
+    assert any("relaxation" in d and "n2-k2" in d for d, _ in skipped)
+    assert "harmful-middle/z1/n8-k2/tau-relaxation" in {c.path for c in combinations}
+    with pytest.raises(ConfigError, match="either pairs"):
+        resolve_config(optimize_config(markets={"pairs": [[4, 1]], "num_goods": [1]}))
+    with pytest.raises(ConfigError, match="pairs"):
+        resolve_config(optimize_config(markets={"pairs": [[4, 1, 2]]}))
+    with pytest.raises(ConfigError, match="relaxation = true"):
+        resolve_config(optimize_config(thresholds=[{"label": "r", "relaxation": 1}]))
+
+
 def test_toml_writer_round_trip():
     config = resolve_config(optimize_config())
     record = {"run": {"name": "x", "seconds": {"total": 1.5}}, "config": config}
@@ -235,6 +255,37 @@ def test_ex_ante_cutoff_meets_the_paper_guarantee_and_gaps_are_reported(tmp_path
     assert set(gaps.threshold_class) == {"zero-welfare", "ex-ante"}
     assert (gaps.fb_minus_opt >= -1e-12).all() and (gaps.opt_vcg_minus_class >= -1e-12).all()
     assert "Decomposition of the welfare gap" in (folder / "README.md").read_text()
+
+
+def test_optimize_run_with_given_thresholds_reports_them_as_classes(tmp_path):
+    config_file = tmp_path / "mixed.toml"
+    config_file.write_text(to_toml({
+        **optimize_config(
+            markets={"pairs": [[4, 1]]},
+            optimizers=[{"method": "best_response", "threshold_forms": ["nodes"],
+                         "max_iterations": 5, "num_random_starts": 0,
+                         "short_genetic_generations": 2, "polish_rounds": 1}],
+            thresholds=[{"label": "zero-welfare", "cutoff": 0.0},
+                        {"label": "ex-ante", "cutoff": "ex_ante"},
+                        {"label": "relaxation", "relaxation": True}]),
+        "output": {"base": str(tmp_path / "runs"), "workers": 1}}))
+    folder = run(config_file, assume_yes=True)
+    summary = pd.read_csv(folder / "summary.csv")
+    assert len(summary) == 4
+    gaps = pd.read_csv(folder / "gap-decomposition.csv")
+    assert set(gaps.threshold_class) == {"nodes", "tau-zero-welfare", "tau-ex-ante",
+                                         "tau-relaxation"}
+    # The relaxation τ is the ascent's "relaxation" start: same VCG-PA welfare on the grid
+    leaf = summary.set_index("path")
+    ascent = json.loads((folder / "harmful-middle/z1/n4-k1/vcgpa_nodes_br/results.json"
+                         ).read_text())
+    start = next(s for s in ascent["search"]["starts"] if s["start"] == "relaxation")
+    given = leaf.loc["harmful-middle/z1/n4-k1/tau-relaxation"]
+    assert given.training_welfare_vcg_pa == pytest.approx(start["start_welfare"], rel=1e-9)
+    assert start["welfare"] >= start["start_welfare"] - 1e-12
+    readme = (folder / "README.md").read_text()
+    assert "given threshold relaxation" in readme and "(n, k) ∈ {(4, 1)}" in readme
+    assert "given τ" in (folder / "harmful-middle/z1/n4-k1/README.md").read_text()
 
 
 def test_inner_parallelism_matches_serial(tmp_path):

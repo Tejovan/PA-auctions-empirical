@@ -68,6 +68,7 @@ from ..threshold_evaluation import (
 from ..symmetric_relaxation import symmetric_relaxation
 from ..threshold_forms import (
     ThresholdForm,
+    build_threshold_form,
     ex_ante_cutoff,
     ex_ante_guarantee,
     externality_nodes,
@@ -207,10 +208,12 @@ def threshold_from_record(record):
 
 
 def given_threshold(entry, training, num_bidders, num_goods):
-    """(threshold function, tau.json payload, kind) of a [[thresholds]] entry (evaluate runs).
+    """(threshold function, tau.json payload, kind) of a [[thresholds]] entry.
 
     cutoff: τ(e) = max(0, w − e) (excluded if w − e > v̄); "ex_ante" computes the welfare
     cutoff w* of the ex ante relaxation on the training distribution for this n, k.
+    relaxation: the τ read off the symmetric relaxation for this n, k (the ascent's
+    "relaxation" start), on the nodes form.
     """
     source, value = entry["source"], entry["value"]
     nodes, _, _ = externality_nodes(training)
@@ -221,6 +224,13 @@ def given_threshold(entry, training, num_bidders, num_goods):
         form = ThresholdForm("cutoff", 1, np.empty(0), float(training.maximum_valuation),
                              externality_range)
         return form.threshold([cutoff]), {"spec": form.spec([cutoff])}, "form"
+    if source == "relaxation":  # τ read off the symmetric relaxation, on the nodes form
+        key = ("symmetric_relaxation", num_bidders, num_goods)
+        if key not in training.cache:
+            training.cache[key] = symmetric_relaxation(training, num_bidders, num_goods)
+        form = build_threshold_form("nodes", training)
+        parameters = form.project(training.cache[key].threshold_function, training)
+        return form.threshold(parameters), {"spec": form.spec(parameters)}, "form"
     if source in ("polynomial", "constant"):
         coefficients = [float(value)] if source == "constant" else [float(c) for c in value]
         form = ThresholdForm("polynomial", len(coefficients) - 1, np.empty(0),

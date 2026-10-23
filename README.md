@@ -104,7 +104,7 @@ A run is described by one TOML file. Every list is a set of values. The run comp
 
 - the distributions and the ζ values of each;
 - the lists in `[markets]` and `[design]`;
-- the `[[optimizers]]` tables and the threshold forms of each (optimize runs), or the `[[thresholds]]` tables (evaluate runs).
+- the `[[optimizers]]` tables and the threshold forms of each (optimize runs), and the `[[thresholds]]` tables (evaluate runs; optional in optimize runs).
 
 Unknown keys are an error. Example files in [configs/](configs/):
 
@@ -120,7 +120,7 @@ Unknown keys are an error. Example files in [configs/](configs/):
 
 | Key | Values | Meaning |
 |---|---|---|
-| `kind` | `"optimize"`, `"evaluate"` | optimize: search for τ in each combination, then evaluate it; evaluate: evaluate given τ |
+| `kind` | `"optimize"`, `"evaluate"` | optimize: search for τ in each combination, then evaluate it (plus any given τ in `[[thresholds]]`); evaluate: evaluate given τ only |
 | `name` | text | part of the run folder name `<date>_<time>_<kind>_<name>` |
 | `description` | text | shown in the run's README |
 
@@ -161,6 +161,9 @@ One table per distribution; at least one.
 |---|---|---|
 | `num_bidders` | `[8]` | numbers of bidders n |
 | `num_goods` | `[1]` | numbers of identical goods k |
+| `pairs` | `[]` | instead of the two keys above: the markets as a list of [n, k] pairs, e.g. `[[4, 1], [8, 2]]` (skips the cells of the n × k grid you don't want, such as k ≥ n) |
+
+Without `pairs`, the run uses every n × k.
 
 ### 3.4 `[design]`
 
@@ -242,13 +245,14 @@ threshold_forms = ["nodes"]
 
 ### 3.6 `[[thresholds]]`
 
-Evaluate runs only; at least one. Each table has a `label` (folder name `tau-<label>`) and exactly one source:
+Given τ, evaluated like an optimized τ in every market: required in evaluate runs (at least one), optional in optimize runs, where they serve as benchmarks next to the optimized τ (same figures, own rows in summary.csv, own class `tau-<label>` in gap-decomposition.csv, compared in `tau-by-threshold` figures). Each table has a `label` (folder name `tau-<label>`) and exactly one source:
 
 | Key | Example | τ(e) |
 |---|---|---|
 | `polynomial` | `[0.0, -1.0]` | Σ_m β_m e^m (coefficients from degree 0) |
 | `constant` | `0.3` | 0.3 |
 | `cutoff` | `0.0` or `"ex_ante"` | max(0, w − e) for welfare cutoff w; `0.0` gives the zero-welfare threshold τ⁰; `"ex_ante"` gives the ex ante cutoff w* with Pr[v + e > w*] = min{k/n, Pr[v + e > 0]} (paper Thm 8.9), computed on the training distribution for each n, k |
+| `relaxation` | `true` | the τ read off the symmetric relaxation for this n, k ([symmetric relaxation](#symmetric-relaxation)), on the `nodes` form: the same τ as the ascent's `relaxation` start; skipped where k ≥ n or the training data are atomic |
 | `tabulated` | `{externalities = [-1, 0], values = [1, 0]}` | piecewise linear through the points, constant outside |
 | `tau_file` | `"runs/<run>/<path>/tau.json"` | a τ saved by an earlier run |
 | `from_run` | `"runs/<run>"` | every τ of an earlier run with the same distribution label, ζ, n and k (without `label`, the original design label is used) |
