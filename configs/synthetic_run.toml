@@ -36,12 +36,12 @@ pairs = [[2, 1], [4, 1], [8, 1], [16, 1], [32, 1],
 objectives = ["vcg_pa", "ivcg_pa"]
 
 [[optimizers]]
-label = "br"                     # starts: zero, zero_welfare, relaxation, 3 random (no genetic
+label = "br"                     # starts: zero, zero_welfare, relaxation, 6 random (no genetic
 method = "best_response"         # start: genetic search only on the cutoff form below)
 threshold_forms = ["nodes"]
 starts = ["zero", "zero_welfare", "relaxation"]
 max_iterations = 100
-num_random_starts = 3
+num_random_starts = 6               # extra insurance against local optima at large n
 polish_rounds = 3
 
 [[optimizers]]
