@@ -8,4 +8,6 @@ Every configuration key, its default and its meaning: [§3 of the top README](..
 | [standard_test.toml](standard_test.toml) | standard test: every feature on small grids, 120 combinations, about 3 min with 12 workers |
 | [evaluate_example.toml](evaluate_example.toml) | evaluate run: the zero-welfare threshold τ⁰, the ex ante cutoff τ*, and the optima of an earlier run |
 | [nodes_run.toml](nodes_run.toml) | nodes form, best-response ascent and symmetric relaxation: harmful_middle and tweets (ζ 1, 10, 100), n ∈ {4, 8}, k ∈ {1, 4} (k = n: no competition), both objectives; default grids, 56 combinations, about 5 min with 12 workers |
+| [synthetic_run.toml](synthetic_run.toml) | WEB27 synthetic results: harmful_middle, n ∈ {2, 4, 8, 16, 32} × k ∈ {1, 2, 4, 8} (fixed n/k on diagonals; k ≥ n: no competition), both objectives; nodes by best-response ascent (relaxation as a start and as a check), common welfare cutoff by genetic search; 80 combinations |
+| [synthetic_benchmarks.toml](synthetic_benchmarks.toml) | WEB27 synthetic benchmarks on the same markets: τ⁰ and the ex ante cutoff τ*; 40 combinations |
 | [optimize_example.toml](optimize_example.toml) | research-size optimize run on the tweet data (several ζ, per-node τ) |
