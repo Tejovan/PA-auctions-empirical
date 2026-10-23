@@ -1,0 +1,63 @@
+# Shapes of optimal τ and penalties across distributions and markets (appendix / supplement):
+# are VCG-PA-optimal τ close to a common welfare cutoff, or to a line? Is the participant set
+# {v ≥ τ(e)} the set of types with positive marginal contribution (participation gap ≈ 0)?
+#   python run.py configs/shapes_run.toml --dry-run
+#   python run.py configs/shapes_run.toml --yes
+#
+# Read-outs: gap-decomposition.csv (OPT^VCG − OPT^VCG_T for T = cutoff, poly1, τ⁰: the loss
+# from restricting τ to a cutoff or a line), check sufficient_condition (participation gap
+# G(τ)/(FB − W_VCG)), marginal-contribution figures, tau-by-bidders / tau-by-goods comparisons.
+#
+# Families: independent (v ⟂ e), harmful_middle (harm rises with v, non-monotone ridge),
+# heavy_tail (heavy-tailed v, harm ∝ √v), two-modes (mixture d: a harmful high-valuation cluster
+# at (e, v) = (−1, 2) and a harmless low-valuation cluster at (0, 1); clustered, not smooth).
+
+kind = "optimize"
+name = "shapes-run"
+description = "Shapes of VCG-PA-optimal τ and penalties: independent, harmful_middle, heavy_tail, two-modes (mixture d); k = 1 with n ∈ {2,4,8,16}, plus (8,2), (16,4); nodes by best-response ascent, cutoff and linear τ by genetic search, τ⁰ given."
+
+[[distributions]]
+source = "independent"
+
+[[distributions]]
+source = "harmful_middle"
+
+[[distributions]]
+source = "heavy_tail"
+
+[[distributions]]
+source = "d"
+label = "two-modes"
+
+[markets]
+pairs = [[2, 1], [4, 1], [8, 1], [16, 1], [8, 2], [16, 4]]
+
+[design]
+objectives = ["vcg_pa"]
+
+[[optimizers]]
+label = "br"                     # starts: zero, zero_welfare, relaxation, 6 random
+method = "best_response"
+threshold_forms = ["nodes"]
+starts = ["zero", "zero_welfare", "relaxation"]
+max_iterations = 100
+num_random_starts = 6
+polish_rounds = 3
+
+[[optimizers]]
+label = "ga"                     # restricted forms: common welfare cutoff, linear τ
+method = "genetic"
+threshold_forms = ["cutoff", "poly1"]
+num_generations = 200
+num_restarts = 2
+num_local_starts = 2
+
+[[thresholds]]
+label = "zero-welfare"           # τ⁰(e) = max(0, −e)
+cutoff = 0.0
+
+[evaluation]
+num_simulated_auctions = 5000
+
+[checks]
+grid_refinement = true
