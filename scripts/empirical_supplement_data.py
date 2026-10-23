@@ -4,7 +4,9 @@ results of the WEB27 paper), from the synthetic run and the shapes run.
     python scripts/empirical_supplement_data.py SYNTHETIC_RUN SHAPES_RUN OUT_DIR
 
 Writes OUT_DIR/data/ (tables *.tex, curves *.dat, type backgrounds bg_*.png, axis limits
-limits.tex) and copies selected run figures to OUT_DIR/figures/.
+limits.tex) and copies selected run figures to OUT_DIR/figures/. OUT_DIR/data/ also receives
+everything web27_paper_data.py writes for the submission, so the supplement can show every
+figure of the paper; the supplement's own tables replace the paper's of the same name.
 """
 
 import shutil
@@ -17,6 +19,7 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
+import web27_paper_data  # noqa: E402
 from web27_paper_data import (FAMILIES, background, label, load_data, load_types,  # noqa: E402
                               percent, shown_threshold)
 
@@ -115,14 +118,6 @@ $n$ & $k$ & revenue & revenue & penalties & rev.\,+\,pen. & net utility & partic
             file.write(f"{n} & {k} & " + " & ".join(values) + r" \\" + "\n")
         file.write(FOOTER)
 
-    for k in (1, 2, 4, 8):
-        rows = [(n / k, cell(summary, n, k, "zero-welfare", "share_vcg_pa"),
-                 cell(summary, n, k, "vcg_pa_nodes", "share_vcg_pa"))
-                for n, kk in markets if kk == k and n > k]
-        with open(DATA / f"share_ratio_k{k}.dat", "w") as file:
-            file.write("ratio tau0 vcgpa\n")
-            for ratio, tau0, vcgpa in rows:
-                file.write(f"{ratio:g} {percent(tau0)} {percent(vcgpa)}\n")
 
 
 def shapes_table(run):
@@ -133,9 +128,7 @@ def shapes_table(run):
 distribution & $n$ & $k$ & $\tau^0$ & cutoff & line & optimized & relax.\ bound & IVCG-PA & gap\\
 \midrule
 """)
-        names = {"independent": "independent", "harmful-middle": "harmful middle",
-                 "heavy-tail": "heavy tail", "two-modes": "two modes"}
-        for family, name in names.items():
+        for family, name in web27_paper_data.FAMILY_NAMES.items():
             part = summary[summary.distribution == family]
             markets = sorted(set(zip(part.num_bidders, part.num_goods)), key=lambda m: (m[1] > 1, m[1], m[0]))
             for index, (n, k) in enumerate(markets):
@@ -154,6 +147,14 @@ distribution & $n$ & $k$ & $\tau^0$ & cutoff & line & optimized & relax.\ bound 
             if family != "two-modes":
                 file.write("\\midrule\n")
         file.write(FOOTER)
+    for family in web27_paper_data.FAMILY_NAMES:
+        part = summary[(summary.distribution == family) & (summary.num_goods == 1)]
+        with open(DATA / f"share_family_{family}.dat", "w") as file:
+            file.write("n tau0 cutoff line nodes\n")
+            for n in SHAPE_BIDDERS:
+                c = part[part.num_bidders == n].set_index("key").share_vcg_pa
+                file.write(" ".join([str(n)] + [percent(c.get(key)) for key in
+                                                ("zero-welfare", "vcg_pa_cutoff", "vcg_pa_poly1", "vcg_pa_nodes")]) + "\n")
 
 
 def curves(synthetic, shapes):
@@ -208,6 +209,7 @@ def main(synthetic, shapes, out):
     DATA, FIGURES = out / "data", out / "figures"
     DATA.mkdir(parents=True, exist_ok=True)
     FIGURES.mkdir(exist_ok=True)
+    web27_paper_data.main(synthetic, shapes, DATA)
     synthetic_tables(synthetic)
     shapes_table(shapes)
     curves(synthetic, shapes)

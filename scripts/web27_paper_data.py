@@ -12,6 +12,12 @@ Writes to OUT_DIR:
   types_hm.dat            τ(e) and IVCG-PA penalty r(e), harmful_middle, n = 4, k = 1, IVCG-PA
   pooled_hm.tex           bands of the bids pooled by IVCG-PA there (pgfplots fill commands)
   limits.tex              axis limits of every type-plane panel as macros
+  share_ratio_k<k>.dat    share of the first-best gain (%) against n/k for k goods (synthetic run)
+  tau_markets.dat         VCG-PA-optimized τ(e) of every market with k < n, harmful-middle (synthetic run)
+  mc_<family>.png         marginal contribution M(e, v) of VCG-PA at its optimized τ, n = 8, k = 1
+                          (PuOr, symmetric logarithmic scale, dashed M = 0, edge of the type density)
+  tau_mc_<family>.dat     the optimized τ(e) drawn over mc_<family>.png
+  forms_two-modes.dat     VCG-PA τ(e) of τ⁰, best cutoff, best line and optimized, n = 8, k = 1 (shapes run)
 """
 
 import sys
@@ -25,8 +31,12 @@ from PA_auctions import figures  # noqa: E402
 
 FAMILIES = {"independent": "Independent", "harmful-middle": "HarmfulMiddle",
             "heavy-tail": "HeavyTail", "two-modes": "TwoModes"}
-FAMILY_NAMES = {"independent": "independent", "harmful-middle": "harmful middle",
-                "heavy-tail": "heavy tail", "two-modes": "two modes"}
+FAMILY_NAMES = {"independent": "independent", "harmful-middle": "harmful-middle",
+                "heavy-tail": "heavy-tail", "two-modes": "two-modes"}
+MAP_LEAVES = {"harmful-middle": ("synthetic", "harmful-middle/z1/n8-k1/vcgpa_nodes_br"),
+              "two-modes": ("shapes", "two-modes/z1/n8-k1/vcgpa_nodes_br")}
+FORM_LEAVES = {"tau0": "tau-zero-welfare", "cutoff": "vcgpa_cutoff_ga", "line": "vcgpa_poly1_ga",
+               "nodes": "vcgpa_nodes_br"}
 MAIN_MARKETS = [(2, 1), (8, 1), (32, 1), (8, 2), (16, 4), (32, 8)]
 SHAPE_BIDDERS = [2, 4, 8, 16]
 MAIN_HEADER = r"""\begin{tabular}{@{}rrrrrrr@{}}
@@ -104,6 +114,30 @@ def background(types, path):
     return view
 
 
+def marginal_background(data, types, path):
+    """M(e, v) of VCG-PA on the view of the type plane, filling the image: PuOr on a symmetric
+    logarithmic scale as in the run figures, the zero contour dashed and the edge of the type density."""
+    view = figures.default_view(types)
+    values = np.asarray(data["mc_vcg_pa"], dtype=float)
+    limit = float(np.quantile(np.abs(values[np.isfinite(values)]), 0.98)) or 1.0
+    norm = figures.SymLogNorm(linthresh=0.01 * limit, vmin=-limit, vmax=limit, base=10)
+    fig = figures.plt.figure(figsize=(3.0, 2.0), dpi=200)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.pcolormesh(data["mc_e"], data["mc_v"], values.T, cmap="PuOr", norm=norm, shading="auto")
+    ax.contour(data["mc_e"], data["mc_v"], values.T, levels=[0.0], colors=figures.INK,
+               linewidths=0.9, linestyles="--")
+    density = np.asarray(view["background_density"], dtype=float)
+    if density.max() > 0:
+        ax.contour(view["background_e"], view["background_v"], density, levels=[density.max() * 0.02],
+                   colors=figures.INK_SECONDARY, linewidths=0.6)
+    ax.set_xlim(*view["e_limits"])
+    ax.set_ylim(*view["v_limits"])
+    ax.set_axis_off()
+    fig.savefig(path, dpi=200)
+    figures.plt.close(fig)
+    return view
+
+
 def shown_threshold(data, view):
     """τ(e) clipped to the view; excluded externalities (τ = v̄⁺) at the top of the view."""
     tau = np.asarray(data["tau_grid"], dtype=float)
@@ -175,6 +209,38 @@ def main(synthetic, shapes, out):
     (out / "pooled_hm.tex").write_text("".join(
         rf"\fill[regionqty] (axis cs:{e_low:.4f},{low:.5g}) rectangle (axis cs:{e_high:.4f},{high:.5g});" + "\n"
         for low, high in pooled))
+    for k in (1, 2, 4, 8):
+        with open(out / f"share_ratio_k{k}.dat", "w") as file:
+            file.write("ratio tau0 cutoff vcgpa ivcgpa bound\n")
+            for (n, kk), row in sorted(main_table.items()):
+                if kk == k and n > k:
+                    file.write(" ".join([f"{n // k}"] + [percent(row.get(c)) for c in
+                                                       ("tau0", "cutoff", "vcgpa", "ivcgpa", "bound")]) + "\n")
+
+    view = figures.default_view(types)
+    columns, names = [], []
+    for (n, k) in sorted(main_table, key=lambda m: (m[0] / m[1], m[1])):
+        if k < n:
+            data = load_data(synthetic / "harmful-middle" / "z1" / f"n{n}-k{k}" / "vcgpa_nodes_br")
+            columns.append(shown_threshold(data, view))
+            names.append(f"n{n}k{k}")
+    np.savetxt(out / "tau_markets.dat", np.column_stack([data["e_grid"]] + columns),
+               header="e " + " ".join(names), comments="", fmt="%.5g")
+
+    runs = {"synthetic": synthetic, "shapes": shapes}
+    for family, (run, leaf) in MAP_LEAVES.items():
+        data = load_data(runs[run] / leaf)
+        view = marginal_background(data, load_types(runs[run], family), out / f"mc_{family}.png")
+        np.savetxt(out / f"tau_mc_{family}.dat", np.column_stack([data["e_grid"], shown_threshold(data, view)]),
+                   header="e tau", comments="", fmt="%.5g")
+
+    view = figures.default_view(load_types(shapes, "two-modes"))
+    columns = []
+    for leaf in FORM_LEAVES.values():
+        data = load_data(shapes / "two-modes" / "z1" / "n8-k1" / leaf)
+        columns.append(shown_threshold(data, view))
+    np.savetxt(out / "forms_two-modes.dat", np.column_stack([data["e_grid"]] + columns),
+               header="e " + " ".join(FORM_LEAVES), comments="", fmt="%.5g")
     (out / "limits.tex").write_text("\n".join(limits) + "\n")
 
 
