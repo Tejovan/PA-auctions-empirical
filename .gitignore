@@ -53,3 +53,9 @@ runs/
 *.sql.gz
 *.sql.tar.gz
 raw_data/
+notes-*.tsv
+notes-*.zip
+ratings-*.tsv
+ratings-*.zip
+noteStatusHistory-*.tsv
+userEnrollment-*.tsv
