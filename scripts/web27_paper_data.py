@@ -197,18 +197,17 @@ def main(synthetic, shapes, out):
         np.savetxt(out / f"tau_{family}.dat", np.column_stack([e_grid] + columns),
                    header="e " + " ".join(f"n{n}" for n in SHAPE_BIDDERS), comments="", fmt="%.5g")
 
-    # Type-plane figure: valuation axis up to the top of the support, so that τ is drawn up to
-    # the externality at which it reaches the top and the penalty becomes constant.
+    # Type-plane figure: τ is drawn only where it is inside the view (column tau, nan above it,
+    # for a line with jumps); taufill clips it to the top of the view for the abstention region.
     leaf = synthetic / "harmful-middle" / "z1" / "n4-k1" / "ivcgpa_nodes_br"
     data, types = load_data(leaf), load_types(synthetic, "harmful-middle")
-    view = dict(figures.default_view(types))
-    view["v_limits"] = np.array([float(view["v_limits"][0]), float(types["maximum_valuation"])])
-    background(view, out / "bg_hm_full.png")
-    limits.append(rf"\def\vmaxFull{{{float(types['maximum_valuation']):.4f}}}")
-    tau = shown_threshold(data, view)
+    view = figures.default_view(types)
+    tau_fill = shown_threshold(data, view)
+    raw = np.asarray(data["tau_grid"], dtype=float)
+    tau = np.where(np.isfinite(raw) & (raw <= float(view["v_limits"][1])), tau_fill, np.nan)
     penalty = np.minimum(np.asarray(data["penalty_ivcg_pa"], dtype=float), float(view["v_limits"][1]))
-    np.savetxt(out / "types_hm.dat", np.column_stack([data["e_grid"], tau, penalty]),
-               header="e tau penalty", comments="", fmt="%.5g")
+    np.savetxt(out / "types_hm.dat", np.column_stack([data["e_grid"], tau, tau_fill, penalty]),
+               header="e tau taufill penalty", comments="", fmt="%.5g")
     pooled = figures._visible_pooled_intervals(data, view)
     e_low, e_high = (float(x) for x in view["e_limits"])
     (out / "pooled_hm.tex").write_text("".join(
