@@ -147,17 +147,16 @@ def padded(view, pad=IMAGE_PAD):
     return out
 
 
-def to_edge(values, low, high):
-    """Values inside [low, high] (below low raised to low); above high or not finite: nan,
-    except next to a value inside, where high, so a line reaches the top edge."""
+TOP_MARGIN = 0.03
+
+
+def clip_top(values, low, high):
+    """Values for a type-plane panel with valuation limits [low, high]: below low raised to low;
+    above the top level high − TOP_MARGIN·(high − low), or not finite (excluded externality), at
+    that level, so a τ above the panel is a flat line along its top, as τ = 0 is along its bottom."""
     values = np.asarray(values, dtype=float)
-    inside = np.isfinite(values) & (values <= high)
-    out = np.where(inside, np.maximum(values, low), np.nan)
-    edge = ~inside & (np.roll(inside, 1) | np.roll(inside, -1))
-    edge[0] &= inside[1] if len(values) > 1 else False
-    edge[-1] &= inside[-2] if len(values) > 1 else False
-    out[edge] = high
-    return out
+    level = high - TOP_MARGIN * (high - low)
+    return np.where(np.isfinite(values), np.clip(values, low, level), level)
 
 
 def _quantiles(axis, weights, levels):
@@ -240,15 +239,14 @@ def limit_macros(macro, view, image=True):
 
 
 def shown_threshold(data, view, clip_above=False):
-    """τ(e) inside the view: nan where τ is above the top of the view or excluded (τ = v̄⁺),
-    so no line is drawn there (next to an inside value: the top, so the line reaches the edge);
-    clip_above=True puts those values at the top instead (for
-    filling the abstention region)."""
+    """τ(e) for a panel of the view (clip_top: above the view or excluded, a flat line along the
+    top); clip_above=True puts those values at the top of the view (for filling the abstention
+    region)."""
     tau = np.asarray(data["tau_grid"], dtype=float)
     low, high = (float(x) for x in view["v_limits"])
     if clip_above:
         return np.where(np.isfinite(tau), np.clip(tau, low, high), high)
-    return to_edge(tau, low, high)
+    return clip_top(tau, low, high)
 
 
 def write_table(run, out):
@@ -288,7 +286,7 @@ def write_shapes(run, family, view, out):
         name = f"{objective}n{n}k{k}"
         tau = shown_threshold(data, view)
         penalty = np.asarray(data[f"penalty_{mechanism}"], dtype=float)
-        columns += [tau, to_edge(penalty, *(float(x) for x in view["v_limits"]))]
+        columns += [tau, clip_top(penalty, *(float(x) for x in view["v_limits"]))]
         names += [f"tau{name}", f"r{name}"]
         color = RATIO_COLORS[min(RATIO_COLORS, key=lambda r: abs(r - n / k))]
         source = rf"{{\familydata/shapes_{family}.dat}}"
