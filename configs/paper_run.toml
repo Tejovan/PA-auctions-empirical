@@ -17,11 +17,13 @@
 # Designs per market (folder <objective>_<form>_<optimizer> or tau-<label>):
 #   vcgpa_nodes_br, ivcgpa_nodes_br   optimized τ (best-response ascent; starts zero,
 #                                     zero_welfare, relaxation + 6 random)
-#   vcgpa_poly1_grid                  best clipped affine τ(e) = min{v̄, max{0, β₀ + β₁e}}:
-#                                     121 × 121 lines (angle, offset) + Nelder–Mead from the 5
-#                                     best separated grid local maxima
+#   vcgpa_poly1_grid, ivcgpa_poly1_grid
+#                                     best clipped affine τ(e) = min{v̄, max{0, β₀ + β₁e}}:
+#                                     grid of lines (angle, offset; 121 × 121 for VCG-PA, 81 × 81
+#                                     for IVCG-PA, whose evaluations cost 3–70 ms instead of 1 ms)
+#                                     + Nelder–Mead from the 5 best separated grid local maxima
 #   vcgpa_cutoff_grid, ivcgpa_cutoff_grid
-#                                     best common welfare cutoff τ(e) = max(0, w − e): 121
+#                                     best common welfare cutoff τ(e) = max(0, w − e): 121 (81)
 #                                     values of w + Nelder–Mead
 #   tau-zero-welfare                  τ⁰(e) = max(0, −e)
 #   tau-ex-ante                       τ*(e) = max(0, w* − e), Pr[v + e > w*] = min{k/n,
@@ -30,10 +32,12 @@
 #                                     VCG-PA welfare is a threshold rule's, below the bound
 # The relaxation bound J (VCG-PA, equal τ) comes from the symmetric_relaxation check (default
 # on), for every combination with k < n.
+# No genetic search: the grid covers both small forms, and the ascent's starts exclude
+# short_genetic.
 
 kind = "optimize"
 name = "paper-run"
-description = "WEB27 paper and supplement: independent, harmful_middle, heavy_tail, harm_rises; 20 markets (n ≤ 32, k/n from 1/32 to 1); VCG-PA and IVCG-PA optimized τ (best-response ascent), best cutoff and best clipped affine τ (grid + Nelder–Mead), given τ⁰, τ* and relaxation τ."
+description = "WEB27 paper and supplement: independent, harmful_middle, heavy_tail, harm_rises; 20 markets (n ≤ 32, k/n from 1/32 to 1); optimized τ, best cutoff and best clipped affine τ for VCG-PA and IVCG-PA (best-response ascent; grid + Nelder–Mead), given τ⁰, τ* and relaxation τ."
 
 [[distributions]]
 source = "independent"
@@ -69,17 +73,18 @@ num_random_starts = 6
 polish_rounds = 3
 
 [[optimizers]]
-label = "grid"                   # best clipped affine τ, VCG-PA only
+label = "grid"                   # best clipped affine τ and best cutoff, VCG-PA
 method = "grid"
-threshold_forms = ["poly1"]
+threshold_forms = ["poly1", "cutoff"]
 objectives = ["vcg_pa"]
 grid_points = 121
 
 [[optimizers]]
-label = "grid"                   # best common welfare cutoff, both objectives
+label = "grid"                   # the same for IVCG-PA, coarser grid (slower evaluations)
 method = "grid"
-threshold_forms = ["cutoff"]
-grid_points = 121
+threshold_forms = ["poly1", "cutoff"]
+objectives = ["ivcg_pa"]
+grid_points = 81
 
 [[thresholds]]
 label = "zero-welfare"

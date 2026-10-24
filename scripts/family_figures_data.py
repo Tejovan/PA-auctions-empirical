@@ -7,15 +7,17 @@
     python scripts/family_figures_data.py OUT_DIR RUN [RUN ...]
 
 Each value is taken from the first run that has it (so a run with the synthetic markets can
-come before a run with more families). Type-plane panels use a linear valuation axis for
-every family. Writes to OUT_DIR:
+come before a run with more families). Type-plane panels are zoomed to the type distribution
+(externality quantiles 0.5% and 99.5%, valuation quantiles 0.5% and 99%; 98% for heavy-tail)
+on a linear valuation axis; heavy-tail also gets a logarithmic version, panel name
+heavy-tail-log (valuation quantiles 0.5% and 99.5%). Writes to OUT_DIR:
   family_share_n<n>k<k>.dat        x (distribution index), family, tau0 cutoff affine relaxtau
-                                   vcgpa ivcgpa bound (share of the first-best gain, %, nan
-                                   where a run lacks the design)
-  family_forms_n<n>k<k>_<family>.dat   e tau0 cutoff affine nodes (VCG-PA τ of each form)
-  family_tau_<family>.dat          e and one column n<n>k<k> per market with k < n
-  family_tau_<family>.tex          pgfplots commands drawing those τ (color n/k, style n)
-  bg_<family>.png, family_limits.tex   linear type background and axis limits
+                                   vcgpa ivcgpa ivcgaffine bound (share of the first-best gain,
+                                   %, nan where a run lacks the design)
+  family_forms_n<n>k<k>_<panel>.dat    e tau0 cutoff affine nodes (VCG-PA τ of each form)
+  family_tau_<panel>.dat           e and one column n<n>k<k> per market with k < n
+  family_tau_<panel>.tex           pgfplots commands drawing those τ (color n/k, style n)
+  bg_<panel>.png, family_limits.tex    type background and axis limits of each panel
 """
 
 import sys
@@ -28,14 +30,17 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from PA_auctions import figures  # noqa: E402
-from web27_paper_data import label, linear_view, load_data, load_types  # noqa: E402
+from web27_paper_data import label, load_data, load_types  # noqa: E402
 
 FAMILY_ORDER = ["independent", "harmful-middle", "heavy-tail", "harm-rises", "two-modes"]
 MACROS = {"independent": "Independent", "harmful-middle": "HarmfulMiddle",
-          "heavy-tail": "HeavyTail", "harm-rises": "HarmRises", "two-modes": "TwoModes"}
+          "heavy-tail": "HeavyTail", "harm-rises": "HarmRises", "two-modes": "TwoModes",
+          "heavy-tail-log": "HeavyTailLog"}
+E_LEVELS, V_LEVELS, V_TOP_HEAVY, V_LEVELS_LOG = (0.005, 0.995), (0.005, 0.99), 0.98, (0.005, 0.995)
 SHARE_KEYS = {"tau0": ("zero-welfare", "share_vcg_pa"), "cutoff": ("vcg_pa_cutoff", "share_vcg_pa"),
               "affine": ("vcg_pa_poly1", "share_vcg_pa"), "relaxtau": ("relaxation", "share_vcg_pa"),
-              "vcgpa": ("vcg_pa_nodes", "share_vcg_pa"), "ivcgpa": ("ivcg_pa_nodes", "share_ivcg_pa")}
+              "vcgpa": ("vcg_pa_nodes", "share_vcg_pa"), "ivcgpa": ("ivcg_pa_nodes", "share_ivcg_pa"),
+              "ivcgaffine": ("ivcg_pa_poly1", "share_ivcg_pa")}
 FORM_KEYS = {"tau0": "zero-welfare", "cutoff": "vcg_pa_cutoff", "affine": "vcg_pa_poly1",
              "nodes": "vcg_pa_nodes"}
 FORM_MARKETS = [(2, 1), (8, 1), (16, 4)]
@@ -52,8 +57,31 @@ def shown(data, view):
     return np.where(np.isfinite(tau) & (tau <= high), np.maximum(tau, low), np.nan)
 
 
-def background(types, path):
-    view = linear_view(types)
+def _quantiles(axis, weights, levels):
+    cumulative = np.cumsum(weights) / weights.sum()
+    return [float(np.interp(level, cumulative, axis)) for level in levels]
+
+
+def zoomed_view(types, scale="linear"):
+    """The view of a type-plane panel, zoomed to quantiles of the marginal distributions of e and
+    v (from the background density, valuations × externalities), with a 3% margin."""
+    view = figures.type_view(types, scale)
+    density = np.asarray(types["background_density"], dtype=float)
+    e_low, e_high = _quantiles(np.asarray(types["background_e"]), density.sum(axis=0), E_LEVELS)
+    heavy = figures.default_view(types)["scale"] == "log"
+    levels = V_LEVELS_LOG if scale == "log" else (V_LEVELS[0], V_TOP_HEAVY if heavy else V_LEVELS[1])
+    v_low, v_high = _quantiles(np.asarray(types["background_v"]), density.sum(axis=1), levels)
+    e_margin = 0.03 * (e_high - e_low)
+    view["e_limits"] = np.array([e_low - e_margin, e_high + e_margin])
+    if scale == "log":
+        view["v_limits"] = np.array([max(v_low, 1e-3), v_high * 1.05])
+    else:
+        v_margin = 0.03 * (v_high - v_low)
+        view["v_limits"] = np.array([v_low - v_margin, v_high + v_margin])
+    return view
+
+
+def background(view, path):
     fig = figures.plt.figure(figsize=(3.0, 2.0), dpi=200)
     ax = fig.add_axes([0, 0, 1, 1])
     figures.draw_types(ax, view)
@@ -131,13 +159,16 @@ def main(out, folders):
     out.mkdir(parents=True, exist_ok=True)
     runs = Runs(folders)
     families = runs.families()[:4]
-    limits, views = [], {}
-    for family in families:
-        view = background(runs.types(family), out / f"bg_{family}.png")
-        views[family] = view
+    # panels: (name, family, view); heavy-tail also in a logarithmic version
+    panels = [(family, family, zoomed_view(runs.types(family))) for family in families]
+    if "heavy-tail" in families:
+        panels.append(("heavy-tail-log", "heavy-tail", zoomed_view(runs.types("heavy-tail"), "log")))
+    limits = []
+    for name, _, view in panels:
+        background(view, out / f"bg_{name}.png")
         e_low, e_high = (float(x) for x in view["e_limits"])
         v_low, v_high = (float(x) for x in view["v_limits"])
-        macro = MACROS[family]
+        macro = MACROS[name]
         limits.append(rf"\def\emin{macro}{{{e_low:.4f}}}\def\emax{macro}{{{e_high:.4f}}}"
                       rf"\def\vmin{macro}{{{v_low:.5g}}}\def\vmax{macro}{{{v_high:.4f}}}")
     (out / "family_limits.tex").write_text("\n".join(limits) + "\n")
@@ -152,7 +183,7 @@ def main(out, folders):
                 file.write(f"{index} {family} " + " ".join(percent(v) for v in values) + "\n")
 
     for n, k in FORM_MARKETS:
-        for family in families:
+        for name, family, view in panels:
             columns, e_grid = [], None
             for key in FORM_KEYS.values():
                 leaf = runs.leaf(family, n, k, key)
@@ -161,29 +192,29 @@ def main(out, folders):
                     continue
                 data = load_data(leaf)
                 e_grid = data["e_grid"]
-                columns.append(shown(data, views[family]))
+                columns.append(shown(data, view))
             columns = [c if c is not None else np.full(len(e_grid), np.nan) for c in columns]
-            np.savetxt(out / f"family_forms_n{n}k{k}_{family}.dat", np.column_stack([e_grid] + columns),
+            np.savetxt(out / f"family_forms_n{n}k{k}_{name}.dat", np.column_stack([e_grid] + columns),
                        header="e " + " ".join(FORM_KEYS), comments="", fmt="%.5g")
 
-    for family in families:
+    for panel, family, view in panels:
         names, columns, e_grid = [], [], None
         for n, k in runs.markets(family):
             if k >= n:
                 continue
             data = load_data(runs.leaf(family, n, k, "vcg_pa_nodes"))
             e_grid = data["e_grid"]
-            columns.append(shown(data, views[family]))
+            columns.append(shown(data, view))
             names.append(f"n{n}k{k}")
-        np.savetxt(out / f"family_tau_{family}.dat", np.column_stack([e_grid] + columns),
+        np.savetxt(out / f"family_tau_{panel}.dat", np.column_stack([e_grid] + columns),
                    header="e " + " ".join(names), comments="", fmt="%.5g")
         commands = []
         for name in sorted(names, key=lambda m: -int(m[1:].split("k")[0]) / int(m.split("k")[1])):
             n, k = (int(x) for x in name[1:].split("k"))
             color = RATIO_COLORS[min(RATIO_COLORS, key=lambda r: abs(r - n / k))]
             commands.append(rf"\addplot[{color},{BIDDER_STYLES[n]},line width=1.2pt,forget plot,"
-                            rf"unbounded coords=jump] table[x=e,y={name}]{{\familydata/family_tau_{family}.dat}};")
-        (out / f"family_tau_{family}.tex").write_text("\n".join(commands) + "\n")
+                            rf"unbounded coords=jump] table[x=e,y={name}]{{\familydata/family_tau_{panel}.dat}};")
+        (out / f"family_tau_{panel}.tex").write_text("\n".join(commands) + "\n")
     print("families", families, "markets", len(markets))
 
 

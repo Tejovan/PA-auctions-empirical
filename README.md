@@ -114,7 +114,7 @@ Unknown keys are an error. Example files in [configs/](configs/):
 | [standard_test.toml](configs/standard_test.toml) | standard test: every feature on small grids, 120 combinations, about 3 min with 12 workers |
 | [evaluate_example.toml](configs/evaluate_example.toml) | evaluate run: the zero-welfare threshold τ⁰, the ex ante cutoff τ*, and the optima of an earlier run |
 | [nodes_run.toml](configs/nodes_run.toml) | nodes form, best-response ascent and symmetric relaxation: harmful_middle and tweets (ζ 1, 10, 100), n ∈ {4, 8}, k ∈ {1, 4} (k = n: no competition), both objectives; default grids, 56 combinations, about 5 min with 12 workers |
-| [paper_run.toml](configs/paper_run.toml) | WEB27 paper and supplement in one run: independent, harmful_middle, heavy_tail, harm_rises; 20 markets (k/n from 1/32 to 1); optimized τ for both objectives, best cutoff and best clipped affine τ by [grid search](#grid-search), given τ⁰, τ* and relaxation τ; 636 combinations |
+| [paper_run.toml](configs/paper_run.toml) | WEB27 paper and supplement in one run: independent, harmful_middle, heavy_tail, harm_rises; 20 markets (k/n from 1/32 to 1); optimized τ for both objectives, best cutoff and best clipped affine τ by [grid search](#grid-search), given τ⁰, τ* and relaxation τ; 716 combinations |
 | [optimize_example.toml](configs/optimize_example.toml) | research-size optimize run on the tweet data (several ζ, per-node τ) |
 
 ### 3.1 Top level
