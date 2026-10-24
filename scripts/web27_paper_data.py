@@ -1,23 +1,28 @@
-"""Data for the empirical section of the WEB27 submission: pgfplots tables, type-distribution
-background images and LaTeX table rows, from the synthetic run and the shapes run.
+r"""Data for the empirical section and appendix of the WEB27 submission: pgfplots tables,
+type-distribution background images and LaTeX table rows, from the paper run
+(configs/paper_run.toml).
 
-    python scripts/web27_paper_data.py SYNTHETIC_RUN SHAPES_RUN OUT_DIR
+    python scripts/web27_paper_data.py RUN OUT_DIR
 
-Writes to OUT_DIR:
-  share_k1.dat            share of the first-best gain (%) against n at k = 1 (synthetic run)
-  table_main.tex          tabular of the main table (selected markets, synthetic run)
-  table_shapes.tex        tabular of the appendix table (all families and markets, shapes run)
-  tau_<family>.dat        VCG-PA-optimized τ(e) for n ∈ {2, 4, 8, 16}, k = 1 (shapes run)
-  bg_<family>.png         type density of each family, linear valuation axis (axes limits in limits.tex)
-  types_hm.dat            τ(e) and IVCG-PA penalty r(e), harmful_middle, n = 4, k = 1, IVCG-PA
+Type-plane panels use zoomed views (zoomed_view with VIEW_OPTIONS); the IVCG-PA type-plane
+figure of harmful-middle (types_hm) shows the whole support. Writes to OUT_DIR:
+  table_results.tex       tabular of the appendix table (TABLE_MARKETS of every distribution)
+  share_k1.dat            share of the first-best gain (%) against n at k = 1, harmful-middle
+  share_ratio_k<k>.dat    share of the first-best gain (%) against n/k for k goods, harmful-middle
+  tau_<family>.dat        VCG-PA-optimized τ(e) for n ∈ SHAPE_BIDDERS, k = 1
+  tau_markets.dat         VCG-PA-optimized τ(e) of every market with k < n, harmful-middle
+  bg_<family>.png         type density of each distribution (axes limits in limits.tex)
+  types_hm.dat            τ(e) and IVCG-PA penalty r(e), harmful-middle, n = 4, k = 1, IVCG-PA
   pooled_hm.tex           bands of the bids pooled by IVCG-PA there (pgfplots fill commands)
-  limits.tex              axis limits of every type-plane panel as macros
-  share_ratio_k<k>.dat    share of the first-best gain (%) against n/k for k goods (synthetic run)
-  tau_markets.dat         VCG-PA-optimized τ(e) of every market with k < n, harmful-middle (synthetic run)
+  bg_types_hm.png         its background (whole support; macros \eminTypes ... in limits.tex)
+  shapes_<family>.dat/.tex      τ(e) and penalty r(e) of the SHAPE_CURVES designs and pgfplots
+                          commands drawing them (color = n/k as in family_tau_*.tex; τ solid,
+                          r dashed; the band of valuations pooled by an IVCG-PA design)
   mc_<family>.png         marginal contribution M(e, v) of VCG-PA at its optimized τ, n = 8, k = 1
                           (PuOr, symmetric logarithmic scale, dashed M = 0, edge of the type density)
   tau_mc_<family>.dat     the optimized τ(e) drawn over mc_<family>.png
-  forms_two-modes.dat     VCG-PA τ(e) of τ⁰, best cutoff, best line and optimized, n = 8, k = 1 (shapes run)
+  limits.tex              axis limits of every type-plane panel as macros
+and everything family_figures_data.py writes (figures of shares and τ across distributions).
 """
 
 import sys
@@ -30,27 +35,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PA_auctions import figures  # noqa: E402
 
 FAMILIES = {"independent": "Independent", "harmful-middle": "HarmfulMiddle",
-            "heavy-tail": "HeavyTail", "two-modes": "TwoModes"}
-FAMILY_NAMES = {"independent": "independent", "harmful-middle": "harmful-middle",
-                "heavy-tail": "heavy-tail", "two-modes": "two-modes"}
-MAP_LEAVES = {"harmful-middle": ("synthetic", "harmful-middle/z1/n8-k1/vcgpa_nodes_br"),
-              "two-modes": ("shapes", "two-modes/z1/n8-k1/vcgpa_nodes_br")}
-FORM_LEAVES = {"tau0": "tau-zero-welfare", "cutoff": "vcgpa_cutoff_ga", "line": "vcgpa_poly1_ga",
-               "nodes": "vcgpa_nodes_br"}
-MAIN_MARKETS = [(2, 1), (8, 1), (32, 1), (8, 2), (16, 4), (32, 8)]
-SHAPE_BIDDERS = [2, 4, 8, 16]
-MAIN_HEADER = r"""\begin{tabular}{@{}rrrrrrr@{}}
+            "heavy-tail": "HeavyTail", "harm-rises": "HarmRises"}
+FAMILY_NAMES = {family: family for family in FAMILIES}
+MAIN_FAMILY = "harmful-middle"
+MAP_MARKET = (8, 1)
+MAP_FAMILIES = ["harmful-middle", "harm-rises"]
+TABLE_MARKETS = [(2, 1), (8, 1), (32, 1), (8, 2), (16, 4), (32, 8), (4, 3), (16, 14)]
+SHAPE_BIDDERS = [2, 4, 8, 16, 32]
+# Designs of the τ-and-penalty figure per distribution: (objective, n, k); an IVCG-PA design
+# also gets the band of valuations it pools. Colors by n/k as in family_figures_data.
+SHAPE_CURVES = {"independent": [("vcgpa", 8, 7), ("vcgpa", 2, 1), ("vcgpa", 32, 1)],
+                "harmful-middle": [("vcgpa", 8, 7), ("vcgpa", 2, 1), ("ivcgpa", 32, 1)],
+                "heavy-tail": [("vcgpa", 4, 3), ("vcgpa", 16, 4), ("vcgpa", 32, 1)],
+                "harm-rises": [("vcgpa", 16, 14), ("vcgpa", 8, 2), ("vcgpa", 32, 1)]}
+TABLE_HEADER = r"""\begin{tabular}{@{}lrrrrrrrrrr@{}}
 \toprule
- & & \multicolumn{4}{c}{VCG-PA with $\tau$} & IVCG-PA\\
-\cmidrule(lr){3-6}
-$n$ & $k$ & $\tau^0$ & best cutoff & optimized & relax.\ bound & optimized\\
-\midrule
-"""
-SHAPES_HEADER = r"""\begin{tabular}{@{}lrrrrrrr@{}}
-\toprule
- & & & & \multicolumn{2}{c}{best} & \multicolumn{2}{c}{optimized}\\
-\cmidrule(lr){5-6}\cmidrule(lr){7-8}
-distribution & $n$ & $k$ & $\tau^0$ & cutoff & affine & share & gap\\
+ & & & \multicolumn{6}{c}{VCG-PA with $\tau$} & IVCG-PA & part.\\
+\cmidrule(lr){4-9}
+distribution & $n$ & $k$ & $\tau^0$ & relax.\ $\tau$ & cutoff & affine & optimized & relax.\ bound & optimized & gap\\
 \midrule
 """
 FOOTER = "\\bottomrule\n\\end{tabular}\n"
@@ -60,18 +62,23 @@ def label(row):
     return row.tau_label if isinstance(row.tau_label, str) else f"{row.objective}_{row.threshold_form}"
 
 
-def shares(run):
-    """Share of the first-best gain (%) by market and τ: τ⁰, cutoff, poly1, VCG-PA and IVCG-PA
-    optimized, and the relaxation bound (VCG-PA optimum + relaxation gap)."""
+def shares(run, family):
+    """Share of the first-best gain by market and τ for one distribution: τ⁰, relaxation τ,
+    cutoff, poly1, VCG-PA and IVCG-PA optimized, participation gap, and the relaxation bound
+    (VCG-PA optimum + relaxation gap)."""
     summary = pd.read_csv(run / "summary.csv")
+    summary = summary[summary.distribution == family].copy()
     summary["key"] = summary.apply(label, axis=1)
     gaps = pd.read_csv(run / "gap-decomposition.csv")
+    gaps = gaps[gaps.distribution == family]
     table = {}
     for (n, k), group in summary.groupby(["num_bidders", "num_goods"]):
         row = {}
         for _, r in group.iterrows():
             if r.key == "zero-welfare":
                 row["tau0"] = r.share_vcg_pa
+            elif r.key == "relaxation":
+                row["relaxtau"] = r.share_vcg_pa
             elif r.key == "vcg_pa_cutoff":
                 row["cutoff"] = r.share_vcg_pa
             elif r.key == "vcg_pa_poly1":
@@ -135,16 +142,14 @@ def zoomed_view(types, scale="linear", e_levels=(0.005, 0.995), v_top=None):
 
 
 def linear_view(types, family=None):
-    """The view of a type-plane panel: linear valuation axis over the whole support, or the
-    zoomed view of VIEW_OPTIONS for that family."""
-    if family in VIEW_OPTIONS:
-        return zoomed_view(types, **VIEW_OPTIONS[family])
-    return figures.type_view(types, "linear")
+    """The view of a type-plane panel: the zoomed view, with the VIEW_OPTIONS of the family."""
+    return zoomed_view(types, **VIEW_OPTIONS.get(family, {}))
 
 
-def background(types, path, family=None):
-    """The type density alone, filling the image, with the limits of its view."""
-    view = linear_view(types, family)
+def background(types, path, family=None, view=None):
+    """The type density alone, filling the image, with the limits of its view (default: the
+    zoomed view of the family)."""
+    view = linear_view(types, family) if view is None else view
     fig = figures.plt.figure(figsize=(3.0, 2.0), dpi=200)
     ax = fig.add_axes([0, 0, 1, 1])
     figures.draw_types(ax, view)
@@ -154,10 +159,9 @@ def background(types, path, family=None):
     return view
 
 
-def marginal_background(data, types, path):
-    """M(e, v) of VCG-PA on the view of the type plane, filling the image: PuOr on a symmetric
+def marginal_background(data, view, path):
+    """M(e, v) of VCG-PA on a view of the type plane, filling the image: PuOr on a symmetric
     logarithmic scale as in the run figures, the zero contour dashed and the edge of the type density."""
-    view = linear_view(types)
     values = np.asarray(data["mc_vcg_pa"], dtype=float)
     limit = float(np.quantile(np.abs(values[np.isfinite(values)]), 0.98)) or 1.0
     norm = figures.SymLogNorm(linthresh=0.01 * limit, vmin=-limit, vmax=limit, base=10)
@@ -178,6 +182,13 @@ def marginal_background(data, types, path):
     return view
 
 
+def limit_macros(macro, view):
+    e_low, e_high = (float(x) for x in view["e_limits"])
+    v_low, v_high = (float(x) for x in view["v_limits"])
+    return (rf"\def\emin{macro}{{{e_low:.4f}}}\def\emax{macro}{{{e_high:.4f}}}"
+            rf"\def\vmin{macro}{{{v_low:.5g}}}\def\vmax{macro}{{{v_high:.4f}}}")
+
+
 def shown_threshold(data, view, clip_above=False):
     """τ(e) inside the view: nan where τ is above the top of the view or excluded (τ = v̄⁺),
     so no line is drawn there; clip_above=True puts those values at the top instead (for
@@ -189,63 +200,103 @@ def shown_threshold(data, view, clip_above=False):
     return np.where(np.isfinite(tau) & (tau <= high), np.maximum(tau, low), np.nan)
 
 
-def main(synthetic, shapes, out):
+def write_table(run, out):
+    with open(out / "table_results.tex", "w") as file:
+        file.write(TABLE_HEADER)
+        for family, name in FAMILY_NAMES.items():
+            table = shares(run, family)
+            for index, (n, k) in enumerate(TABLE_MARKETS):
+                row = table[(n, k)]
+                first = rf"\multirow{{{len(TABLE_MARKETS)}}}{{*}}{{{name}}}" if index == 0 else ""
+                file.write(f"{first} & {n} & {k} & " + " & ".join(percent(row.get(c)) for c in
+                           ("tau0", "relaxtau", "cutoff", "line", "vcgpa", "bound", "ivcgpa"))
+                           + f" & {100 * row['gap']:.2f}" + r" \\" + "\n")
+            file.write(r"\midrule" + "\n" if family != list(FAMILY_NAMES)[-1] else "")
+        file.write(FOOTER)
+
+
+def write_shapes(run, family, view, out):
+    """τ and penalty of the SHAPE_CURVES designs of one distribution, and pgfplots commands:
+    the pooled band of an IVCG-PA design first, then penalties (dashed) and τ (solid)."""
+    from family_figures_data import RATIO_COLORS
+    columns, names, fills, lines = [], [], [], []
+    for objective, n, k in SHAPE_CURVES[family]:
+        data = load_data(run / family / "z1" / f"n{n}-k{k}" / f"{objective}_nodes_br")
+        mechanism = "ivcg_pa" if objective == "ivcgpa" else "vcg_pa"
+        name = f"{objective}n{n}k{k}"
+        tau = shown_threshold(data, view)
+        penalty = np.asarray(data[f"penalty_{mechanism}"], dtype=float)
+        columns += [tau, np.where(np.isfinite(tau), penalty, np.nan)]
+        names += [f"tau{name}", f"r{name}"]
+        color = RATIO_COLORS[min(RATIO_COLORS, key=lambda r: abs(r - n / k))]
+        source = rf"{{\familydata/shapes_{family}.dat}}"
+        lines.append(rf"\addplot[{color},line width=1.0pt,densely dashed,forget plot] table[x=e,y=r{name}]{source};")
+        lines.append(rf"\addplot[{color},line width=1.4pt,forget plot] table[x=e,y=tau{name}]{source};")
+        if objective == "ivcgpa":
+            e_low, e_high = (float(x) for x in view["e_limits"])
+            fills += [rf"\fill[regionqty] (axis cs:{e_low:.4f},{low:.5g}) rectangle (axis cs:{e_high:.4f},{high:.5g});"
+                      for low, high in figures._visible_pooled_intervals(data, view)]
+        e_grid = data["e_grid"]
+    np.savetxt(out / f"shapes_{family}.dat", np.column_stack([e_grid] + columns),
+               header="e " + " ".join(names), comments="", fmt="%.5g")
+    (out / f"shapes_{family}.tex").write_text("\n".join(fills + lines) + "\n")
+
+
+def main(run, out):
     out.mkdir(parents=True, exist_ok=True)
     limits = []
+    write_table(run, out)
 
-    main_table = shares(synthetic)
+    main_table = shares(run, MAIN_FAMILY)
     with open(out / "share_k1.dat", "w") as file:
         file.write("n tau0 cutoff vcgpa ivcgpa bound\n")
         for (n, k), row in sorted(main_table.items()):
             if k == 1:
                 file.write(" ".join([str(n)] + [percent(row.get(c)) for c in
                                                 ("tau0", "cutoff", "vcgpa", "ivcgpa", "bound")]) + "\n")
-    with open(out / "table_main.tex", "w") as file:
-        file.write(MAIN_HEADER)
-        for n, k in MAIN_MARKETS:
-            row = main_table[(n, k)]
-            file.write(f"{n} & {k} & " + " & ".join(percent(row.get(c)) for c in
-                       ("tau0", "cutoff", "vcgpa", "bound", "ivcgpa")) + r" \\" + "\n")
-        file.write(FOOTER)
-
-    with open(out / "table_shapes.tex", "w") as file:
-        file.write(SHAPES_HEADER)
-        summary = pd.read_csv(shapes / "summary.csv")
-        summary["key"] = summary.apply(label, axis=1)
-        for family, name in FAMILY_NAMES.items():
-            part = summary[summary.distribution == family]
-            markets = sorted(set(zip(part.num_bidders, part.num_goods)), key=lambda m: (m[1] > 1, m[1], m[0]))
-            for index, (n, k) in enumerate(markets):
-                cell = part[(part.num_bidders == n) & (part.num_goods == k)].set_index("key")
-                values = [cell.share_vcg_pa.get(key) for key in
-                          ("zero-welfare", "vcg_pa_cutoff", "vcg_pa_poly1", "vcg_pa_nodes")]
-                gap = cell.participation_gap_share_vcg_pa.get("vcg_pa_nodes")
-                first = rf"\multirow{{{len(markets)}}}{{*}}{{{name}}}" if index == 0 else ""
-                file.write(f"{first} & {n} & {k} & " + " & ".join(percent(v) for v in values)
-                           + f" & {100 * gap:.2f}" + r" \\" + "\n")
-            file.write(r"\midrule" + "\n" if family != "two-modes" else "")
-        file.write(FOOTER)
+    for k in (1, 2, 4, 8):
+        with open(out / f"share_ratio_k{k}.dat", "w") as file:
+            file.write("ratio tau0 cutoff vcgpa ivcgpa bound\n")
+            for (n, kk), row in sorted(main_table.items()):
+                if kk == k and n > k:
+                    file.write(" ".join([f"{n // k}"] + [percent(row.get(c)) for c in
+                                                       ("tau0", "cutoff", "vcgpa", "ivcgpa", "bound")]) + "\n")
 
     for family, macro in FAMILIES.items():
-        types = load_types(shapes, family)
+        types = load_types(run, family)
         view = background(types, out / f"bg_{family}.png", family)
-        e_low, e_high = (float(x) for x in view["e_limits"])
-        v_low, v_high = (float(x) for x in view["v_limits"])
-        limits.append(rf"\def\emin{macro}{{{e_low:.4f}}}\def\emax{macro}{{{e_high:.4f}}}"
-                      rf"\def\vmin{macro}{{{v_low:.5g}}}\def\vmax{macro}{{{v_high:.4f}}}")
+        limits.append(limit_macros(macro, view))
         columns, e_grid = [], None
         for n in SHAPE_BIDDERS:
-            data = load_data(shapes / family / "z1" / f"n{n}-k1" / "vcgpa_nodes_br")
+            data = load_data(run / family / "z1" / f"n{n}-k1" / "vcgpa_nodes_br")
             e_grid = data["e_grid"]
             columns.append(shown_threshold(data, view))
         np.savetxt(out / f"tau_{family}.dat", np.column_stack([e_grid] + columns),
                    header="e " + " ".join(f"n{n}" for n in SHAPE_BIDDERS), comments="", fmt="%.5g")
+        write_shapes(run, family, view, out)
+        if family in MAP_FAMILIES:
+            n, k = MAP_MARKET
+            data = load_data(run / family / "z1" / f"n{n}-k{k}" / "vcgpa_nodes_br")
+            marginal_background(data, view, out / f"mc_{family}.png")
+            np.savetxt(out / f"tau_mc_{family}.dat", np.column_stack([data["e_grid"], shown_threshold(data, view)]),
+                       header="e tau", comments="", fmt="%.5g")
+        if family == MAIN_FAMILY:
+            columns, names = [], []
+            for (n, k) in sorted(main_table, key=lambda m: (m[0] / m[1], m[1])):
+                if k < n:
+                    data = load_data(run / family / "z1" / f"n{n}-k{k}" / "vcgpa_nodes_br")
+                    columns.append(shown_threshold(data, view))
+                    names.append(f"n{n}k{k}")
+            np.savetxt(out / "tau_markets.dat", np.column_stack([data["e_grid"]] + columns),
+                       header="e " + " ".join(names), comments="", fmt="%.5g")
 
-    # Type-plane figure: τ is drawn only where it is inside the view (column tau, nan above it,
-    # for a line with jumps); taufill clips it to the top of the view for the abstention region.
-    leaf = synthetic / "harmful-middle" / "z1" / "n4-k1" / "ivcgpa_nodes_br"
-    data, types = load_data(leaf), load_types(synthetic, "harmful-middle")
-    view = linear_view(types)
+    # IVCG-PA type-plane figure, whole support: τ is drawn only where it is inside the view
+    # (column tau, nan above it, for a line with jumps); taufill clips it to the top of the view
+    # for the abstention region.
+    leaf = run / MAIN_FAMILY / "z1" / "n4-k1" / "ivcgpa_nodes_br"
+    data, types = load_data(leaf), load_types(run, MAIN_FAMILY)
+    view = background(types, out / "bg_types_hm.png", view=figures.type_view(types, "linear"))
+    limits.append(limit_macros("Types", view))
     tau_fill = shown_threshold(data, view, clip_above=True)
     raw = np.asarray(data["tau_grid"], dtype=float)
     tau = np.where(np.isfinite(raw) & (raw <= float(view["v_limits"][1])), tau_fill, np.nan)
@@ -257,40 +308,11 @@ def main(synthetic, shapes, out):
     (out / "pooled_hm.tex").write_text("".join(
         rf"\fill[regionqty] (axis cs:{e_low:.4f},{low:.5g}) rectangle (axis cs:{e_high:.4f},{high:.5g});" + "\n"
         for low, high in pooled))
-    for k in (1, 2, 4, 8):
-        with open(out / f"share_ratio_k{k}.dat", "w") as file:
-            file.write("ratio tau0 cutoff vcgpa ivcgpa bound\n")
-            for (n, kk), row in sorted(main_table.items()):
-                if kk == k and n > k:
-                    file.write(" ".join([f"{n // k}"] + [percent(row.get(c)) for c in
-                                                       ("tau0", "cutoff", "vcgpa", "ivcgpa", "bound")]) + "\n")
-
-    view = linear_view(types)
-    columns, names = [], []
-    for (n, k) in sorted(main_table, key=lambda m: (m[0] / m[1], m[1])):
-        if k < n:
-            data = load_data(synthetic / "harmful-middle" / "z1" / f"n{n}-k{k}" / "vcgpa_nodes_br")
-            columns.append(shown_threshold(data, view))
-            names.append(f"n{n}k{k}")
-    np.savetxt(out / "tau_markets.dat", np.column_stack([data["e_grid"]] + columns),
-               header="e " + " ".join(names), comments="", fmt="%.5g")
-
-    runs = {"synthetic": synthetic, "shapes": shapes}
-    for family, (run, leaf) in MAP_LEAVES.items():
-        data = load_data(runs[run] / leaf)
-        view = marginal_background(data, load_types(runs[run], family), out / f"mc_{family}.png")
-        np.savetxt(out / f"tau_mc_{family}.dat", np.column_stack([data["e_grid"], shown_threshold(data, view)]),
-                   header="e tau", comments="", fmt="%.5g")
-
-    view = linear_view(load_types(shapes, "two-modes"))
-    columns = []
-    for leaf in FORM_LEAVES.values():
-        data = load_data(shapes / "two-modes" / "z1" / "n8-k1" / leaf)
-        columns.append(shown_threshold(data, view))
-    np.savetxt(out / "forms_two-modes.dat", np.column_stack([data["e_grid"]] + columns),
-               header="e " + " ".join(FORM_LEAVES), comments="", fmt="%.5g")
     (out / "limits.tex").write_text("\n".join(limits) + "\n")
+
+    import family_figures_data
+    family_figures_data.main(out, [run])
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]))
+    main(Path(sys.argv[1]), Path(sys.argv[2]))

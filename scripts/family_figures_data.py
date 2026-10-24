@@ -6,8 +6,7 @@
 
     python scripts/family_figures_data.py OUT_DIR RUN [RUN ...]
 
-Each value is taken from the first run that has it (so a run with the synthetic markets can
-come before a run with more families). Type-plane panels are zoomed to the type distribution
+Each value is taken from the first run that has it. Type-plane panels are zoomed to the type distribution
 on a linear valuation axis (web27_paper_data.zoomed_view: externality quantiles 0.5% and 99.5%,
 valuation quantiles 0.5% and 99%; VIEW_OPTIONS for independent and heavy-tail). Writes to OUT_DIR:
   family_share_n<n>k<k>.dat        x (distribution index), family, tau0 cutoff affine relaxtau
@@ -133,7 +132,6 @@ def main(out, folders):
     out.mkdir(parents=True, exist_ok=True)
     runs = Runs(folders)
     families = runs.families()[:4]
-    # panels: (name, family, view); heavy-tail also in a logarithmic version
     panels = [(family, family, zoomed_view(runs.types(family), **VIEW_OPTIONS.get(family, {})))
               for family in families]
     limits = []
