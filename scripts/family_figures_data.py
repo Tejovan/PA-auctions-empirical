@@ -16,9 +16,10 @@ valuation quantiles 0.5% and 99%; VIEW_OPTIONS for independent and heavy-tail). 
   family_tau_<family>.dat           e and one column n<n>k<k> per market with k < n
   family_tau_<family>.tex           pgfplots commands drawing those τ (color n/k, style n; solid
                                    lines first, dotted last, so dashed and dotted stay visible)
-  family_taufew_<family>.tex        the same for the markets with n/k ≤ FEW_RATIO
+  family_taufew_<family>.tex        the same for the markets with n/k in FEW_RATIOS
   family_tau_limits.tex             zoomed axis limits for those (\eminZoom<Family> ...): the
-                                    range of the curves, v up to ZOOM_TOP of the view
+                                    range of the curves, v up to ZOOM_TOP of the view; and the
+                                    limits of the share figure's panels (\eminShare<Family> ...)
   bg_<family>.png, family_limits.tex    type background and axis limits of each panel
 """
 
@@ -32,7 +33,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from PA_auctions import figures  # noqa: E402
-from web27_paper_data import VIEW_OPTIONS, label, load_data, load_types, zoomed_view  # noqa: E402
+from web27_paper_data import (VIEW_OPTIONS, label, limit_macros, load_data, load_types, padded,  # noqa: E402
+                              to_edge, zoomed_view)
 
 FAMILY_ORDER = ["independent", "harmful-middle", "heavy-tail", "harm-rises", "two-modes"]
 MACROS = {"independent": "Independent", "harmful-middle": "HarmfulMiddle",
@@ -49,8 +51,12 @@ FORM_MARKETS = [(2, 1), (8, 1), (16, 4)]
 RATIO_COLORS = {8 / 7: "sevenA", 4 / 3: "sevenB", 2: "sevenC", 4: "sevenD", 8: "sevenE",
                 16: "sevenF", 32: "sevenG"}
 BIDDER_STYLES = {2: "dotted", 4: "dash dot dot", 8: "dashdotted", 16: "dashed", 32: "solid"}
-FEW_RATIO = 8
+FEW_RATIOS = (1.2, 8)  # the markets of family_taufew: 1.2 < n/k ≤ 8 (n/k = 8/7 left out)
 ZOOM_TOP = 0.85
+# Type-plane panels of the share figure: externality range narrowed by SHARE_E[0] of its width on the
+# left and widened by SHARE_E[1] on the right; valuation range widened by SHARE_V at the top.
+SHARE_E = (0.12, 0.02)
+SHARE_V = 0.12
 
 
 def zoom_limits(view, e_grid, columns):
@@ -69,18 +75,18 @@ def zoom_limits(view, e_grid, columns):
 
 
 def shown(data, view):
-    """τ(e) where it is inside the view, nan above it (excluded externalities included)."""
-    tau = np.asarray(data["tau_grid"], dtype=float)
+    """τ(e) where it is inside the view, nan above it (excluded externalities included), except
+    the top of the view next to an inside point, so lines reach the edge."""
     low, high = (float(x) for x in view["v_limits"])
-    return np.where(np.isfinite(tau) & (tau <= high), np.maximum(tau, low), np.nan)
+    return to_edge(data["tau_grid"], low, high)
 
 
 def background(view, path):
-    fig = figures.plt.figure(figsize=(3.0, 2.0), dpi=200)
+    fig = figures.plt.figure(figsize=(3.0, 2.0), dpi=300)
     ax = fig.add_axes([0, 0, 1, 1])
-    figures.draw_types(ax, view)
+    figures.draw_types(ax, padded(view))
     ax.set_axis_off()
-    fig.savefig(path, dpi=200, transparent=True)
+    fig.savefig(path, dpi=300, transparent=True)
     figures.plt.close(fig)
     return view
 
@@ -158,11 +164,7 @@ def main(out, folders):
     limits = []
     for name, _, view in panels:
         background(view, out / f"bg_{name}.png")
-        e_low, e_high = (float(x) for x in view["e_limits"])
-        v_low, v_high = (float(x) for x in view["v_limits"])
-        macro = MACROS[name]
-        limits.append(rf"\def\emin{macro}{{{e_low:.4f}}}\def\emax{macro}{{{e_high:.4f}}}"
-                      rf"\def\vmin{macro}{{{v_low:.5g}}}\def\vmax{macro}{{{v_high:.4f}}}")
+        limits.append(limit_macros(MACROS[name], view))
     (out / "family_limits.tex").write_text("\n".join(limits) + "\n")
 
     markets = sorted(set().union(*(set(runs.markets(f)) for f in families)))
@@ -204,18 +206,24 @@ def main(out, folders):
         markets = [tuple(int(x) for x in name[1:].split("k")) for name in names]
         # Solid (n = 32) first, dotted (n = 2) last; within one n, larger n/k first.
         order = sorted(markets, key=lambda m: (-m[0], -m[0] / m[1]))
-        for suffix, chosen in (("tau", order), ("taufew", [m for m in order if m[0] / m[1] <= FEW_RATIO])):
+        for suffix, chosen in (("tau", order), ("taufew", [m for m in order if FEW_RATIOS[0] < m[0] / m[1] <= FEW_RATIOS[1]])):
             commands = []
             for n, k in chosen:
                 color = RATIO_COLORS[min(RATIO_COLORS, key=lambda r: abs(r - n / k))]
                 commands.append(rf"\addplot[{color},{BIDDER_STYLES[n]},line width=1.2pt,forget plot,"
                                 rf"unbounded coords=jump] table[x=e,y=n{n}k{k}]{{\familydata/family_tau_{panel}.dat}};")
             (out / f"family_{suffix}_{panel}.tex").write_text("\n".join(commands) + "\n")
-        few = [c for c, m in zip(columns, markets) if m[0] / m[1] <= FEW_RATIO]
+        few = [c for c, m in zip(columns, markets) if FEW_RATIOS[0] < m[0] / m[1] <= FEW_RATIOS[1]]
         e_min, e_max, v_min, v_max = zoom_limits(view, np.asarray(e_grid, dtype=float), few)
         macro = MACROS[panel]
         zooms.append(rf"\def\eminZoom{macro}{{{e_min:.4f}}}\def\emaxZoom{macro}{{{e_max:.4f}}}"
                      rf"\def\vminZoom{macro}{{{v_min:.5g}}}\def\vmaxZoom{macro}{{{v_max:.4f}}}")
+        e_low, e_high = (float(x) for x in view["e_limits"])
+        v_low, v_high = (float(x) for x in view["v_limits"])
+        width, height = e_high - e_low, v_high - v_low
+        zooms.append(rf"\def\eminShare{macro}{{{e_low + SHARE_E[0] * width:.4f}}}"
+                     rf"\def\emaxShare{macro}{{{e_high + SHARE_E[1] * width:.4f}}}"
+                     rf"\def\vminShare{macro}{{{v_low:.5g}}}\def\vmaxShare{macro}{{{v_high + SHARE_V * height:.4f}}}")
     (out / "family_tau_limits.tex").write_text("\n".join(zooms) + "\n")
     print("families", families, "markets", len(markets))
 

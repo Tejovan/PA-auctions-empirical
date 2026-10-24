@@ -126,7 +126,7 @@ REFERENCE = {"color": "#52514e", "linewidth": 0.7, "linestyle": (0, (4, 2))}
 INK = "#0b0b0b"
 INK_SECONDARY = "#52514e"
 # Gray scale of type densities: Greys without its white and black ends.
-TYPE_CMAP = ListedColormap(plt.get_cmap("Greys")(np.linspace(0.15, 0.8, 256)), name="types")
+TYPE_CMAP = ListedColormap(plt.get_cmap("Greys")(np.linspace(0.15, 0.65, 256)), name="types")
 
 STYLE = {
     "font.family": ["Latin Modern Roman", "Latin Modern Math", "DejaVu Sans"], "mathtext.fontset": "cm",

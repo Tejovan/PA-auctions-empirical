@@ -22,8 +22,10 @@ figure of harmful-middle (types_hm) shows the whole support. Writes to OUT_DIR:
                           participating types only (drawn below the type density)
   mc_<family>.png         marginal contribution M(e, v) of VCG-PA at its optimized τ, n = 8, k = 1
                           (PuOr, symmetric logarithmic scale, dashed M = 0, edge of the type density)
-  tau_mc_<family>.dat     the optimized τ(e) drawn over mc_<family>.png
-  limits.tex              axis limits of every type-plane panel as macros
+  tau_mc_<family>.dat     the optimized τ(e) drawn over mc_<family>.png (view: MAP_VIEW_OPTIONS,
+                          else the panel view; macros \eminMap<Family> ...)
+  limits.tex              axis limits of every type-plane panel as macros, and the extent of
+                          its background image (padded by IMAGE_PAD; \eminImg<Family> ...)
 and everything family_figures_data.py writes (figures of shares and τ across distributions).
 """
 
@@ -118,6 +120,33 @@ def load_data(leaf):
 # shifted right by 10% of its width, so the density is nearer the center.
 VIEW_OPTIONS = {"independent": {"e_levels": (0.025, 0.975)},
                 "heavy-tail": {"e_levels": (0.025, 0.975), "v_top": 0.80, "e_shift": 0.10}}
+# Views of the marginal-contribution maps where they differ from VIEW_OPTIONS (heavy-tail: most of
+# the distribution).
+MAP_VIEW_OPTIONS = {"heavy-tail": {"e_levels": (0.005, 0.995), "v_top": 0.95}}
+# Background images extend beyond the view by IMAGE_PAD of its width and height on each side, so a
+# panel can widen its limits (\eminImg... macros give the image extent).
+IMAGE_PAD = 0.25
+
+
+def padded(view, pad=IMAGE_PAD):
+    out = dict(view)
+    for key in ("e_limits", "v_limits"):
+        low, high = (float(x) for x in view[key])
+        out[key] = np.array([low - pad * (high - low), high + pad * (high - low)])
+    return out
+
+
+def to_edge(values, low, high):
+    """Values inside [low, high] (below low raised to low); above high or not finite: nan,
+    except next to a value inside, where high, so a line reaches the top edge."""
+    values = np.asarray(values, dtype=float)
+    inside = np.isfinite(values) & (values <= high)
+    out = np.where(inside, np.maximum(values, low), np.nan)
+    edge = ~inside & (np.roll(inside, 1) | np.roll(inside, -1))
+    edge[0] &= inside[1] if len(values) > 1 else False
+    edge[-1] &= inside[-2] if len(values) > 1 else False
+    out[edge] = high
+    return out
 
 
 def _quantiles(axis, weights, levels):
@@ -155,11 +184,11 @@ def background(types, path, family=None, view=None):
     """The type density alone, filling the image, with the limits of its view (default: the
     zoomed view of the family)."""
     view = linear_view(types, family) if view is None else view
-    fig = figures.plt.figure(figsize=(3.0, 2.0), dpi=200)
+    fig = figures.plt.figure(figsize=(3.0, 2.0), dpi=300)
     ax = fig.add_axes([0, 0, 1, 1])
-    figures.draw_types(ax, view)
+    figures.draw_types(ax, padded(view))
     ax.set_axis_off()
-    fig.savefig(path, dpi=200, transparent=True)
+    fig.savefig(path, dpi=300, transparent=True)
     figures.plt.close(fig)
     return view
 
@@ -187,22 +216,28 @@ def marginal_background(data, view, path):
     return view
 
 
-def limit_macros(macro, view):
-    e_low, e_high = (float(x) for x in view["e_limits"])
-    v_low, v_high = (float(x) for x in view["v_limits"])
-    return (rf"\def\emin{macro}{{{e_low:.4f}}}\def\emax{macro}{{{e_high:.4f}}}"
-            rf"\def\vmin{macro}{{{v_low:.5g}}}\def\vmax{macro}{{{v_high:.4f}}}")
+def limit_macros(macro, view, image=True):
+    r"""Axis limits of a view (\emin<macro> ...) and, with image, the extent of its padded
+    background image (\eminImg<macro> ...)."""
+    text = ""
+    for prefix, limits in [("", view)] + ([("Img", padded(view))] if image else []):
+        e_low, e_high = (float(x) for x in limits["e_limits"])
+        v_low, v_high = (float(x) for x in limits["v_limits"])
+        text += (rf"\def\emin{prefix}{macro}{{{e_low:.4f}}}\def\emax{prefix}{macro}{{{e_high:.4f}}}"
+                 rf"\def\vmin{prefix}{macro}{{{v_low:.5g}}}\def\vmax{prefix}{macro}{{{v_high:.4f}}}")
+    return text
 
 
 def shown_threshold(data, view, clip_above=False):
     """τ(e) inside the view: nan where τ is above the top of the view or excluded (τ = v̄⁺),
-    so no line is drawn there; clip_above=True puts those values at the top instead (for
+    so no line is drawn there (next to an inside value: the top, so the line reaches the edge);
+    clip_above=True puts those values at the top instead (for
     filling the abstention region)."""
     tau = np.asarray(data["tau_grid"], dtype=float)
     low, high = (float(x) for x in view["v_limits"])
     if clip_above:
         return np.where(np.isfinite(tau), np.clip(tau, low, high), high)
-    return np.where(np.isfinite(tau) & (tau <= high), np.maximum(tau, low), np.nan)
+    return to_edge(tau, low, high)
 
 
 def write_table(run, out):
@@ -221,25 +256,18 @@ def write_table(run, out):
 
 
 def pooled_fill(data, view):
-    """pgfplots fill commands for the bands of bids pooled by an IVCG-PA design, only at the
-    participating types (v ≥ τ(e)), as in the IVCG-PA type-plane figure."""
-    tau = np.asarray(data["tau_grid"], dtype=float)
-    e_grid = np.asarray(data["e_grid"], dtype=float)
-    e_low, e_high = (float(x) for x in view["e_limits"])
-    inside = (e_grid >= e_low) & (e_grid <= e_high)
-    commands = []
-    for low, high in figures._visible_pooled_intervals(data, view):
-        bottom = np.where(np.isfinite(tau), np.clip(tau, low, high), high)[inside]
-        points = [(e, b) for e, b in zip(e_grid[inside], bottom)]
-        points = [(e_low, points[0][1])] + points + [(e_high, points[-1][1]), (e_high, high), (e_low, high)]
-        commands.append(r"\addplot[draw=none,fill=regionqty,forget plot] coordinates {"
-                        + " ".join(f"({e:.4f},{b:.5g})" for e, b in points) + "} -- cycle;")
-    return commands
+    """pgfplots fill commands for the bands of bids pooled by an IVCG-PA design, across the
+    width of the image."""
+    image = padded(view)
+    e_low, e_high = (float(x) for x in image["e_limits"])
+    return [rf"\fill[regionqty] (axis cs:{e_low:.4f},{low:.5g}) rectangle (axis cs:{e_high:.4f},{high:.5g});"
+            for low, high in figures._visible_pooled_intervals(data, view)]
 
 
 def write_shapes(run, family, view, out):
     """τ and penalty of the SHAPE_CURVES designs of one distribution, and pgfplots commands:
-    shapes_<family>.tex draws τ (solid) below the penalties (dashed); shapes_fill_<family>.tex
+    shapes_<family>.tex draws τ (solid, opacity 0.8) below the penalties (dashed, darker shade of
+    the same color); shapes_fill_<family>.tex
     the band of bids pooled by an IVCG-PA design, drawn below the type density."""
     from family_figures_data import RATIO_COLORS
     columns, names, fills, taus, penalties = [], [], [], [], []
@@ -249,12 +277,12 @@ def write_shapes(run, family, view, out):
         name = f"{objective}n{n}k{k}"
         tau = shown_threshold(data, view)
         penalty = np.asarray(data[f"penalty_{mechanism}"], dtype=float)
-        columns += [tau, np.where(np.isfinite(tau), penalty, np.nan)]
+        columns += [tau, to_edge(penalty, *(float(x) for x in view["v_limits"]))]
         names += [f"tau{name}", f"r{name}"]
         color = RATIO_COLORS[min(RATIO_COLORS, key=lambda r: abs(r - n / k))]
         source = rf"{{\familydata/shapes_{family}.dat}}"
-        taus.append(rf"\addplot[{color},line width=1.4pt,forget plot] table[x=e,y=tau{name}]{source};")
-        penalties.append(rf"\addplot[{color},line width=1.0pt,densely dashed,forget plot] table[x=e,y=r{name}]{source};")
+        taus.append(rf"\addplot[{color},line width=1.4pt,opacity=0.8,forget plot,unbounded coords=jump] table[x=e,y=tau{name}]{source};")
+        penalties.append(rf"\addplot[{color}!70!black,line width=1.1pt,densely dashed,forget plot,unbounded coords=jump] table[x=e,y=r{name}]{source};")
         if objective == "ivcgpa":
             fills += pooled_fill(data, view)
         e_grid = data["e_grid"]
@@ -299,8 +327,10 @@ def main(run, out):
         if family in MAP_FAMILIES:
             n, k = MAP_MARKET
             data = load_data(run / family / "z1" / f"n{n}-k{k}" / "vcgpa_nodes_br")
-            marginal_background(data, view, out / f"mc_{family}.png")
-            np.savetxt(out / f"tau_mc_{family}.dat", np.column_stack([data["e_grid"], shown_threshold(data, view)]),
+            map_view = zoomed_view(types, **MAP_VIEW_OPTIONS[family]) if family in MAP_VIEW_OPTIONS else view
+            limits.append(limit_macros("Map" + macro, map_view, image=False))
+            marginal_background(data, map_view, out / f"mc_{family}.png")
+            np.savetxt(out / f"tau_mc_{family}.dat", np.column_stack([data["e_grid"], shown_threshold(data, map_view)]),
                        header="e tau", comments="", fmt="%.5g")
         if family == MAIN_FAMILY:
             columns, names = [], []
