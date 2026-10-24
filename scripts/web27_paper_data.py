@@ -17,8 +17,8 @@ figure of harmful-middle (types_hm) shows the whole support. Writes to OUT_DIR:
   bg_types_hm.png         its background (whole support; macros \eminTypes ... in limits.tex)
   shapes_<family>.dat/.tex      τ(e) and penalty r(e) of VCG-PA in the SHAPE_MARKETS and of IVCG-PA
                           in SHAPE_PAIR, and pgfplots commands drawing them (color = n/k as in
-                          family_tau_*.tex; VCG-PA τ solid, r dashed; IVCG-PA τ dotted, r
-                          dash-dotted)
+                          family_tau_*.tex; VCG-PA τ solid, r dashed; IVCG-PA τ dotted with
+                          diamonds, r dash-dotted with circles)
   shapes_fill_<family>.tex      the band of bids pooled by IVCG-PA there, at the
                           participating types only (drawn below the type density)
   mc_<family>.png         marginal contribution M(e, v) of VCG-PA at its optimized τ, n = 8, k = 1
@@ -268,17 +268,45 @@ def pooled_fill(data, view):
             for low, high in figures._visible_pooled_intervals(data, view)]
 
 
+MARK_PANEL = (3.6, 1.9)  # panel width and height (cm) of the τ-and-penalty figure
+MARK_STEP = 0.32         # distance (cm) between marks along a curve
+
+
+def mark_points(e, values, view, phase=0.0):
+    """Points at equal distances MARK_STEP along a curve as drawn in a MARK_PANEL panel of the
+    view (inside the view only), starting phase·MARK_STEP from its first visible point."""
+    e, values = np.asarray(e, dtype=float), np.asarray(values, dtype=float)
+    e_low, e_high = (float(x) for x in view["e_limits"])
+    v_low, v_high = (float(x) for x in view["v_limits"])
+    inside = (e >= e_low) & (e <= e_high) & (values >= v_low) & (values <= v_high)
+    x = (e - e_low) / (e_high - e_low) * MARK_PANEL[0]
+    y = (values - v_low) / (v_high - v_low) * MARK_PANEL[1]
+    chosen, travelled, target = [], 0.0, phase * MARK_STEP
+    for i in range(len(e)):
+        if i > 0 and inside[i] and inside[i - 1]:
+            travelled += float(np.hypot(x[i] - x[i - 1], y[i] - y[i - 1]))
+        if inside[i] and travelled >= target:
+            chosen.append(i)
+            target = travelled + MARK_STEP
+    return e[chosen], values[chosen]
+
+
 def write_shapes(run, family, view, out):
     """τ and penalty of the SHAPE_MARKETS of one distribution (VCG-PA; also IVCG-PA at
     SHAPE_PAIR), and pgfplots commands: shapes_<family>.tex draws VCG-PA τ (solid) first, then
-    VCG-PA r (dashed), IVCG-PA r (dash-dotted) and IVCG-PA τ (dotted); shapes_fill_<family>.tex
+    VCG-PA r (dashed), IVCG-PA r (thin dash-dotted, hollow circles) and IVCG-PA τ (thin dotted,
+    hollow diamonds; marks evenly spaced along the drawn curve, shapes_marks_<family>.dat), so
+    IVCG-PA stays visible where it coincides with VCG-PA; shapes_fill_<family>.tex
     the bands of bids pooled by IVCG-PA, drawn below the type density."""
     from family_figures_data import RATIO_COLORS
     low, vbar = float(view["v_limits"][0]), float(view["maximum_valuation"])
     columns, names, fills, e_grid = [], [], [], None
     layers = {"tau-vcgpa": [], "r-vcgpa": [], "r-ivcgpa": [], "tau-ivcgpa": []}
     styles = {"tau-vcgpa": "line width=1.4pt", "r-vcgpa": "line width=1.1pt,densely dashed",
-              "r-ivcgpa": "line width=1.1pt,dashdotted", "tau-ivcgpa": "line width=1.6pt,densely dotted"}
+              "r-ivcgpa": "line width=0.6pt,dashdotted", "tau-ivcgpa": "line width=0.6pt,densely dotted"}
+    mark_styles = {"r": "only marks,mark=*,mark size=1.6pt,mark options={fill=white,line width=0.7pt}",
+                   "tau": "only marks,mark=diamond*,mark size=2.4pt,mark options={fill=white,line width=0.8pt}"}
+    marks, mark_names = [], []
     for n, k in SHAPE_MARKETS:
         color = RATIO_COLORS[min(RATIO_COLORS, key=lambda r: abs(r - n / k))]
         for objective in ["vcgpa"] + (["ivcgpa"] if (n, k) == SHAPE_PAIR[family] else []):
@@ -292,11 +320,23 @@ def write_shapes(run, family, view, out):
                 shade = color if kind == "tau" else f"{color}!70!black"
                 layers[f"{kind}-{objective}"].append(
                     rf"\addplot[{shade},{styles[f'{kind}-{objective}']},forget plot] table[x=e,y={column}]{source};")
+                if objective == "ivcgpa":
+                    values = columns[-2] if kind == "tau" else columns[-1]
+                    marks += list(mark_points(data["e_grid"], values, view, phase=0.0 if kind == "tau" else 0.5))
+                    mark_names += [f"e{column}", column]
+                    layers[f"{kind}-{objective}"].append(
+                        rf"\addplot[{shade},{mark_styles[kind]},forget plot] table[x=e{column},y={column}]"
+                        rf"{{\familydata/shapes_marks_{family}.dat}};")
             if objective == "ivcgpa":
                 fills += pooled_fill(data, view)
             e_grid = data["e_grid"]
     np.savetxt(out / f"shapes_{family}.dat", np.column_stack([e_grid] + columns),
                header="e " + " ".join(names), comments="", fmt="%.5g")
+    length = max([len(m) for m in marks] + [1])
+    padded_marks = [np.concatenate([m, np.full(length - len(m), np.nan)]) for m in marks]
+    if padded_marks:
+        np.savetxt(out / f"shapes_marks_{family}.dat", np.column_stack(padded_marks),
+                   header=" ".join(mark_names), comments="", fmt="%.5g")
     (out / f"shapes_{family}.tex").write_text("\n".join(sum(layers.values(), [])) + "\n")
     (out / f"shapes_fill_{family}.tex").write_text("\n".join(fills) + "\n")
 
