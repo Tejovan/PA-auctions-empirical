@@ -1,6 +1,6 @@
 """
 Tests of the distribution families, kernel smoothing, the empirical pipeline and
-the exact-objective genetic search. Run from WEB27/code with
+the exact-objective genetic search. Run from the repository root with
 
     .venv/bin/python -m pytest tests -q
 """

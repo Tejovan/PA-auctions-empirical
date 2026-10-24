@@ -52,7 +52,7 @@ Experiments with figures: `python run.py configs/standard_test.toml` (top-level 
 | `experiments/compute.py` | One combination: τ (searched or given), exact outcomes, simulation, bootstrap, diagnostics, checks; writes `tau.json`, `tau.csv`, `results.json`, `first-order.csv`, `data.npz`. |
 | `experiments/runner.py` | A run: plan, time estimate, parallel computation, `run.toml`, `summary.csv`, `checks.csv`, `runs/index.csv`. |
 | `experiments/report.py` | Figures and README of a run from its saved files (`python run.py --report`). |
-| `experiments/provenance.py` | Git version, software versions, host (local or BU SCC), data hashes; TOML writer. |
+| `experiments/provenance.py` | Git version, software versions, host (local or cluster), data hashes; TOML writer. |
 
 ## Type distributions
 
@@ -186,7 +186,7 @@ It stops when no step raises W, when two consecutive relative gains are below `r
 
 **Speed and accuracy** (151 × 150 grid, n = 8, k = 2): `nodes` converges in 0.1–1.1 s (VCG-PA and IVCG-PA, two starts), with interior marginal contribution below 3·10⁻⁵ and best-response gap below 10⁻¹¹; `knots6` in 1–3 s, reaching the Nelder–Mead optimum of the same form to 10⁻¹¹; Example N's optimum t* = 4c/3 exactly in every form. On the Community Notes data (241 nodes, ζ = 5, n = 8, k = 1) `nodes` takes 0.2 s.
 
-**Parallel stages.** `optimize_threshold(..., workers=W)`: the genetic restarts run simultaneously (each with the workers left over for its Nelder–Mead starts), then the best-response starts; `bootstrap_welfare(..., workers=W)` splits the resamples into contiguous chunks. Results equal the serial ones (test `test_inner_parallelism_matches_serial`). In a run, `runner` uses one process per combination and gives each combination workers // (number of combinations) for these stages, so a run with few, large combinations (on the SCC: one combination, 16–28 slots) still uses every core. Process start-up costs about 1 s per parallel stage.
+**Parallel stages.** `optimize_threshold(..., workers=W)`: the genetic restarts run simultaneously (each with the workers left over for its Nelder–Mead starts), then the best-response starts; `bootstrap_welfare(..., workers=W)` splits the resamples into contiguous chunks. Results equal the serial ones (test `test_inner_parallelism_matches_serial`). In a run, `runner` uses one process per combination and gives each combination workers // (number of combinations) for these stages, so a run with few, large combinations (e.g. one combination on a cluster node with 16–28 slots) still uses every core. Process start-up costs about 1 s per parallel stage.
 
 **Time limit and stop reasons.** `optimize_threshold(..., time_limit=seconds)` (configuration `time_limit_minutes`, default 60 per combination) sets one deadline for the whole search: the genetic stage stops after its current generation, Nelder–Mead and L-BFGS-B after their current iteration, the ascent before its next iteration; later restarts and starts are skipped; the best τ so far is returned. Every stage records `stop_reason`: genetic `stalled`, `max_generations`, `time_limit`; Nelder–Mead `converged`, `max_evaluations`, `time_limit`; ascent `no_improving_step`, `small_gain`, `max_iterations`, `time_limit` (`skipped (time limit)` for starts not begun).
 

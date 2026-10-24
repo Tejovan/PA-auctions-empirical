@@ -1,6 +1,6 @@
 # Audited auctions: computation, optimization and experiments
 
-Code for the WEB27 paper on auctions with participant audits (`WEB27/arxiv_WEB/` of the paper repository). The model has n bidders, k identical goods, and bidder types (e, v), where e is the externality and v the valuation.
+Code for the paper on auctions with participant audits. The model has n bidders, k identical goods, and bidder types (e, v), where e is the externality and v the valuation.
 
 For a type distribution and a participation threshold function τ(e) common to all bidders, the package computes exactly:
 
@@ -12,7 +12,8 @@ It also simulates per-auction outcomes, computes bootstrap intervals for empiric
 Further documentation:
 
 - methods and modules: [PA_auctions/README.md](PA_auctions/README.md);
-- methodology and output formats: the supplement `WEB27/drafting/code_supplement/` of the paper repository.
+- implementation, running experiments and outputs: the code supplement [supplement/code_supplement_v5.tex](supplement/code_supplement_v5.tex);
+- methods and additional results: the empirical supplement of the paper.
 
 **Contents**
 
@@ -327,7 +328,7 @@ Each run writes `runs/<YYYY-MM-DD_HHMM>_<kind>_<name>/` (not tracked by git):
 runs/2026-10-19_1400_optimize_standard-test/
   README.md                index: inputs, check verdicts, results table, links to every figure
   config.toml              the configuration as given
-  run.toml                 resolved configuration, git commit + dirty flag, versions, host (local / SCC + job id),
+  run.toml                 resolved configuration, git commit + dirty flag, versions, host (local / cluster + job id),
                            seeds, data SHA-256, start/end times, runtime per stage
   code.patch               uncommitted changes of tracked code (only when the tree was dirty)
   log.txt                  progress messages
@@ -550,7 +551,7 @@ The continuous version differs from the grid by an error of the same order as th
 
 ### The tweet data set (`tweets` = `data/samples/g_full_tweets.csv`)
 
-The set has 11,811 tweets created between 2022-12-16 and 2025-01-18, each with at least one Community Notes note. Engagement counts are as of 2025-02-02. It was built by [create_distribution.ipynb](create_distribution.ipynb) from the Twitter/X API ([get_tweets.ipynb](get_tweets.ipynb)) and the public Community Notes data. `full_tweets.csv` in the top folder is the same file.
+The set has 11,811 tweets created between 2022-12-16 and 2025-01-18, each with at least one Community Notes note. Engagement counts are as of 2025-02-02. It was built by [scripts/create_distribution.ipynb](scripts/create_distribution.ipynb) from the Twitter/X API ([scripts/get_tweets.ipynb](scripts/get_tweets.ipynb)) and the public Community Notes data.
 
 **Construction (from the notebook):**
 

@@ -1,5 +1,5 @@
 """
-Tests for the PA_auctions package. Run from WEB27/code with
+Tests for the PA_auctions package. Run from the repository root with
 
     .venv/bin/python -m pytest tests -q
 

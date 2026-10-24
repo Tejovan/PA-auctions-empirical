@@ -60,7 +60,7 @@ Module & Implements \\
 \label{tab:modules}
 \end{table}
 
-\code{run.py} is the command-line entry point; \code{scripts/} holds the data scripts of the main paper and the empirical supplement, the notebooks that fetched and built the tweet data, descriptive statistics and the exploration of the raw Community Notes data, the previews of the synthetic families, and the accessibility check of figure colors; \code{scc/} holds the cluster scripts; \code{tests/} the test suite (\code{pytest}, 80 tests).
+\code{run.py} is the command-line entry point; \code{scripts/} holds the data scripts of the main paper and the empirical supplement, the notebooks that fetched and built the tweet data, descriptive statistics and the exploration of the raw Community Notes data, the previews of the synthetic families, and the accessibility check of figure colors; \code{scc/} holds the cluster scripts; \code{tests/} the test suite (\code{pytest}, 84 tests).
 
 \section{Running Experiments}\label{sec:running}
 
@@ -97,7 +97,7 @@ Command & Does \\
     \item The resolved configuration, with every default explicit.
     \item The random seeds: train/test split, search, simulation, bootstrap.
     \item The git commit, and whether tracked files had uncommitted changes. If they had, their diff is saved as \code{code.patch}.
-    \item Package versions; the host (local machine, or the BU SCC cluster with its job id); the SHA-256 hash of each data file.
+    \item Package versions; the host (local machine, or a batch cluster with its job id); the SHA-256 hash of each data file.
     \item Start and end times, and the runtime of each stage.
 \end{itemize}
 Rerunning the saved \code{config.toml} at the recorded commit reproduces the run. Figures are drawn only from saved files, so \code{python run.py -{}-report RUN\_FOLDER} redraws them without recomputation.
@@ -108,10 +108,10 @@ Rerunning the saved \code{config.toml} at the recorded commit reproduces the run
     \item \code{configs/standard\_test.toml}: every feature, about three minutes. It has two distributions: \code{harmful\_middle}, and the tweet data at $\zeta\in\{5,50\}$. It runs $n\in\{4,8\}$, $k\in\{1,2\}$, both objectives, and three optimizers: genetic search on \code{poly1}, \code{knots4} and \code{cutoff}, best-response ascent on \code{knots4}, and the relaxation on \code{nodes}, with short searches on coarse grids: 120 combinations.
 \end{itemize}
 
-\paragraph{Experiments of the main paper.} The main paper and the empirical supplement use two runs, \code{configs/synthetic\_run.toml} and \code{configs/shapes\_run.toml}. With their run folders \code{SYN} and \code{SHP},
+\paragraph{Experiments of the main paper.} The main paper and the empirical supplement use one run, \code{configs/paper\_run.toml} (716 combinations). With its run folder \code{RUN},
 \begin{center}
-\code{python scripts/web27\_paper\_data.py SYN SHP OUT}\\
-\code{python scripts/empirical\_supplement\_data.py SYN SHP OUT}
+\code{python scripts/web27\_paper\_data.py RUN OUT}\\
+\code{python scripts/empirical\_supplement\_data.py RUN OUT}
 \end{center}
 write the tables, curves, type backgrounds and copied figures from which the two documents draw their figures in \LaTeX.
 

@@ -1,6 +1,6 @@
 """
 Tests of the threshold forms, the marginal contribution, best-response ascent and the
-gradient polish. Run from WEB27/code with
+gradient polish. Run from the repository root with
 
     .venv/bin/python -m pytest tests -q
 """

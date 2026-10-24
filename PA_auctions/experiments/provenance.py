@@ -3,7 +3,7 @@ provenance.py
 
 What is needed to reproduce a run and to know where it ran: code version
 (git commit, branch, uncommitted changes), package versions, host (local
-machine or the BU SCC cluster, with the batch job id), input data hashes, and
+machine or a batch cluster, with the job id), input data hashes, and
 a small TOML writer for the human-readable run record (run.toml).
 """
 
@@ -45,9 +45,9 @@ def uncommitted_diff():
 def host_information(workers):
     """Machine, operating system, where the run ran, and the batch job if any."""
     hostname = platform.node()
-    on_scc = "SGE_O_HOST" in os.environ or hostname.startswith("scc")
+    on_cluster = "SGE_O_HOST" in os.environ
     return {"hostname": hostname, "platform": platform.platform(),
-            "where": "BU SCC" if on_scc else "local",
+            "where": "cluster" if on_cluster else "local",
             "job_id": os.environ.get("JOB_ID"), "task_id": os.environ.get("SGE_TASK_ID"),
             "slots": os.environ.get("NSLOTS"), "cpu_count": os.cpu_count(),
             "workers": workers}
