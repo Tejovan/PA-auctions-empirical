@@ -23,7 +23,7 @@ figure of harmful-middle (types_hm) shows the whole support. Writes to OUT_DIR:
   mc_<family>.png         marginal contribution M(e, v) of VCG-PA at its optimized τ, n = 8, k = 1
                           (PuOr, symmetric logarithmic scale, dashed M = 0, edge of the type density)
   tau_mc_<family>.dat     the optimized τ(e) drawn over mc_<family>.png (view: MAP_VIEW_OPTIONS,
-                          else the panel view; macros \eminMap<Family> ...)
+                          else the panel view, widened by MAP_ZOOM_OUT; macros \eminMap<Family> ...)
   limits.tex              axis limits of every type-plane panel as macros, and the extent of
                           its background image (padded by IMAGE_PAD; \eminImg<Family> ...)
 and everything family_figures_data.py writes (figures of shares and τ across distributions).
@@ -123,6 +123,17 @@ VIEW_OPTIONS = {"independent": {"e_levels": (0.025, 0.975)},
 # Views of the marginal-contribution maps where they differ from VIEW_OPTIONS (heavy-tail: most of
 # the distribution).
 MAP_VIEW_OPTIONS = {"heavy-tail": {"e_levels": (0.005, 0.995), "v_top": 0.95}}
+# Map views are widened by MAP_ZOOM_OUT of their width on each side and of their height at the top.
+MAP_ZOOM_OUT = 0.08
+
+
+def map_view(types, family):
+    view = zoomed_view(types, **MAP_VIEW_OPTIONS.get(family, VIEW_OPTIONS.get(family, {})))
+    e_low, e_high = (float(x) for x in view["e_limits"])
+    v_low, v_high = (float(x) for x in view["v_limits"])
+    view["e_limits"] = np.array([e_low - MAP_ZOOM_OUT * (e_high - e_low), e_high + MAP_ZOOM_OUT * (e_high - e_low)])
+    view["v_limits"] = np.array([v_low, v_high + MAP_ZOOM_OUT * (v_high - v_low)])
+    return view
 # Background images extend beyond the view by IMAGE_PAD of its width and height on each side, so a
 # panel can widen its limits (\eminImg... macros give the image extent).
 IMAGE_PAD = 0.25
@@ -327,10 +338,10 @@ def main(run, out):
         if family in MAP_FAMILIES:
             n, k = MAP_MARKET
             data = load_data(run / family / "z1" / f"n{n}-k{k}" / "vcgpa_nodes_br")
-            map_view = zoomed_view(types, **MAP_VIEW_OPTIONS[family]) if family in MAP_VIEW_OPTIONS else view
-            limits.append(limit_macros("Map" + macro, map_view, image=False))
-            marginal_background(data, map_view, out / f"mc_{family}.png")
-            np.savetxt(out / f"tau_mc_{family}.dat", np.column_stack([data["e_grid"], shown_threshold(data, map_view)]),
+            mview = map_view(types, family)
+            limits.append(limit_macros("Map" + macro, mview, image=False))
+            marginal_background(data, mview, out / f"mc_{family}.png")
+            np.savetxt(out / f"tau_mc_{family}.dat", np.column_stack([data["e_grid"], shown_threshold(data, mview)]),
                        header="e tau", comments="", fmt="%.5g")
         if family == MAIN_FAMILY:
             columns, names = [], []
