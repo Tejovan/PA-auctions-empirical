@@ -8,17 +8,15 @@
 
 Each value is taken from the first run that has it (so a run with the synthetic markets can
 come before a run with more families). Type-plane panels are zoomed to the type distribution
-(externality quantiles 0.5% and 99.5%, valuation quantiles 0.5% and 99%; 98% for heavy-tail)
-on a linear valuation axis. Comparison panels: heavy-tail-log (logarithmic, valuation quantiles
-0.5% and 99.5%), heavy-tail-q80 and heavy-tail-q75 (linear up to the 80% and 75% valuation
-quantiles), independent-zoom (externality quantiles 2.5% and 97.5%). Writes to OUT_DIR:
+on a linear valuation axis (web27_paper_data.zoomed_view: externality quantiles 0.5% and 99.5%,
+valuation quantiles 0.5% and 99%; VIEW_OPTIONS for independent and heavy-tail). Writes to OUT_DIR:
   family_share_n<n>k<k>.dat        x (distribution index), family, tau0 cutoff affine relaxtau
                                    vcgpa ivcgpa ivcgaffine bound (share of the first-best gain,
                                    %, nan where a run lacks the design)
-  family_forms_n<n>k<k>_<panel>.dat    e tau0 cutoff affine nodes (VCG-PA τ of each form)
-  family_tau_<panel>.dat           e and one column n<n>k<k> per market with k < n
-  family_tau_<panel>.tex           pgfplots commands drawing those τ (color n/k, style n)
-  bg_<panel>.png, family_limits.tex    type background and axis limits of each panel
+  family_forms_n<n>k<k>_<family>.dat    e tau0 cutoff affine nodes (VCG-PA τ of each form)
+  family_tau_<family>.dat           e and one column n<n>k<k> per market with k < n
+  family_tau_<family>.tex           pgfplots commands drawing those τ (color n/k, style n)
+  bg_<family>.png, family_limits.tex    type background and axis limits of each panel
 """
 
 import sys
@@ -31,14 +29,12 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from PA_auctions import figures  # noqa: E402
-from web27_paper_data import label, load_data, load_types  # noqa: E402
+from web27_paper_data import VIEW_OPTIONS, label, load_data, load_types, zoomed_view  # noqa: E402
 
 FAMILY_ORDER = ["independent", "harmful-middle", "heavy-tail", "harm-rises", "two-modes"]
 MACROS = {"independent": "Independent", "harmful-middle": "HarmfulMiddle",
           "heavy-tail": "HeavyTail", "harm-rises": "HarmRises", "two-modes": "TwoModes",
-          "heavy-tail-log": "HeavyTailLog", "heavy-tail-q80": "HeavyTailQEighty",
-          "heavy-tail-q75": "HeavyTailQSeventyFive", "independent-zoom": "IndependentZoom"}
-E_LEVELS, V_LEVELS, V_TOP_HEAVY, V_LEVELS_LOG = (0.005, 0.995), (0.005, 0.99), 0.98, (0.005, 0.995)
+}
 SHARE_KEYS = {"tau0": ("zero-welfare", "share_vcg_pa"), "cutoff": ("vcg_pa_cutoff", "share_vcg_pa"),
               "affine": ("vcg_pa_poly1", "share_vcg_pa"), "relaxtau": ("relaxation", "share_vcg_pa"),
               "vcgpa": ("vcg_pa_nodes", "share_vcg_pa"), "ivcgpa": ("ivcg_pa_nodes", "share_ivcg_pa"),
@@ -57,32 +53,6 @@ def shown(data, view):
     tau = np.asarray(data["tau_grid"], dtype=float)
     low, high = (float(x) for x in view["v_limits"])
     return np.where(np.isfinite(tau) & (tau <= high), np.maximum(tau, low), np.nan)
-
-
-def _quantiles(axis, weights, levels):
-    cumulative = np.cumsum(weights) / weights.sum()
-    return [float(np.interp(level, cumulative, axis)) for level in levels]
-
-
-def zoomed_view(types, scale="linear", e_levels=E_LEVELS, v_top=None):
-    """The view of a type-plane panel, zoomed to quantiles of the marginal distributions of e and
-    v (from the background density, valuations × externalities), with a 3% margin; v_top
-    overrides the upper valuation quantile of a linear view."""
-    view = figures.type_view(types, scale)
-    density = np.asarray(types["background_density"], dtype=float)
-    e_low, e_high = _quantiles(np.asarray(types["background_e"]), density.sum(axis=0), e_levels)
-    heavy = figures.default_view(types)["scale"] == "log"
-    top = v_top or (V_TOP_HEAVY if heavy else V_LEVELS[1])
-    levels = V_LEVELS_LOG if scale == "log" else (V_LEVELS[0], top)
-    v_low, v_high = _quantiles(np.asarray(types["background_v"]), density.sum(axis=1), levels)
-    e_margin = 0.03 * (e_high - e_low)
-    view["e_limits"] = np.array([e_low - e_margin, e_high + e_margin])
-    if scale == "log":
-        view["v_limits"] = np.array([max(v_low, 1e-3), v_high * 1.05])
-    else:
-        v_margin = 0.03 * (v_high - v_low)
-        view["v_limits"] = np.array([v_low - v_margin, v_high + v_margin])
-    return view
 
 
 def background(view, path):
@@ -164,15 +134,8 @@ def main(out, folders):
     runs = Runs(folders)
     families = runs.families()[:4]
     # panels: (name, family, view); heavy-tail also in a logarithmic version
-    panels = [(family, family, zoomed_view(runs.types(family))) for family in families]
-    if "heavy-tail" in families:
-        heavy = runs.types("heavy-tail")
-        panels += [("heavy-tail-log", "heavy-tail", zoomed_view(heavy, "log")),
-                   ("heavy-tail-q80", "heavy-tail", zoomed_view(heavy, v_top=0.80)),
-                   ("heavy-tail-q75", "heavy-tail", zoomed_view(heavy, v_top=0.75))]
-    if "independent" in families:  # externality quantiles 2.5% and 97.5%
-        panels.append(("independent-zoom", "independent",
-                       zoomed_view(runs.types("independent"), e_levels=(0.025, 0.975))))
+    panels = [(family, family, zoomed_view(runs.types(family), **VIEW_OPTIONS.get(family, {})))
+              for family in families]
     limits = []
     for name, _, view in panels:
         background(view, out / f"bg_{name}.png")

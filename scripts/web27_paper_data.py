@@ -104,14 +104,47 @@ def load_data(leaf):
         return {key: data[key] for key in data.files}
 
 
-def linear_view(types):
-    """The view of every type-plane panel: linear valuation axis (also for heavy-tail)."""
+# Views of the type plane chosen per distribution (zoomed_view options): independent zoomed to
+# the 2.5%–97.5% externality quantiles; heavy-tail also cut at the 80% valuation quantile.
+VIEW_OPTIONS = {"independent": {"e_levels": (0.025, 0.975)},
+                "heavy-tail": {"e_levels": (0.025, 0.975), "v_top": 0.80}}
+
+
+def _quantiles(axis, weights, levels):
+    cumulative = np.cumsum(weights) / weights.sum()
+    return [float(np.interp(level, cumulative, axis)) for level in levels]
+
+
+def zoomed_view(types, scale="linear", e_levels=(0.005, 0.995), v_top=None):
+    """The view of a type-plane panel, zoomed to quantiles of the marginal distributions of e and
+    v (from the background density, valuations × externalities), with a 3% margin; v_top
+    overrides the upper valuation quantile of a linear view."""
+    view = figures.type_view(types, scale)
+    density = np.asarray(types["background_density"], dtype=float)
+    e_low, e_high = _quantiles(np.asarray(types["background_e"]), density.sum(axis=0), e_levels)
+    levels = (0.005, 0.995) if scale == "log" else (0.005, v_top or 0.99)
+    v_low, v_high = _quantiles(np.asarray(types["background_v"]), density.sum(axis=1), levels)
+    e_margin = 0.03 * (e_high - e_low)
+    view["e_limits"] = np.array([e_low - e_margin, e_high + e_margin])
+    if scale == "log":
+        view["v_limits"] = np.array([max(v_low, 1e-3), v_high * 1.05])
+    else:
+        v_margin = 0.03 * (v_high - v_low)
+        view["v_limits"] = np.array([v_low - v_margin, v_high + v_margin])
+    return view
+
+
+def linear_view(types, family=None):
+    """The view of a type-plane panel: linear valuation axis over the whole support, or the
+    zoomed view of VIEW_OPTIONS for that family."""
+    if family in VIEW_OPTIONS:
+        return zoomed_view(types, **VIEW_OPTIONS[family])
     return figures.type_view(types, "linear")
 
 
-def background(types, path):
+def background(types, path, family=None):
     """The type density alone, filling the image, with the limits of its view."""
-    view = linear_view(types)
+    view = linear_view(types, family)
     fig = figures.plt.figure(figsize=(3.0, 2.0), dpi=200)
     ax = fig.add_axes([0, 0, 1, 1])
     figures.draw_types(ax, view)
@@ -145,11 +178,15 @@ def marginal_background(data, types, path):
     return view
 
 
-def shown_threshold(data, view):
-    """τ(e) clipped to the view; excluded externalities (τ = v̄⁺) at the top of the view."""
+def shown_threshold(data, view, clip_above=False):
+    """τ(e) inside the view: nan where τ is above the top of the view or excluded (τ = v̄⁺),
+    so no line is drawn there; clip_above=True puts those values at the top instead (for
+    filling the abstention region)."""
     tau = np.asarray(data["tau_grid"], dtype=float)
     low, high = (float(x) for x in view["v_limits"])
-    return np.where(np.isfinite(tau), np.clip(tau, low, high), high)
+    if clip_above:
+        return np.where(np.isfinite(tau), np.clip(tau, low, high), high)
+    return np.where(np.isfinite(tau) & (tau <= high), np.maximum(tau, low), np.nan)
 
 
 def main(synthetic, shapes, out):
@@ -191,7 +228,7 @@ def main(synthetic, shapes, out):
 
     for family, macro in FAMILIES.items():
         types = load_types(shapes, family)
-        view = background(types, out / f"bg_{family}.png")
+        view = background(types, out / f"bg_{family}.png", family)
         e_low, e_high = (float(x) for x in view["e_limits"])
         v_low, v_high = (float(x) for x in view["v_limits"])
         limits.append(rf"\def\emin{macro}{{{e_low:.4f}}}\def\emax{macro}{{{e_high:.4f}}}"
@@ -209,7 +246,7 @@ def main(synthetic, shapes, out):
     leaf = synthetic / "harmful-middle" / "z1" / "n4-k1" / "ivcgpa_nodes_br"
     data, types = load_data(leaf), load_types(synthetic, "harmful-middle")
     view = linear_view(types)
-    tau_fill = shown_threshold(data, view)
+    tau_fill = shown_threshold(data, view, clip_above=True)
     raw = np.asarray(data["tau_grid"], dtype=float)
     tau = np.where(np.isfinite(raw) & (raw <= float(view["v_limits"][1])), tau_fill, np.nan)
     penalty = np.minimum(np.asarray(data["penalty_ivcg_pa"], dtype=float), float(view["v_limits"][1]))

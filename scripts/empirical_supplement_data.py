@@ -162,7 +162,7 @@ def curves(synthetic, shapes):
     for run, families in ((synthetic, ["harmful-middle"]), (shapes, list(FAMILIES))):
         for family in families:
             types = load_types(run, family)
-            view = background(types, DATA / f"bg_{family}.png")
+            view = background(types, DATA / f"bg_{family}.png", family)
             macro = FAMILIES[family]
             e_low, e_high = (float(x) for x in view["e_limits"])
             v_low, v_high = (float(x) for x in view["v_limits"])
