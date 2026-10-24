@@ -15,10 +15,11 @@ figure of harmful-middle (types_hm) shows the whole support. Writes to OUT_DIR:
   types_hm.dat            τ(e) and IVCG-PA penalty r(e), harmful-middle, n = 4, k = 1, IVCG-PA
   pooled_hm.tex           bands of the bids pooled by IVCG-PA there (pgfplots fill commands)
   bg_types_hm.png         its background (whole support; macros \eminTypes ... in limits.tex)
-  shapes_<family>.dat/.tex      τ(e) and penalty r(e) of the SHAPE_CURVES designs and pgfplots
-                          commands drawing them (color = n/k as in family_tau_*.tex; τ solid
-                          below r dashed)
-  shapes_fill_<family>.tex      the band of bids pooled by an IVCG-PA design there, at the
+  shapes_<family>.dat/.tex      τ(e) and penalty r(e) of VCG-PA in the SHAPE_MARKETS and of IVCG-PA
+                          in SHAPE_PAIR, and pgfplots commands drawing them (color = n/k as in
+                          family_tau_*.tex; VCG-PA τ solid, r dashed; IVCG-PA τ dotted, r
+                          dash-dotted)
+  shapes_fill_<family>.tex      the band of bids pooled by IVCG-PA there, at the
                           participating types only (drawn below the type density)
   mc_<family>.png         marginal contribution M(e, v) of VCG-PA at its optimized τ, n = 8, k = 1
                           (PuOr, symmetric logarithmic scale, dashed M = 0, edge of the type density)
@@ -46,12 +47,11 @@ MAP_MARKET = (8, 1)
 MAP_FAMILIES = ["harmful-middle", "heavy-tail", "harm-rises", "independent"]
 TABLE_MARKETS = [(2, 1), (8, 1), (32, 1), (8, 2), (16, 4), (32, 8), (4, 3), (16, 14)]
 SHAPE_BIDDERS = [2, 4, 8, 16, 32]
-# Designs of the τ-and-penalty figure per distribution: (objective, n, k); an IVCG-PA design
-# also gets the band of valuations it pools. Colors by n/k as in family_figures_data.
-SHAPE_CURVES = {"independent": [("vcgpa", 8, 7), ("vcgpa", 2, 1), ("vcgpa", 32, 1)],
-                "harmful-middle": [("vcgpa", 8, 7), ("vcgpa", 2, 1), ("ivcgpa", 32, 1)],
-                "heavy-tail": [("vcgpa", 4, 3), ("vcgpa", 16, 4), ("vcgpa", 32, 1)],
-                "harm-rises": [("vcgpa", 16, 14), ("vcgpa", 8, 2), ("vcgpa", 32, 1)]}
+# Markets of the τ-and-penalty figure (n/k = 2, 8, 32: well separated colors, as in
+# family_figures_data), with VCG-PA in each and also IVCG-PA in one per distribution (with the band
+# of bids it pools): where the two differ most (harmful-middle) and where they coincide (others).
+SHAPE_MARKETS = [(2, 1), (16, 2), (32, 1)]
+SHAPE_PAIR = {"independent": (32, 1), "harmful-middle": (2, 1), "heavy-tail": (2, 1), "harm-rises": (16, 2)}
 TABLE_HEADER = r"""\begin{tabular}{@{}lrrrrrrrrrr@{}}
 \toprule
  & & & \multicolumn{6}{c}{VCG-PA with $\tau$} & IVCG-PA & part.\\
@@ -269,30 +269,35 @@ def pooled_fill(data, view):
 
 
 def write_shapes(run, family, view, out):
-    """τ and penalty of the SHAPE_CURVES designs of one distribution, and pgfplots commands:
-    shapes_<family>.tex draws τ (solid, opacity 0.8) below the penalties (dashed, darker shade of
-    the same color); shapes_fill_<family>.tex
-    the band of bids pooled by an IVCG-PA design, drawn below the type density."""
+    """τ and penalty of the SHAPE_MARKETS of one distribution (VCG-PA; also IVCG-PA at
+    SHAPE_PAIR), and pgfplots commands: shapes_<family>.tex draws VCG-PA τ (solid) first, then
+    VCG-PA r (dashed), IVCG-PA r (dash-dotted) and IVCG-PA τ (dotted); shapes_fill_<family>.tex
+    the bands of bids pooled by IVCG-PA, drawn below the type density."""
     from family_figures_data import RATIO_COLORS
-    columns, names, fills, taus, penalties = [], [], [], [], []
-    for objective, n, k in SHAPE_CURVES[family]:
-        data = load_data(run / family / "z1" / f"n{n}-k{k}" / f"{objective}_nodes_br")
-        mechanism = "ivcg_pa" if objective == "ivcgpa" else "vcg_pa"
-        name = f"{objective}n{n}k{k}"
-        tau = shown_threshold(data, view)
-        penalty = np.asarray(data[f"penalty_{mechanism}"], dtype=float)
-        columns += [tau, at_support_top(penalty, float(view["v_limits"][0]), float(view["maximum_valuation"]))]
-        names += [f"tau{name}", f"r{name}"]
+    low, vbar = float(view["v_limits"][0]), float(view["maximum_valuation"])
+    columns, names, fills, e_grid = [], [], [], None
+    layers = {"tau-vcgpa": [], "r-vcgpa": [], "r-ivcgpa": [], "tau-ivcgpa": []}
+    styles = {"tau-vcgpa": "line width=1.4pt", "r-vcgpa": "line width=1.1pt,densely dashed",
+              "r-ivcgpa": "line width=1.1pt,dashdotted", "tau-ivcgpa": "line width=1.6pt,densely dotted"}
+    for n, k in SHAPE_MARKETS:
         color = RATIO_COLORS[min(RATIO_COLORS, key=lambda r: abs(r - n / k))]
-        source = rf"{{\familydata/shapes_{family}.dat}}"
-        taus.append(rf"\addplot[{color},line width=1.4pt,opacity=0.8,forget plot,unbounded coords=jump] table[x=e,y=tau{name}]{source};")
-        penalties.append(rf"\addplot[{color}!70!black,line width=1.1pt,densely dashed,forget plot,unbounded coords=jump] table[x=e,y=r{name}]{source};")
-        if objective == "ivcgpa":
-            fills += pooled_fill(data, view)
-        e_grid = data["e_grid"]
+        for objective in ["vcgpa"] + (["ivcgpa"] if (n, k) == SHAPE_PAIR[family] else []):
+            data = load_data(run / family / "z1" / f"n{n}-k{k}" / f"{objective}_nodes_br")
+            mechanism = "ivcg_pa" if objective == "ivcgpa" else "vcg_pa"
+            name = f"{objective}n{n}k{k}"
+            columns += [shown_threshold(data, view), at_support_top(data[f"penalty_{mechanism}"], low, vbar)]
+            names += [f"tau{name}", f"r{name}"]
+            source = rf"{{\familydata/shapes_{family}.dat}}"
+            for kind, column in (("tau", f"tau{name}"), ("r", f"r{name}")):
+                shade = color if kind == "tau" else f"{color}!70!black"
+                layers[f"{kind}-{objective}"].append(
+                    rf"\addplot[{shade},{styles[f'{kind}-{objective}']},forget plot] table[x=e,y={column}]{source};")
+            if objective == "ivcgpa":
+                fills += pooled_fill(data, view)
+            e_grid = data["e_grid"]
     np.savetxt(out / f"shapes_{family}.dat", np.column_stack([e_grid] + columns),
                header="e " + " ".join(names), comments="", fmt="%.5g")
-    (out / f"shapes_{family}.tex").write_text("\n".join(taus + penalties) + "\n")
+    (out / f"shapes_{family}.tex").write_text("\n".join(sum(layers.values(), [])) + "\n")
     (out / f"shapes_fill_{family}.tex").write_text("\n".join(fills) + "\n")
 
 
