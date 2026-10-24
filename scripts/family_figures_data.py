@@ -9,8 +9,9 @@
 Each value is taken from the first run that has it (so a run with the synthetic markets can
 come before a run with more families). Type-plane panels are zoomed to the type distribution
 (externality quantiles 0.5% and 99.5%, valuation quantiles 0.5% and 99%; 98% for heavy-tail)
-on a linear valuation axis; heavy-tail also gets a logarithmic version, panel name
-heavy-tail-log (valuation quantiles 0.5% and 99.5%). Writes to OUT_DIR:
+on a linear valuation axis. Comparison panels: heavy-tail-log (logarithmic, valuation quantiles
+0.5% and 99.5%), heavy-tail-q80 and heavy-tail-q75 (linear up to the 80% and 75% valuation
+quantiles), independent-zoom (externality quantiles 2.5% and 97.5%). Writes to OUT_DIR:
   family_share_n<n>k<k>.dat        x (distribution index), family, tau0 cutoff affine relaxtau
                                    vcgpa ivcgpa ivcgaffine bound (share of the first-best gain,
                                    %, nan where a run lacks the design)
@@ -35,7 +36,8 @@ from web27_paper_data import label, load_data, load_types  # noqa: E402
 FAMILY_ORDER = ["independent", "harmful-middle", "heavy-tail", "harm-rises", "two-modes"]
 MACROS = {"independent": "Independent", "harmful-middle": "HarmfulMiddle",
           "heavy-tail": "HeavyTail", "harm-rises": "HarmRises", "two-modes": "TwoModes",
-          "heavy-tail-log": "HeavyTailLog"}
+          "heavy-tail-log": "HeavyTailLog", "heavy-tail-q80": "HeavyTailQEighty",
+          "heavy-tail-q75": "HeavyTailQSeventyFive", "independent-zoom": "IndependentZoom"}
 E_LEVELS, V_LEVELS, V_TOP_HEAVY, V_LEVELS_LOG = (0.005, 0.995), (0.005, 0.99), 0.98, (0.005, 0.995)
 SHARE_KEYS = {"tau0": ("zero-welfare", "share_vcg_pa"), "cutoff": ("vcg_pa_cutoff", "share_vcg_pa"),
               "affine": ("vcg_pa_poly1", "share_vcg_pa"), "relaxtau": ("relaxation", "share_vcg_pa"),
@@ -62,14 +64,16 @@ def _quantiles(axis, weights, levels):
     return [float(np.interp(level, cumulative, axis)) for level in levels]
 
 
-def zoomed_view(types, scale="linear"):
+def zoomed_view(types, scale="linear", e_levels=E_LEVELS, v_top=None):
     """The view of a type-plane panel, zoomed to quantiles of the marginal distributions of e and
-    v (from the background density, valuations × externalities), with a 3% margin."""
+    v (from the background density, valuations × externalities), with a 3% margin; v_top
+    overrides the upper valuation quantile of a linear view."""
     view = figures.type_view(types, scale)
     density = np.asarray(types["background_density"], dtype=float)
-    e_low, e_high = _quantiles(np.asarray(types["background_e"]), density.sum(axis=0), E_LEVELS)
+    e_low, e_high = _quantiles(np.asarray(types["background_e"]), density.sum(axis=0), e_levels)
     heavy = figures.default_view(types)["scale"] == "log"
-    levels = V_LEVELS_LOG if scale == "log" else (V_LEVELS[0], V_TOP_HEAVY if heavy else V_LEVELS[1])
+    top = v_top or (V_TOP_HEAVY if heavy else V_LEVELS[1])
+    levels = V_LEVELS_LOG if scale == "log" else (V_LEVELS[0], top)
     v_low, v_high = _quantiles(np.asarray(types["background_v"]), density.sum(axis=1), levels)
     e_margin = 0.03 * (e_high - e_low)
     view["e_limits"] = np.array([e_low - e_margin, e_high + e_margin])
@@ -162,7 +166,13 @@ def main(out, folders):
     # panels: (name, family, view); heavy-tail also in a logarithmic version
     panels = [(family, family, zoomed_view(runs.types(family))) for family in families]
     if "heavy-tail" in families:
-        panels.append(("heavy-tail-log", "heavy-tail", zoomed_view(runs.types("heavy-tail"), "log")))
+        heavy = runs.types("heavy-tail")
+        panels += [("heavy-tail-log", "heavy-tail", zoomed_view(heavy, "log")),
+                   ("heavy-tail-q80", "heavy-tail", zoomed_view(heavy, v_top=0.80)),
+                   ("heavy-tail-q75", "heavy-tail", zoomed_view(heavy, v_top=0.75))]
+    if "independent" in families:  # externality quantiles 2.5% and 97.5%
+        panels.append(("independent-zoom", "independent",
+                       zoomed_view(runs.types("independent"), e_levels=(0.025, 0.975))))
     limits = []
     for name, _, view in panels:
         background(view, out / f"bg_{name}.png")
