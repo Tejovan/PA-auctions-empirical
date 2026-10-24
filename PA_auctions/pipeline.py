@@ -7,8 +7,9 @@ Building blocks of one combination of a run (used by experiments/compute.py):
                           and the one it is evaluated on (evaluation)
   optimize_threshold      search for τ in a threshold form (threshold_forms.py)
                           with the exact objective: genetic search,
-                          best-response ascent, both, or the symmetric
-                          relaxation followed by best-response ascent
+                          best-response ascent, both, the symmetric
+                          relaxation followed by best-response ascent, or
+                          an exhaustive grid with polish (cutoff, poly1)
   bandwidth_sensitivity   redesign τ on the training half smoothed with other
                           bandwidths and evaluate each design on the test half
 
@@ -55,6 +56,7 @@ from .empirical import (
 )
 from .best_response_ascent import run_best_response_ascent
 from .genetic_search import run_genetic_search
+from .grid_search import GRID_FORMS, run_grid_search
 from .parallel import split_workers, parallel_map
 from .symmetric_relaxation import symmetric_relaxation
 from .threshold_evaluation import (AUDITED_MECHANISMS, MECHANISMS, expected_welfare,
@@ -65,7 +67,7 @@ from .type_distributions import SYNTHETIC_FAMILIES, TypeDistribution, synthetic_
 SYNTHETIC_GRID_DEFAULTS = {"num_externality_nodes": 151, "num_valuation_cells": 150}
 EMPIRICAL_GRID_DEFAULTS = {"num_externality_nodes": 241, "num_valuation_cells": 400}
 EVALUATION_CHOICES = ("atomic", "smoothed")
-OPTIMIZERS = ("auto", "genetic", "best_response", "genetic+best_response", "relaxation")
+OPTIMIZERS = ("auto", "genetic", "best_response", "genetic+best_response", "relaxation", "grid")
 
 
 def is_synthetic_source(source) -> bool:
@@ -168,6 +170,8 @@ def resolve_optimizer(optimizer, form_kind):
         raise ValueError(f"optimizer must be one of {OPTIMIZERS}")
     if optimizer == "auto":
         return "genetic" if form_kind == "polynomial" else "best_response"
+    if optimizer == "grid":
+        return optimizer  # form checked in optimize_threshold (cutoff or poly1 only)
     if optimizer == "genetic" and form_kind not in GENETIC_FORMS:
         raise ValueError(f"the genetic search needs a form in {GENETIC_FORMS}")
     if optimizer != "genetic" and form_kind not in BEST_RESPONSE_FORMS:  # incl. relaxation
@@ -184,7 +188,7 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
                        objective_mechanism="vcg_pa", optimizer="auto", ga_options=None,
                        ga_seed=0, num_restarts=1, initial_solution=None, genetic_form=None,
                        best_response_options=None, warm_starts=(), verbose=True,
-                       time_limit=None, workers=1):
+                       time_limit=None, workers=1, grid_options=None):
     """Search for τ in threshold_form on the training distribution.
 
     threshold_form : label ("poly2", "knots6", "bins10", "nodes") or polynomial degree
@@ -195,7 +199,9 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
                      thresholds of the best symmetric participation rule for VCG-PA,
                      symmetric_relaxation.py, projected on the form, then
                      best-response ascent from that single start; piecewise-uniform
-                     training distributions with k < n)
+                     training distributions with k < n) or "grid" (every point of a
+                     grid of the cutoff or poly1 form, then Nelder–Mead from the best
+                     grid local maxima; grid_search.py; options in grid_options)
     initial_solution : genetic search warm start (parameters of the genetic form)
     warm_starts    : threshold functions used as extra best-response starts
     best_response_options : keyword options of run_best_response_ascent (starts,
@@ -227,6 +233,19 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
         trajectory_forms.append(search_form.spec([]))
         index = len(trajectory_forms) - 1
         trajectory.extend((index, list(candidate)) for candidate in candidates)
+
+    if optimizer == "grid":
+        if form.label not in GRID_FORMS:
+            raise ValueError(f"the grid search needs a form in {GRID_FORMS}")
+        search = run_grid_search(training, form, num_bidders, num_goods,
+                                 objective_mechanism=objective_mechanism, welfare_scale=scale,
+                                 deadline=deadline, workers=workers, verbose=verbose,
+                                 **dict(grid_options or {}))
+        record_trajectory(form, search.trajectory)
+        summaries.append(search.summary)
+        return {"form": form, "parameters": list(search.coefficients), "welfare": search.welfare,
+                "optimizer": optimizer, "trajectory": trajectory, "benchmarks": benchmarks,
+                "trajectory_forms": trajectory_forms, "search_summaries": summaries}
 
     if optimizer in ("genetic", "genetic+best_response"):
         if optimizer == "genetic":

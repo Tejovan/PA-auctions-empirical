@@ -27,6 +27,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..grid_search import GRID_FORMS
 from ..threshold_forms import BEST_RESPONSE_FORMS, GENETIC_FORMS, parse_form_label
 from ..type_distributions import SYNTHETIC_FAMILIES
 
@@ -38,12 +39,13 @@ DATA_SETS = {"tweets": "data/samples/g_full_tweets.csv"}
 RUN_KINDS = ("optimize", "evaluate")
 OBJECTIVES = ("vcg_pa", "ivcg_pa")
 OBJECTIVE_SHORT = {"vcg_pa": "vcgpa", "ivcg_pa": "ivcgpa"}
-METHODS = ("genetic", "best_response", "genetic+best_response", "relaxation")
+METHODS = ("genetic", "best_response", "genetic+best_response", "relaxation", "grid")
 METHOD_LABELS = {"genetic": "ga", "best_response": "br", "genetic+best_response": "ga-br",
-                 "relaxation": "relax"}
+                 "relaxation": "relax", "grid": "grid"}
 # Threshold forms of an [[optimizers]] table without threshold_forms.
 DEFAULT_FORMS = {"genetic": ["knots6"], "best_response": ["knots6"],
-                 "genetic+best_response": ["knots6"], "relaxation": ["nodes"]}
+                 "genetic+best_response": ["knots6"], "relaxation": ["nodes"],
+                 "grid": ["poly1"]}
 
 SYNTHETIC_DEFAULTS = {
     "externality_scales": [1.0],
@@ -84,7 +86,13 @@ BEST_RESPONSE_DEFAULTS = {
     "polish_rounds": 3,
     "short_genetic_generations": 40,
 }
+GRID_DEFAULTS = {  # grid search (grid_search.py): cutoff and poly1 forms only
+    "grid_points": 121,  # per parameter: 121 cutoffs w, or 121 × 121 lines (angle, offset)
+    "grid_local_starts": 5,  # Nelder–Mead polish starts (separated grid local maxima)
+    "grid_local_max_evaluations": 500,
+}
 OPTIMIZER_OTHER_DEFAULTS = {
+    "objectives": None,  # None: the [design] objectives; else a subset for this optimizer
     "genetic_form": None,  # genetic+best_response: form of the genetic stage
     "warm_start_across_zeta": False,  # best response: also start from the previous ζ's optimum
     "time_limit_minutes": 60,  # per combination's search; 0 = no limit
@@ -177,6 +185,8 @@ def resolve_distribution(table):
 
 def method_accepts_form(method, form_label):
     kind, _ = parse_form_label(form_label)
+    if method == "grid":
+        return str(form_label).strip().lower() in GRID_FORMS
     if method == "genetic":
         return kind in GENETIC_FORMS
     return kind in BEST_RESPONSE_FORMS
@@ -185,7 +195,7 @@ def method_accepts_form(method, form_label):
 def resolve_optimizer(table):
     """An [[optimizers]] table: label, method, threshold forms and the method's parameters."""
     table = dict(table)
-    for group in ("genetic", "best_response"):  # nested in a resolved configuration
+    for group in ("genetic", "best_response", "grid"):  # nested in a resolved configuration
         table.update(table.pop(group, {}))
     method = table.pop("method", None)
     if method not in METHODS:
@@ -195,16 +205,27 @@ def resolve_optimizer(table):
     for form in forms:
         parse_form_label(form)  # raises on an unknown label
         if not method_accepts_form(method, form):
-            accepted = GENETIC_FORMS if method == "genetic" else BEST_RESPONSE_FORMS
+            accepted = {"genetic": GENETIC_FORMS, "grid": GRID_FORMS}.get(method,
+                                                                         BEST_RESPONSE_FORMS)
             raise ConfigError(f"optimizer {label}: method {method} cannot search form {form!r} "
                               f"(form kinds: {', '.join(accepted)})")
-    allowed = {**GENETIC_DEFAULTS, **BEST_RESPONSE_DEFAULTS, **OPTIMIZER_OTHER_DEFAULTS}
+    allowed = {**GENETIC_DEFAULTS, **BEST_RESPONSE_DEFAULTS, **GRID_DEFAULTS,
+               **OPTIMIZER_OTHER_DEFAULTS}
     _check_keys(table, allowed, f"optimizer {label}")
     genetic = {key: table.get(key, value) for key, value in GENETIC_DEFAULTS.items()}
     best_response = {key: table.get(key, value) for key, value in BEST_RESPONSE_DEFAULTS.items()}
+    grid = {key: table.get(key, value) for key, value in GRID_DEFAULTS.items()}
     other = {key: table.get(key, value) for key, value in OPTIMIZER_OTHER_DEFAULTS.items()}
+    if other["objectives"] is not None:
+        other["objectives"] = _as_list(other["objectives"])
+        for objective in other["objectives"]:
+            if objective not in OBJECTIVES:
+                raise ConfigError(f"optimizer {label}: objectives must be in {OBJECTIVES}, "
+                                  f"got {objective!r}")
+    if not (isinstance(grid["grid_points"], int) and grid["grid_points"] >= 3):
+        raise ConfigError(f"optimizer {label}: grid_points must be an integer >= 3")
     return {"label": label, "method": method, "threshold_forms": forms, "genetic": genetic,
-            "best_response": best_response, **other}
+            "best_response": best_response, "grid": grid, **other}
 
 
 THRESHOLD_SOURCES = ("polynomial", "constant", "tabulated", "cutoff", "relaxation", "tau_file",
@@ -286,9 +307,13 @@ def resolve_config(raw):
         config["thresholds"] = [resolve_threshold(t) for t in raw.get("thresholds", [])]
         optimizers = raw.get("optimizers") or [{"method": "best_response"}]
         config["optimizers"] = [resolve_optimizer(t) for t in optimizers]
-        labels = [o["label"] for o in config["optimizers"]]
-        if len(set(labels)) != len(labels):
-            raise ConfigError(f"optimizer labels must differ: {labels}")
+        # Tables may share a label (e.g. one grid table per set of objectives) if they share
+        # the method; expand() then checks that no two combinations share a folder.
+        methods = {}
+        for optimizer in config["optimizers"]:
+            if methods.setdefault(optimizer["label"], optimizer["method"]) != optimizer["method"]:
+                raise ConfigError(f"optimizers labeled {optimizer['label']!r} have different "
+                                  f"methods; give them different labels")
     else:
         if not raw.get("thresholds"):
             raise ConfigError("evaluate runs need at least one [[thresholds]] table")
@@ -396,8 +421,11 @@ def expand(config):
                 base = dict(distribution=distribution, externality_scale=zeta,
                             num_bidders=n, num_goods=k)
                 if config["kind"] == "optimize":
-                    for objective, optimizer in itertools.product(
-                            config["design"]["objectives"], config["optimizers"]):
+                    pairs = [(objective, optimizer) for objective in OBJECTIVES
+                             for optimizer in config["optimizers"]
+                             if objective in (optimizer.get("objectives")
+                                              or config["design"]["objectives"])]
+                    for objective, optimizer in pairs:
                         if (optimizer["method"] == "relaxation"
                                 and _relaxation_undefined(distribution, n, k)):
                             skipped.append((f"{optimizer['label']} for {distribution['label']} "
@@ -420,6 +448,11 @@ def expand(config):
                         skipped.append((f"from_run {entry['value']}",
                                         f"no τ for {distribution['label']} z{zeta:g} n{n}-k{k}"))
                     combinations.extend(Combination(**base, threshold=e) for e in entries)
+    paths = [c.path for c in combinations]
+    duplicates = sorted({p for p in paths if paths.count(p) > 1})
+    if duplicates:
+        raise ConfigError(f"several [[optimizers]] tables give the same combination (same "
+                          f"label, form and objective): {duplicates[:3]}")
     unique_skipped = list(dict.fromkeys(skipped))
     return combinations, unique_skipped
 

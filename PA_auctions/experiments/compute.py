@@ -279,6 +279,12 @@ def _search(combination, prepared, config, warm_start):
                           time_limit=(60.0 * optimizer["time_limit_minutes"]
                                       if optimizer["time_limit_minutes"] else None),
                           workers=config.get("inner_workers", 1))
+    grid = optimizer.get("grid") or {}
+    if optimizer["method"] == "grid":
+        search_options["grid_options"] = {
+            "grid_points": grid.get("grid_points", 121),
+            "num_local_starts": grid.get("grid_local_starts", 5),
+            "local_max_evaluations": grid.get("grid_local_max_evaluations", 500)}
     begin = time.time()
     result = optimize_threshold(prepared.training, combination.threshold_form,
                                 combination.num_bidders, combination.num_goods,
@@ -311,6 +317,11 @@ def _history(result):
                           "stop_reason": s["stop_reason"], "points": s["history"]}
                          for s in summary["starts"] if s["history"])
             continue
+        if summary.get("optimizer") == "grid":
+            lines.extend({"optimizer": "nelder_mead", "start": f"grid local maximum {i}",
+                          "stop_reason": s["stop_reason"], "points": s["history"]}
+                         for i, s in enumerate(summary.get("local_starts", [])))
+            continue
         lines.append({"optimizer": "genetic", "start": f"genetic run {index}",
                       "stop_reason": summary["stop_reason"], "points": summary["history"]})
         lines.extend({"optimizer": "nelder_mead", "start": f"run {index}, local start {i}",
@@ -336,6 +347,20 @@ def _search_summary(result):
                                for key in ("gap", "stationarity", "max_marginal")}
                               if s["history"] else {})}
                           for s in summary["starts"])
+        elif summary.get("optimizer") == "grid":
+            starts.append({"optimizer": "grid", "start": "grid", "welfare": summary["grid_welfare"],
+                           "evaluations": int(np.prod(summary["grid_shape"])),
+                           "grid_shape": summary["grid_shape"],
+                           "seconds": summary["grid_seconds"],
+                           "local_maxima": summary["num_grid_local_maxima"],
+                           "polish_gain": summary["polish_gain"],
+                           "second_local_optimum_gap": summary["second_local_optimum_gap"],
+                           "stop_reason": summary["stop_reason"]})
+            starts.extend({"optimizer": "nelder_mead", "start": f"grid local maximum {i}",
+                           "start_welfare": s["start_welfare"], "welfare": s["welfare"],
+                           "evaluations": s["evaluations"], "converged": s["converged"],
+                           "stop_reason": s["stop_reason"]}
+                          for i, s in enumerate(summary.get("local_starts", [])))
         else:
             starts.append({"optimizer": "genetic", "start": "genetic stage",
                            "welfare": summary["genetic_welfare"],

@@ -493,8 +493,10 @@ def _readme(folder, record, summary, checks, leaf_files, compare_files):
         for optimizer in config["optimizers"]:
             # Runs before forms were set per optimizer list them under [design].
             forms = optimizer.get("threshold_forms", config["design"].get("threshold_forms", []))
+            objectives = (f"; objectives {', '.join(optimizer['objectives'])}"
+                          if optimizer.get("objectives") else "")
             lines.append(f"- **optimizer {optimizer['label']}:** {optimizer['method']}, "
-                         f"forms {', '.join(forms)}")
+                         f"forms {', '.join(forms)}{objectives}")
     for threshold in config.get("thresholds", []):
         lines.append(f"- **{'given ' if run['kind'] == 'optimize' else ''}threshold "
                      f"{threshold.get('label') or ''}:** {threshold['source']} = "

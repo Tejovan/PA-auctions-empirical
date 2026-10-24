@@ -114,6 +114,7 @@ Unknown keys are an error. Example files in [configs/](configs/):
 | [standard_test.toml](configs/standard_test.toml) | standard test: every feature on small grids, 120 combinations, about 3 min with 12 workers |
 | [evaluate_example.toml](configs/evaluate_example.toml) | evaluate run: the zero-welfare threshold τ⁰, the ex ante cutoff τ*, and the optima of an earlier run |
 | [nodes_run.toml](configs/nodes_run.toml) | nodes form, best-response ascent and symmetric relaxation: harmful_middle and tweets (ζ 1, 10, 100), n ∈ {4, 8}, k ∈ {1, 4} (k = n: no competition), both objectives; default grids, 56 combinations, about 5 min with 12 workers |
+| [paper_run.toml](configs/paper_run.toml) | WEB27 paper and supplement in one run: independent, harmful_middle, heavy_tail, harm_rises; 20 markets (k/n from 1/32 to 1); optimized τ for both objectives, best cutoff and best clipped affine τ by [grid search](#grid-search), given τ⁰, τ* and relaxation τ; 636 combinations |
 | [optimize_example.toml](configs/optimize_example.toml) | research-size optimize run on the tweet data (several ζ, per-node τ) |
 
 ### 3.1 Top level
@@ -177,23 +178,24 @@ The forms of τ are set per optimizer (`threshold_forms` in [`[[optimizers]]`](#
 
 ### 3.5 `[[optimizers]]`
 
-Optimize runs only; default: one best-response optimizer. Each table is one optimizer with its own forms of τ; the run computes every objective × optimizer × form of that optimizer. Keys: [every method](#every-method), [genetic search](#genetic-search), [best-response ascent](#best-response-ascent), [symmetric relaxation](#symmetric-relaxation).
+Optimize runs only; default: one best-response optimizer. Each table is one optimizer with its own forms of τ; the run computes every objective × optimizer × form of that optimizer (objectives: `[design]`, or the table's own `objectives`). Keys: [every method](#every-method), [genetic search](#genetic-search), [best-response ascent](#best-response-ascent), [symmetric relaxation](#symmetric-relaxation), [grid search](#grid-search).
 
 <a id="every-method"></a>**Every method:**
 
 | Key | Default | Meaning |
 |---|---|---|
-| `method` | required | `genetic` (genetic stage + Nelder–Mead), `best_response` (best-response ascent + gradient polish), `genetic+best_response` (ascent also started from a genetic result), `relaxation` (ascent from the symmetric relaxation only; below) |
-| `threshold_forms` | `["knots6"]`; `["nodes"]` for `relaxation` | forms of τ this optimizer searches (table below); a form the method cannot search is an error |
-| `label` | `ga`, `br`, `ga-br`, `relax` | optimizer label in folder names |
+| `method` | required | `genetic` (genetic stage + Nelder–Mead), `best_response` (best-response ascent + gradient polish), `genetic+best_response` (ascent also started from a genetic result), `relaxation` (ascent from the symmetric relaxation only; below), `grid` (every point of a grid + Nelder–Mead; `cutoff` and `poly1` only; below) |
+| `threshold_forms` | `["knots6"]`; `["nodes"]` for `relaxation`; `["poly1"]` for `grid` | forms of τ this optimizer searches (table below); a form the method cannot search is an error |
+| `objectives` | the `[design]` objectives | objectives of this optimizer only (e.g. `["vcg_pa"]`) |
+| `label` | `ga`, `br`, `ga-br`, `relax`, `grid` | optimizer label in folder names; several tables may share a label if they share the method and give different folders (e.g. one `grid` table per set of objectives) |
 | `time_limit_minutes` | 60 | search time per combination (all stages and starts); past it, each stage stops after its current iteration, later starts are skipped, the best τ so far is kept, and check `search_stop` fails; 0 = no limit |
 
 | Form | τ(e) | Methods |
 |---|---|---|
-| `poly<d>` | polynomial of degree d | genetic |
+| `poly<d>` | polynomial of degree d (`poly1`: clipped affine τ(e) = min{v̄, max{0, β₀ + β₁e}}) | genetic; `poly1` also grid |
 | `knots<K>` | continuous piecewise linear with K knots, plus an exclusion cutoff | all |
 | `bins<K>` | constant on K bins | all |
-| `cutoff` | common welfare cutoff w: τ(e) = max(0, w − e), excluded if w − e > v̄ | genetic |
+| `cutoff` | common welfare cutoff w: τ(e) = max(0, w − e), excluded if w − e > v̄ | genetic, grid |
 | `nodes` | free value at every externality node | best response, genetic+best response, relaxation |
 
 Example: genetic search on a polynomial and a piecewise-linear τ, best-response ascent per node:
@@ -242,6 +244,16 @@ threshold_forms = ["nodes"]
 - **Record:** `results.json` → `search.relaxation`: `value` (J), `threshold_rule` (true: the best symmetric rule is a threshold rule, and the τ read off it is a best common τ for VCG-PA up to the discretization, paper v3), `largest_drop`, `seconds`.
 - **As a start:** the same τ is a default `starts` entry of `best_response`, where the best start is kept; the separate method shows what the relaxation gives alone.
 - **Scope:** with the objective `ivcg_pa` it is a start only. Needs k < n and a piecewise-uniform training distribution; other combinations are skipped and listed in the plan.
+
+<a id="grid-search"></a>**Grid search** (`grid`; `grid_search.py`). Exhaustive search of the one- and two-parameter forms, then Nelder–Mead. `cutoff`: `grid_points` welfare cutoffs w, evenly spaced on the genetic search range. `poly1`: `grid_points` × `grid_points` lines in the box of the type plane, by angle θ ∈ (0, π) and offset between the box's lowest and highest corner, so steep and flat lines are equally dense (θ → 0: vertical boundary, τ decreasing; offset 0: all participate; offset 1: all excluded). Nelder–Mead then starts from the best grid points that are strict local maxima of the grid, more than three grid spacings apart. Every evaluation is exact, so the result is at least the best grid value; about 1 ms per VCG-PA evaluation, so 121 × 121 lines take 15 s on one worker (grid points run in parallel).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `grid_points` | 121 | grid points per parameter |
+| `grid_local_starts` | 5 | Nelder–Mead starts |
+| `grid_local_max_evaluations` | 500 | evaluations per Nelder–Mead start |
+
+- **Record:** `results.json` → `search.starts`: the `grid` entry (best grid welfare, `local_maxima` = number of strict grid local maxima, `polish_gain` and `second_local_optimum_gap` in units of the first-best gain), then one `nelder_mead` entry per start.
 
 ### 3.6 `[[thresholds]]`
 
@@ -581,7 +593,7 @@ The set has 11,811 tweets created between 2022-12-16 and 2025-01-18, each with a
 | `evaluate_threshold(distribution, τ, n, k, num_simulated_draws=...)` | `threshold_evaluation` | exact outcomes, penalties, simulated auctions |
 | `exact_outcomes(distribution, τ, n, k)` | `threshold_evaluation` | exact outcomes only (welfare and its parts, revenue, penalties, bidder utility) |
 | `expected_welfare(distribution, τ, n, k, mechanism)` | `threshold_evaluation` | the optimization objective |
-| `optimize_threshold(training, form, n, k, objective, optimizer)` | `pipeline` | search for τ (`optimizer`: `genetic`, `best_response`, `genetic+best_response`, `relaxation`) |
+| `optimize_threshold(training, form, n, k, objective, optimizer)` | `pipeline` | search for τ (`optimizer`: `genetic`, `best_response`, `genetic+best_response`, `relaxation`, `grid`) |
 | `run_genetic_search`, `run_best_response_ascent` | `genetic_search`, `best_response_ascent` | the two search algorithms |
 | `symmetric_relaxation(distribution, n, k)` | `symmetric_relaxation` | best symmetric participation rule for VCG-PA (bound and τ) |
 | `participation_gap(distribution, τ, n, k)` | `best_response_ascent` | G(τ) of the sufficient condition |
@@ -601,9 +613,9 @@ The set has 11,811 tweets created between 2022-12-16 and 2025-01-18, each with a
 | [docs/distributions/](docs/distributions/) | previews of the synthetic families (§6), drawn by `scripts/draw_distributions.py` |
 | [tests/](tests/) | unit tests |
 | [supplement/](supplement/) | code supplement (`code_supplement_v5`: package layout, running experiments, outputs); the methods and additional results are in the separate empirical supplement |
-| [scripts/](scripts/) | `web27_paper_data.py` and `empirical_supplement_data.py` (tables and figure data of the paper and the empirical supplement from the runs of `configs/synthetic_run.toml` and `configs/shapes_run.toml`); `explore_raw_data.py` (raw Community Notes data); `create_distribution.ipynb` and `get_tweets.ipynb` (how the tweet data were fetched and built), `create_descriptive_stats.py` and `csv_to_latex.py` (descriptive statistics), `draw_distributions.py` (family previews), `check_palette.py` (accessibility of figure colors) |
+| [scripts/](scripts/) | `web27_paper_data.py` and `empirical_supplement_data.py` (tables and figure data of the paper and the empirical supplement from the runs of `configs/synthetic_run.toml` and `configs/shapes_run.toml`); `family_figures_data.py` (figures across distributions: shares and forms per market, τ of all markets; from any runs, first run with a value wins); `explore_raw_data.py` (raw Community Notes data); `create_distribution.ipynb` and `get_tweets.ipynb` (how the tweet data were fetched and built), `create_descriptive_stats.py` and `csv_to_latex.py` (descriptive statistics), `draw_distributions.py` (family previews), `check_palette.py` (accessibility of figure colors) |
 | `data/samples/` | the tweet data (`g_full_tweets.csv`) |
 | `raw_data/` | raw X / Community Notes dumps and downloads (gitignored, never committed) |
 | [legacy/](legacy/) | superseded scripts, notebooks, outputs and documents of the EC 2025 / EAAMO 2026 workflow ([legacy/README.md](legacy/README.md)) |
 
-**Tests:** `python -m pytest tests -q` (80 tests). After a code change, run the smallest config covering the change, starting with `configs/smoke_test.toml`; `configs/standard_test.toml` exercises every feature.
+**Tests:** `python -m pytest tests -q` (84 tests). After a code change, run the smallest config covering the change, starting with `configs/smoke_test.toml`; `configs/standard_test.toml` exercises every feature.

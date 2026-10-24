@@ -8,7 +8,7 @@ Writes to OUT_DIR:
   table_main.tex          tabular of the main table (selected markets, synthetic run)
   table_shapes.tex        tabular of the appendix table (all families and markets, shapes run)
   tau_<family>.dat        VCG-PA-optimized τ(e) for n ∈ {2, 4, 8, 16}, k = 1 (shapes run)
-  bg_<family>.png         type density of each family (axes limits in limits.tex)
+  bg_<family>.png         type density of each family, linear valuation axis (axes limits in limits.tex)
   types_hm.dat            τ(e) and IVCG-PA penalty r(e), harmful_middle, n = 4, k = 1, IVCG-PA
   pooled_hm.tex           bands of the bids pooled by IVCG-PA there (pgfplots fill commands)
   limits.tex              axis limits of every type-plane panel as macros
@@ -104,9 +104,14 @@ def load_data(leaf):
         return {key: data[key] for key in data.files}
 
 
+def linear_view(types):
+    """The view of every type-plane panel: linear valuation axis (also for heavy-tail)."""
+    return figures.type_view(types, "linear")
+
+
 def background(types, path):
     """The type density alone, filling the image, with the limits of its view."""
-    view = figures.default_view(types)
+    view = linear_view(types)
     fig = figures.plt.figure(figsize=(3.0, 2.0), dpi=200)
     ax = fig.add_axes([0, 0, 1, 1])
     figures.draw_types(ax, view)
@@ -119,7 +124,7 @@ def background(types, path):
 def marginal_background(data, types, path):
     """M(e, v) of VCG-PA on the view of the type plane, filling the image: PuOr on a symmetric
     logarithmic scale as in the run figures, the zero contour dashed and the edge of the type density."""
-    view = figures.default_view(types)
+    view = linear_view(types)
     values = np.asarray(data["mc_vcg_pa"], dtype=float)
     limit = float(np.quantile(np.abs(values[np.isfinite(values)]), 0.98)) or 1.0
     norm = figures.SymLogNorm(linthresh=0.01 * limit, vmin=-limit, vmax=limit, base=10)
@@ -203,7 +208,7 @@ def main(synthetic, shapes, out):
     # for a line with jumps); taufill clips it to the top of the view for the abstention region.
     leaf = synthetic / "harmful-middle" / "z1" / "n4-k1" / "ivcgpa_nodes_br"
     data, types = load_data(leaf), load_types(synthetic, "harmful-middle")
-    view = figures.default_view(types)
+    view = linear_view(types)
     tau_fill = shown_threshold(data, view)
     raw = np.asarray(data["tau_grid"], dtype=float)
     tau = np.where(np.isfinite(raw) & (raw <= float(view["v_limits"][1])), tau_fill, np.nan)
@@ -223,7 +228,7 @@ def main(synthetic, shapes, out):
                     file.write(" ".join([f"{n // k}"] + [percent(row.get(c)) for c in
                                                        ("tau0", "cutoff", "vcgpa", "ivcgpa", "bound")]) + "\n")
 
-    view = figures.default_view(types)
+    view = linear_view(types)
     columns, names = [], []
     for (n, k) in sorted(main_table, key=lambda m: (m[0] / m[1], m[1])):
         if k < n:
@@ -240,7 +245,7 @@ def main(synthetic, shapes, out):
         np.savetxt(out / f"tau_mc_{family}.dat", np.column_stack([data["e_grid"], shown_threshold(data, view)]),
                    header="e tau", comments="", fmt="%.5g")
 
-    view = figures.default_view(load_types(shapes, "two-modes"))
+    view = linear_view(load_types(shapes, "two-modes"))
     columns = []
     for leaf in FORM_LEAVES.values():
         data = load_data(shapes / "two-modes" / "z1" / "n8-k1" / leaf)

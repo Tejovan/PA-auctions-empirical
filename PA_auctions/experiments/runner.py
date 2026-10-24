@@ -142,9 +142,12 @@ def _evaluations_per_search(optimizer):
         iterations * 4 * (1 + best_response["polish_rounds"]) + 40 * best_response["polish_rounds"])
     relaxation_count = iterations * 4 * (1 + best_response["polish_rounds"]) + 40 * best_response[
         "polish_rounds"]  # one start (the linear program is timed as RELAXATION_SECONDS)
+    grid = optimizer.get("grid") or {"grid_points": 121, "grid_local_starts": 5,
+                                      "grid_local_max_evaluations": 500}
+    grid_count = grid["grid_points"] ** 2 + grid["grid_local_starts"] * 150  # poly1 (bound)
     return {"genetic": genetic_count, "best_response": best_response_count,
             "genetic+best_response": genetic_count + best_response_count,
-            "relaxation": relaxation_count}[optimizer["method"]]
+            "relaxation": relaxation_count, "grid": grid_count}[optimizer["method"]]
 
 
 RELAXATION_SECONDS = 5.0  # one symmetric relaxation (linear program), default size
@@ -211,7 +214,7 @@ def describe_plan(config, combinations, skipped):
     lines.append(f"  {markets_text(config)}")
     if config["kind"] == "optimize":
         lines.append(f"  objectives {config['design']['objectives']}, optimizers "
-                     f"{[o['label'] + ' (' + o['method'] + ': ' + ', '.join(o['threshold_forms']) + ')' for o in config['optimizers']]}")
+                     f"{[o['label'] + ' (' + o['method'] + ': ' + ', '.join(o['threshold_forms']) + (('; ' + ', '.join(o['objectives'])) if o.get('objectives') else '') + ')' for o in config['optimizers']]}")
     if config.get("thresholds"):
         lines.append(f"  {'given ' if config['kind'] == 'optimize' else ''}thresholds "
                      f"{[t['label'] or t['value'] for t in config['thresholds']]}")

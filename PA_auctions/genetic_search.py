@@ -129,8 +129,10 @@ def _past(deadline):
     return deadline is not None and time.time() >= deadline
 
 
-def refine_with_nelder_mead(welfare_of, starts, lows, highs, max_evaluations, deadline=None):
-    """Nelder–Mead from each start, in coordinates where each coefficient's range is [0, 1].
+def refine_with_nelder_mead(welfare_of, starts, lows, highs, max_evaluations, deadline=None,
+                            simplex_step=INITIAL_SIMPLEX_STEP):
+    """Nelder–Mead from each start, in coordinates where each coefficient's range is [0, 1]
+    (initial simplex steps simplex_step in these coordinates).
 
     Returns a list of dicts (start, coefficients, welfare, start_welfare,
     evaluations, converged, stop_reason, history), one per start; starts not
@@ -149,7 +151,7 @@ def refine_with_nelder_mead(welfare_of, starts, lows, highs, max_evaluations, de
         start_welfare = welfare_of(start)
         scaled_start = (start - lows) / span
         simplex = np.vstack([scaled_start,
-                             scaled_start + INITIAL_SIMPLEX_STEP * np.eye(len(start))])
+                             scaled_start + simplex_step * np.eye(len(start))])
         history = [{"iteration": 0, "welfare": float(start_welfare), "time": time.time()}]
 
         def callback(intermediate_result):
