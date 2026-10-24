@@ -304,8 +304,8 @@ def write_shapes(run, family, view, out):
     layers = {"tau-vcgpa": [], "r-vcgpa": [], "r-ivcgpa": [], "tau-ivcgpa": []}
     styles = {"tau-vcgpa": "line width=1.4pt", "r-vcgpa": "line width=1.1pt,densely dashed",
               "r-ivcgpa": "line width=0.6pt,dashdotted", "tau-ivcgpa": "line width=0.6pt,densely dotted"}
-    mark_styles = {"r": "only marks,mark=*,mark size=1.6pt,mark options={fill=white,line width=0.7pt}",
-                   "tau": "only marks,mark=diamond*,mark size=2.4pt,mark options={fill=white,line width=0.8pt}"}
+    mark_styles = {"r": "only marks,mark=*,mark size=1.35pt,mark options={fill=white,line width=0.7pt}",
+                   "tau": "only marks,mark=diamond*,mark size=2.1pt,mark options={fill=white,line width=0.8pt,yscale=0.75}"}
     marks, mark_names = [], []
     for n, k in SHAPE_MARKETS:
         color = RATIO_COLORS[min(RATIO_COLORS, key=lambda r: abs(r - n / k))]
