@@ -18,7 +18,7 @@ valuation quantiles 0.5% and 99%; VIEW_OPTIONS for independent and heavy-tail). 
                                    lines first, dotted last, so dashed and dotted stay visible)
   family_taufew_<family>.tex        the same for the markets with n/k in FEW_RATIOS
   family_tau_limits.tex             zoomed axis limits for those (\eminZoom<Family> ...): the
-                                    range of the curves, v up to ZOOM_TOP of the view; and the
+                                    range of the curves, v up to ZOOM_TOP (ZOOM_TOP_FAMILY) of the view; and the
                                     limits of the share figure's panels (\eminShare<Family> ...)
   bg_<family>.png, family_limits.tex    type background and axis limits of each panel
 """
@@ -53,18 +53,19 @@ RATIO_COLORS = {8 / 7: "sevenA", 4 / 3: "sevenB", 2: "sevenC", 4: "sevenD", 8: "
 BIDDER_STYLES = {2: "dotted", 4: "dash dot dot", 8: "dashdotted", 16: "dashed", 32: "solid"}
 FEW_RATIOS = (1.2, 8)  # the markets of family_taufew: 1.2 < n/k ≤ 8 (n/k = 8/7 left out)
 ZOOM_TOP = 0.85
+ZOOM_TOP_FAMILY = {"independent": 1.0}  # independent: valuations up to the top of the view
 # Type-plane panels of the share figure: externality range narrowed by SHARE_E[0] of its width on the
 # left and widened by SHARE_E[1] on the right; valuation range widened by SHARE_V at the top.
 SHARE_E = (0.12, 0.02)
 SHARE_V = 0.12
 
 
-def zoom_limits(view, e_grid, columns):
+def zoom_limits(view, e_grid, columns, zoom_top=ZOOM_TOP):
     """Axis limits around τ curves: valuations up to ZOOM_TOP of the view, externalities from
     the first point below that top to the last point with τ > 0 (2% of the view), with a 4% margin."""
     v_low, v_high = (float(x) for x in view["v_limits"])
     e_low, e_high = (float(x) for x in view["e_limits"])
-    top = v_low + ZOOM_TOP * (v_high - v_low)
+    top = v_low + zoom_top * (v_high - v_low)
     taus = np.column_stack(columns)
     below_top = np.any(taus <= top, axis=1)
     above_bottom = np.any(taus > max(v_low, 0.0) + 0.02 * (v_high - v_low), axis=1)
@@ -214,7 +215,8 @@ def main(out, folders):
                                 rf"unbounded coords=jump] table[x=e,y=n{n}k{k}]{{\familydata/family_tau_{panel}.dat}};")
             (out / f"family_{suffix}_{panel}.tex").write_text("\n".join(commands) + "\n")
         few = [c for c, m in zip(columns, markets) if FEW_RATIOS[0] < m[0] / m[1] <= FEW_RATIOS[1]]
-        e_min, e_max, v_min, v_max = zoom_limits(view, np.asarray(e_grid, dtype=float), few)
+        e_min, e_max, v_min, v_max = zoom_limits(view, np.asarray(e_grid, dtype=float), few,
+                                                 ZOOM_TOP_FAMILY.get(family, ZOOM_TOP))
         macro = MACROS[panel]
         zooms.append(rf"\def\eminZoom{macro}{{{e_min:.4f}}}\def\emaxZoom{macro}{{{e_max:.4f}}}"
                      rf"\def\vminZoom{macro}{{{v_min:.5g}}}\def\vmaxZoom{macro}{{{v_max:.4f}}}")
