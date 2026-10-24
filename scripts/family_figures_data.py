@@ -12,7 +12,8 @@ valuation quantiles 0.5% and 99%; VIEW_OPTIONS for independent and heavy-tail). 
   family_share_n<n>k<k>.dat        x (distribution index), family, tau0 cutoff affine relaxtau
                                    vcgpa ivcgpa ivcgaffine bound (share of the first-best gain,
                                    %, nan where a run lacks the design)
-  family_forms_n<n>k<k>_<family>.dat    e tau0 cutoff affine nodes (VCG-PA τ of each form)
+  family_forms_n<n>k<k>_<family>.dat    e tau0 cutoff affine nodes relaxtau (VCG-PA τ of each form, and
+                                       the relaxation τ)
   family_tau_<family>.dat           e and one column n<n>k<k> per market with k < n
   family_tau_<family>.tex           pgfplots commands drawing those τ (color n/k, style n; solid
                                    lines first, dotted last, so dashed and dotted stay visible)
@@ -35,7 +36,7 @@ sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from PA_auctions import figures  # noqa: E402
 from web27_paper_data import (VIEW_OPTIONS, label, limit_macros, load_data, load_types, padded,  # noqa: E402
-                              clip_top, zoomed_view)
+                              at_support_top, zoomed_view)
 
 FAMILY_ORDER = ["independent", "harmful-middle", "heavy-tail", "harm-rises", "two-modes"]
 MACROS = {"independent": "Independent", "harmful-middle": "HarmfulMiddle",
@@ -46,7 +47,7 @@ SHARE_KEYS = {"tau0": ("zero-welfare", "share_vcg_pa"), "cutoff": ("vcg_pa_cutof
               "vcgpa": ("vcg_pa_nodes", "share_vcg_pa"), "ivcgpa": ("ivcg_pa_nodes", "share_ivcg_pa"),
               "ivcgaffine": ("ivcg_pa_poly1", "share_ivcg_pa")}
 FORM_KEYS = {"tau0": "zero-welfare", "cutoff": "vcg_pa_cutoff", "affine": "vcg_pa_poly1",
-             "nodes": "vcg_pa_nodes"}
+             "nodes": "vcg_pa_nodes", "relaxtau": "relaxation"}
 FORM_MARKETS = [(2, 1), (8, 1), (16, 4)]
 # Figure (2): color by bidders per good n/k (viridis, figstyle sevenA–G), line style by n.
 RATIO_COLORS = {8 / 7: "sevenA", 4 / 3: "sevenB", 2: "sevenC", 4: "sevenD", 8: "sevenE",
@@ -85,10 +86,10 @@ def zoom_limits(view, e_grid, columns, zoom_top=ZOOM_TOP):
     return max(e_low, left - margin), min(e_high, right + margin), v_low, top
 
 
-def shown(data, low, high):
-    """τ(e) for a panel with valuation limits [low, high] (clip_top: above it, a flat line along
-    the top)."""
-    return clip_top(data["tau_grid"], low, high)
+def shown(data, view):
+    """τ(e) for a panel of the view: an excluded externality at the top valuation v̄
+    (at_support_top); values above the panel are clipped by the axis."""
+    return at_support_top(data["tau_grid"], float(view["v_limits"][0]), float(view["maximum_valuation"]))
 
 
 def raw(data):
@@ -195,7 +196,6 @@ def main(out, folders):
     for n, k in FORM_MARKETS:
         for name, family, view in panels:
             columns, e_grid = [], None
-            v_min, v_max = share_limits(view, family)[2:]
             for key in FORM_KEYS.values():
                 leaf = runs.leaf(family, n, k, key)
                 if leaf is None:
@@ -203,7 +203,7 @@ def main(out, folders):
                     continue
                 data = load_data(leaf)
                 e_grid = data["e_grid"]
-                columns.append(shown(data, v_min, v_max))
+                columns.append(shown(data, view))
             columns = [c if c is not None else np.full(len(e_grid), np.nan) for c in columns]
             np.savetxt(out / f"family_forms_n{n}k{k}_{name}.dat", np.column_stack([e_grid] + columns),
                        header="e " + " ".join(FORM_KEYS), comments="", fmt="%.5g")
@@ -211,13 +211,12 @@ def main(out, folders):
     zooms = []
     for panel, family, view in panels:
         names, columns, raws, e_grid = [], [], [], None
-        v_low, v_high = (float(x) for x in view["v_limits"])
         for n, k in runs.markets(family):
             if k >= n:
                 continue
             data = load_data(runs.leaf(family, n, k, "vcg_pa_nodes"))
             e_grid = data["e_grid"]
-            columns.append(shown(data, v_low, v_high))
+            columns.append(shown(data, view))
             raws.append(raw(data))
             names.append(f"n{n}k{k}")
         np.savetxt(out / f"family_tau_{panel}.dat", np.column_stack([e_grid] + columns),
@@ -236,7 +235,7 @@ def main(out, folders):
         e_min, e_max, v_min, v_max = zoom_limits(view, np.asarray(e_grid, dtype=float), [raws[i] for i in few],
                                                  ZOOM_TOP_FAMILY.get(family, ZOOM_TOP))
         np.savetxt(out / f"family_taufew_{panel}.dat",
-                   np.column_stack([e_grid] + [clip_top(raws[i], v_min, v_max) for i in few]),
+                   np.column_stack([e_grid] + [columns[i] for i in few]),
                    header="e " + " ".join(names[i] for i in few), comments="", fmt="%.5g")
         macro = MACROS[panel]
         zooms.append(rf"\def\eminZoom{macro}{{{e_min:.4f}}}\def\emaxZoom{macro}{{{e_max:.4f}}}"

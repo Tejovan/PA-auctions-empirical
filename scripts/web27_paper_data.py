@@ -147,16 +147,12 @@ def padded(view, pad=IMAGE_PAD):
     return out
 
 
-TOP_MARGIN = 0.03
-
-
-def clip_top(values, low, high):
-    """Values for a type-plane panel with valuation limits [low, high]: below low raised to low;
-    above the top level high − TOP_MARGIN·(high − low), or not finite (excluded externality), at
-    that level, so a τ above the panel is a flat line along its top, as τ = 0 is along its bottom."""
+def at_support_top(values, low, vbar):
+    """Values for a type-plane panel: below low raised to low; not finite (τ = v̄⁺, the
+    externality is excluded) at the top valuation v̄ of the distribution, so τ runs flat along v̄
+    there, as τ = 0 runs along the bottom. Values above the panel are left for the axis to clip."""
     values = np.asarray(values, dtype=float)
-    level = high - TOP_MARGIN * (high - low)
-    return np.where(np.isfinite(values), np.clip(values, low, level), level)
+    return np.where(np.isfinite(values), np.maximum(values, low), vbar)
 
 
 def _quantiles(axis, weights, levels):
@@ -239,14 +235,13 @@ def limit_macros(macro, view, image=True):
 
 
 def shown_threshold(data, view, clip_above=False):
-    """τ(e) for a panel of the view (clip_top: above the view or excluded, a flat line along the
-    top); clip_above=True puts those values at the top of the view (for filling the abstention
-    region)."""
+    """τ(e) for a panel of the view (at_support_top: an excluded externality at v̄);
+    clip_above=True puts values above the view at its top (for filling the abstention region)."""
     tau = np.asarray(data["tau_grid"], dtype=float)
     low, high = (float(x) for x in view["v_limits"])
     if clip_above:
         return np.where(np.isfinite(tau), np.clip(tau, low, high), high)
-    return clip_top(tau, low, high)
+    return at_support_top(tau, low, float(view["maximum_valuation"]))
 
 
 def write_table(run, out):
@@ -286,7 +281,7 @@ def write_shapes(run, family, view, out):
         name = f"{objective}n{n}k{k}"
         tau = shown_threshold(data, view)
         penalty = np.asarray(data[f"penalty_{mechanism}"], dtype=float)
-        columns += [tau, clip_top(penalty, *(float(x) for x in view["v_limits"]))]
+        columns += [tau, at_support_top(penalty, float(view["v_limits"][0]), float(view["maximum_valuation"]))]
         names += [f"tau{name}", f"r{name}"]
         color = RATIO_COLORS[min(RATIO_COLORS, key=lambda r: abs(r - n / k))]
         source = rf"{{\familydata/shapes_{family}.dat}}"
