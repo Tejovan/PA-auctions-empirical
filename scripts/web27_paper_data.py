@@ -50,7 +50,7 @@ SHAPES_HEADER = r"""\begin{tabular}{@{}lrrrrrrr@{}}
 \toprule
  & & & & \multicolumn{2}{c}{best} & \multicolumn{2}{c}{optimized}\\
 \cmidrule(lr){5-6}\cmidrule(lr){7-8}
-distribution & $n$ & $k$ & $\tau^0$ & cutoff & line & share & gap\\
+distribution & $n$ & $k$ & $\tau^0$ & cutoff & affine & share & gap\\
 \midrule
 """
 FOOTER = "\\bottomrule\n\\end{tabular}\n"

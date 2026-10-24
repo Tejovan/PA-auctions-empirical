@@ -125,7 +125,7 @@ def shapes_table(run):
     with open(DATA / "table_shapes.tex", "w") as file:
         file.write(r"""\begin{tabular}{@{}lrrrrrrrrr@{}}
 \toprule
-distribution & $n$ & $k$ & $\tau^0$ & cutoff & line & optimized & relax.\ bound & IVCG-PA & gap\\
+distribution & $n$ & $k$ & $\tau^0$ & cutoff & affine & optimized & relax.\ bound & IVCG-PA & gap\\
 \midrule
 """)
         for family, name in web27_paper_data.FAMILY_NAMES.items():
