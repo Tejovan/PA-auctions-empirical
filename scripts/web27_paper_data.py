@@ -16,8 +16,10 @@ figure of harmful-middle (types_hm) shows the whole support. Writes to OUT_DIR:
   pooled_hm.tex           bands of the bids pooled by IVCG-PA there (pgfplots fill commands)
   bg_types_hm.png         its background (whole support; macros \eminTypes ... in limits.tex)
   shapes_<family>.dat/.tex      τ(e) and penalty r(e) of the SHAPE_CURVES designs and pgfplots
-                          commands drawing them (color = n/k as in family_tau_*.tex; τ solid,
-                          r dashed; the band of valuations pooled by an IVCG-PA design)
+                          commands drawing them (color = n/k as in family_tau_*.tex; τ solid
+                          below r dashed)
+  shapes_fill_<family>.tex      the band of bids pooled by an IVCG-PA design there, at the
+                          participating types only (drawn below the type density)
   mc_<family>.png         marginal contribution M(e, v) of VCG-PA at its optimized τ, n = 8, k = 1
                           (PuOr, symmetric logarithmic scale, dashed M = 0, edge of the type density)
   tau_mc_<family>.dat     the optimized τ(e) drawn over mc_<family>.png
@@ -39,7 +41,7 @@ FAMILIES = {"independent": "Independent", "harmful-middle": "HarmfulMiddle",
 FAMILY_NAMES = {family: family for family in FAMILIES}
 MAIN_FAMILY = "harmful-middle"
 MAP_MARKET = (8, 1)
-MAP_FAMILIES = ["harmful-middle", "harm-rises"]
+MAP_FAMILIES = ["harmful-middle", "heavy-tail", "harm-rises", "independent"]
 TABLE_MARKETS = [(2, 1), (8, 1), (32, 1), (8, 2), (16, 4), (32, 8), (4, 3), (16, 14)]
 SHAPE_BIDDERS = [2, 4, 8, 16, 32]
 # Designs of the τ-and-penalty figure per distribution: (objective, n, k); an IVCG-PA design
@@ -112,9 +114,10 @@ def load_data(leaf):
 
 
 # Views of the type plane chosen per distribution (zoomed_view options): independent zoomed to
-# the 2.5%–97.5% externality quantiles; heavy-tail also cut at the 80% valuation quantile.
+# the 2.5%–97.5% externality quantiles; heavy-tail also cut at the 80% valuation quantile and
+# shifted right by 10% of its width, so the density is nearer the center.
 VIEW_OPTIONS = {"independent": {"e_levels": (0.025, 0.975)},
-                "heavy-tail": {"e_levels": (0.025, 0.975), "v_top": 0.80}}
+                "heavy-tail": {"e_levels": (0.025, 0.975), "v_top": 0.80, "e_shift": 0.10}}
 
 
 def _quantiles(axis, weights, levels):
@@ -122,17 +125,19 @@ def _quantiles(axis, weights, levels):
     return [float(np.interp(level, cumulative, axis)) for level in levels]
 
 
-def zoomed_view(types, scale="linear", e_levels=(0.005, 0.995), v_top=None):
+def zoomed_view(types, scale="linear", e_levels=(0.005, 0.995), v_top=None, e_shift=0.0):
     """The view of a type-plane panel, zoomed to quantiles of the marginal distributions of e and
     v (from the background density, valuations × externalities), with a 3% margin; v_top
-    overrides the upper valuation quantile of a linear view."""
+    overrides the upper valuation quantile of a linear view; e_shift moves the externality range
+    right by that share of its width."""
     view = figures.type_view(types, scale)
     density = np.asarray(types["background_density"], dtype=float)
     e_low, e_high = _quantiles(np.asarray(types["background_e"]), density.sum(axis=0), e_levels)
     levels = (0.005, 0.995) if scale == "log" else (0.005, v_top or 0.99)
     v_low, v_high = _quantiles(np.asarray(types["background_v"]), density.sum(axis=1), levels)
     e_margin = 0.03 * (e_high - e_low)
-    view["e_limits"] = np.array([e_low - e_margin, e_high + e_margin])
+    shift = e_shift * (e_high - e_low + 2 * e_margin)
+    view["e_limits"] = np.array([e_low - e_margin + shift, e_high + e_margin + shift])
     if scale == "log":
         view["v_limits"] = np.array([max(v_low, 1e-3), v_high * 1.05])
     else:
@@ -215,11 +220,29 @@ def write_table(run, out):
         file.write(FOOTER)
 
 
+def pooled_fill(data, view):
+    """pgfplots fill commands for the bands of bids pooled by an IVCG-PA design, only at the
+    participating types (v ≥ τ(e)), as in the IVCG-PA type-plane figure."""
+    tau = np.asarray(data["tau_grid"], dtype=float)
+    e_grid = np.asarray(data["e_grid"], dtype=float)
+    e_low, e_high = (float(x) for x in view["e_limits"])
+    inside = (e_grid >= e_low) & (e_grid <= e_high)
+    commands = []
+    for low, high in figures._visible_pooled_intervals(data, view):
+        bottom = np.where(np.isfinite(tau), np.clip(tau, low, high), high)[inside]
+        points = [(e, b) for e, b in zip(e_grid[inside], bottom)]
+        points = [(e_low, points[0][1])] + points + [(e_high, points[-1][1]), (e_high, high), (e_low, high)]
+        commands.append(r"\addplot[draw=none,fill=regionqty,forget plot] coordinates {"
+                        + " ".join(f"({e:.4f},{b:.5g})" for e, b in points) + "} -- cycle;")
+    return commands
+
+
 def write_shapes(run, family, view, out):
     """τ and penalty of the SHAPE_CURVES designs of one distribution, and pgfplots commands:
-    the pooled band of an IVCG-PA design first, then penalties (dashed) and τ (solid)."""
+    shapes_<family>.tex draws τ (solid) below the penalties (dashed); shapes_fill_<family>.tex
+    the band of bids pooled by an IVCG-PA design, drawn below the type density."""
     from family_figures_data import RATIO_COLORS
-    columns, names, fills, lines = [], [], [], []
+    columns, names, fills, taus, penalties = [], [], [], [], []
     for objective, n, k in SHAPE_CURVES[family]:
         data = load_data(run / family / "z1" / f"n{n}-k{k}" / f"{objective}_nodes_br")
         mechanism = "ivcg_pa" if objective == "ivcgpa" else "vcg_pa"
@@ -230,16 +253,15 @@ def write_shapes(run, family, view, out):
         names += [f"tau{name}", f"r{name}"]
         color = RATIO_COLORS[min(RATIO_COLORS, key=lambda r: abs(r - n / k))]
         source = rf"{{\familydata/shapes_{family}.dat}}"
-        lines.append(rf"\addplot[{color},line width=1.0pt,densely dashed,forget plot] table[x=e,y=r{name}]{source};")
-        lines.append(rf"\addplot[{color},line width=1.4pt,forget plot] table[x=e,y=tau{name}]{source};")
+        taus.append(rf"\addplot[{color},line width=1.4pt,forget plot] table[x=e,y=tau{name}]{source};")
+        penalties.append(rf"\addplot[{color},line width=1.0pt,densely dashed,forget plot] table[x=e,y=r{name}]{source};")
         if objective == "ivcgpa":
-            e_low, e_high = (float(x) for x in view["e_limits"])
-            fills += [rf"\fill[regionqty] (axis cs:{e_low:.4f},{low:.5g}) rectangle (axis cs:{e_high:.4f},{high:.5g});"
-                      for low, high in figures._visible_pooled_intervals(data, view)]
+            fills += pooled_fill(data, view)
         e_grid = data["e_grid"]
     np.savetxt(out / f"shapes_{family}.dat", np.column_stack([e_grid] + columns),
                header="e " + " ".join(names), comments="", fmt="%.5g")
-    (out / f"shapes_{family}.tex").write_text("\n".join(fills + lines) + "\n")
+    (out / f"shapes_{family}.tex").write_text("\n".join(taus + penalties) + "\n")
+    (out / f"shapes_fill_{family}.tex").write_text("\n".join(fills) + "\n")
 
 
 def main(run, out):

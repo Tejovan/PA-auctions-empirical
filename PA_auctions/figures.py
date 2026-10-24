@@ -61,7 +61,7 @@ import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.cm import ScalarMappable
-from matplotlib.colors import LogNorm, SymLogNorm
+from matplotlib.colors import ListedColormap, LogNorm, SymLogNorm
 from matplotlib.transforms import Bbox
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
@@ -125,6 +125,8 @@ REGION_QTY = {"color": "#5e3c99", "alpha": 0.18}
 REFERENCE = {"color": "#52514e", "linewidth": 0.7, "linestyle": (0, (4, 2))}
 INK = "#0b0b0b"
 INK_SECONDARY = "#52514e"
+# Gray scale of type densities: Greys without its white and black ends.
+TYPE_CMAP = ListedColormap(plt.get_cmap("Greys")(np.linspace(0.15, 0.8, 256)), name="types")
 
 STYLE = {
     "font.family": ["Latin Modern Roman", "Latin Modern Math", "DejaVu Sans"], "mathtext.fontset": "cm",
@@ -535,14 +537,14 @@ def draw_types(ax, types, alpha=0.72):
     if str(types["shading"]) == "log":
         masked = np.ma.masked_less_equal(density, density.max() * 1e-5)
         if masked.count():
-            ax.pcolormesh(e_axis, v_axis, masked, cmap="Greys", shading="auto", alpha=alpha,
+            ax.pcolormesh(e_axis, v_axis, masked, cmap=TYPE_CMAP, shading="auto", alpha=alpha,
                           norm=LogNorm(vmin=masked.min(), vmax=masked.max()), rasterized=True,
                           zorder=0)
     else:
         levels = np.linspace(0, density.max(), 9)[1:]
         if density.max() > 0:
             ax.contourf(e_axis, v_axis, density, levels=np.append(levels, density.max() * 1.01),
-                        cmap="Greys", alpha=alpha, zorder=0)
+                        cmap=TYPE_CMAP, alpha=alpha, zorder=0)
     type_plane_axes(ax, types)
 
 

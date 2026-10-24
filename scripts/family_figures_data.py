@@ -1,4 +1,4 @@
-"""Data for two figures across type distributions (draft figures; later the supplement):
+r"""Data for two figures across type distributions (draft figures; later the supplement):
 
   (1) per market: share of the first-best gain of every τ by distribution (top row) and the
       τ of the four forms over each type distribution (bottom row);
@@ -14,7 +14,11 @@ valuation quantiles 0.5% and 99%; VIEW_OPTIONS for independent and heavy-tail). 
                                    %, nan where a run lacks the design)
   family_forms_n<n>k<k>_<family>.dat    e tau0 cutoff affine nodes (VCG-PA τ of each form)
   family_tau_<family>.dat           e and one column n<n>k<k> per market with k < n
-  family_tau_<family>.tex           pgfplots commands drawing those τ (color n/k, style n)
+  family_tau_<family>.tex           pgfplots commands drawing those τ (color n/k, style n; solid
+                                   lines first, dotted last, so dashed and dotted stay visible)
+  family_taufew_<family>.tex        the same for the markets with n/k ≤ FEW_RATIO
+  family_tau_limits.tex             zoomed axis limits for those (\eminZoom<Family> ...): the
+                                    range of the curves, v up to ZOOM_TOP of the view
   bg_<family>.png, family_limits.tex    type background and axis limits of each panel
 """
 
@@ -45,6 +49,23 @@ FORM_MARKETS = [(2, 1), (8, 1), (16, 4)]
 RATIO_COLORS = {8 / 7: "sevenA", 4 / 3: "sevenB", 2: "sevenC", 4: "sevenD", 8: "sevenE",
                 16: "sevenF", 32: "sevenG"}
 BIDDER_STYLES = {2: "dotted", 4: "dash dot dot", 8: "dashdotted", 16: "dashed", 32: "solid"}
+FEW_RATIO = 8
+ZOOM_TOP = 0.85
+
+
+def zoom_limits(view, e_grid, columns):
+    """Axis limits around τ curves: valuations up to ZOOM_TOP of the view, externalities from
+    the first point below that top to the last point with τ > 0 (2% of the view), with a 4% margin."""
+    v_low, v_high = (float(x) for x in view["v_limits"])
+    e_low, e_high = (float(x) for x in view["e_limits"])
+    top = v_low + ZOOM_TOP * (v_high - v_low)
+    taus = np.column_stack(columns)
+    below_top = np.any(taus <= top, axis=1)
+    above_bottom = np.any(taus > max(v_low, 0.0) + 0.02 * (v_high - v_low), axis=1)
+    left = float(e_grid[below_top].min()) if below_top.any() else e_low
+    right = float(e_grid[above_bottom].max()) if above_bottom.any() else e_high
+    margin = 0.04 * (right - left)
+    return max(e_low, left - margin), min(e_high, right + margin), v_low, top
 
 
 def shown(data, view):
@@ -168,6 +189,7 @@ def main(out, folders):
             np.savetxt(out / f"family_forms_n{n}k{k}_{name}.dat", np.column_stack([e_grid] + columns),
                        header="e " + " ".join(FORM_KEYS), comments="", fmt="%.5g")
 
+    zooms = []
     for panel, family, view in panels:
         names, columns, e_grid = [], [], None
         for n, k in runs.markets(family):
@@ -179,13 +201,22 @@ def main(out, folders):
             names.append(f"n{n}k{k}")
         np.savetxt(out / f"family_tau_{panel}.dat", np.column_stack([e_grid] + columns),
                    header="e " + " ".join(names), comments="", fmt="%.5g")
-        commands = []
-        for name in sorted(names, key=lambda m: -int(m[1:].split("k")[0]) / int(m.split("k")[1])):
-            n, k = (int(x) for x in name[1:].split("k"))
-            color = RATIO_COLORS[min(RATIO_COLORS, key=lambda r: abs(r - n / k))]
-            commands.append(rf"\addplot[{color},{BIDDER_STYLES[n]},line width=1.2pt,forget plot,"
-                            rf"unbounded coords=jump] table[x=e,y={name}]{{\familydata/family_tau_{panel}.dat}};")
-        (out / f"family_tau_{panel}.tex").write_text("\n".join(commands) + "\n")
+        markets = [tuple(int(x) for x in name[1:].split("k")) for name in names]
+        # Solid (n = 32) first, dotted (n = 2) last; within one n, larger n/k first.
+        order = sorted(markets, key=lambda m: (-m[0], -m[0] / m[1]))
+        for suffix, chosen in (("tau", order), ("taufew", [m for m in order if m[0] / m[1] <= FEW_RATIO])):
+            commands = []
+            for n, k in chosen:
+                color = RATIO_COLORS[min(RATIO_COLORS, key=lambda r: abs(r - n / k))]
+                commands.append(rf"\addplot[{color},{BIDDER_STYLES[n]},line width=1.2pt,forget plot,"
+                                rf"unbounded coords=jump] table[x=e,y=n{n}k{k}]{{\familydata/family_tau_{panel}.dat}};")
+            (out / f"family_{suffix}_{panel}.tex").write_text("\n".join(commands) + "\n")
+        few = [c for c, m in zip(columns, markets) if m[0] / m[1] <= FEW_RATIO]
+        e_min, e_max, v_min, v_max = zoom_limits(view, np.asarray(e_grid, dtype=float), few)
+        macro = MACROS[panel]
+        zooms.append(rf"\def\eminZoom{macro}{{{e_min:.4f}}}\def\emaxZoom{macro}{{{e_max:.4f}}}"
+                     rf"\def\vminZoom{macro}{{{v_min:.5g}}}\def\vmaxZoom{macro}{{{v_max:.4f}}}")
+    (out / "family_tau_limits.tex").write_text("\n".join(zooms) + "\n")
     print("families", families, "markets", len(markets))
 
 
