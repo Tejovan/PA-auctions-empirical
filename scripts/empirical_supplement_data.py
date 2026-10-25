@@ -1,7 +1,9 @@
 """Tables, pgfplots data and copied run figures for the empirical supplement (additional
 results of the WEB27 paper), from the paper run (configs/paper_run.toml).
 
-    python scripts/empirical_supplement_data.py RUN OUT_DIR
+    python scripts/empirical_supplement_data.py RUN OUT_DIR [EXTRA_RUN ...]
+
+EXTRA_RUN: further runs for the share figures (the run of configs/vcg_guarantee_run.toml).
 
 Writes OUT_DIR/data/ (tables *.tex, curves *.dat, type backgrounds bg_*.png, axis limits
 limits.tex) and copies selected run figures to OUT_DIR/figures/. OUT_DIR/data/ also receives
@@ -68,7 +70,7 @@ def market_tables(run):
 \toprule
  & & \multicolumn{6}{c}{VCG-PA with $\tau$} & \multicolumn{3}{c}{IVCG-PA with $\tau$} & relax. & part.\\
 \cmidrule(lr){3-8}\cmidrule(lr){9-11}
-$n$ & $k$ & $\tau^0$ & $\tau^*$ & relax.\ $\tau$ & cutoff & affine & optimized & cutoff & affine & optimized & bound & gap\\
+$n$ & $k$ & $\tau^0$ & $\tau^{\mathrm{EA}}$ & relax.\ $\tau$ & cutoff & affine & optimized & cutoff & affine & optimized & bound & gap\\
 \midrule
 """)
             for n, k in markets:
@@ -97,7 +99,7 @@ def main_tables(run):
     with open(DATA / "table_gaps.tex", "w") as file:
         file.write(r"""\begin{tabular}{@{}rrrrrrrrrr@{}}
 \toprule
-$n$ & $k$ & $\mathrm{FB}-\mathrm{OPT}$ & $\mathrm{OPT}-\mathrm{OPT}^{\mathrm{VCG}}$ & cutoff & affine & $\tau^0$ & $\tau^*$ & relax.\ $\tau$ & $J-\mathrm{OPT}^{\mathrm{VCG}}$\\
+$n$ & $k$ & $\mathrm{FB}-\mathrm{OPT}$ & $\mathrm{OPT}-\mathrm{OPT}^{\mathrm{VCG}}$ & cutoff & affine & $\tau^0$ & $\tau^{\mathrm{EA}}$ & relax.\ $\tau$ & $J-\mathrm{OPT}^{\mathrm{VCG}}$\\
 \midrule
 """)
         for n, k in markets:
@@ -230,12 +232,12 @@ def harm_figures(run):
     (DATA / "harm_families.tex").write_text("".join(parts))
 
 
-def main(run, out):
+def main(run, out, extra=()):
     global DATA, FIGURES
     DATA, FIGURES = out / "data", out / "figures"
     DATA.mkdir(parents=True, exist_ok=True)
     FIGURES.mkdir(exist_ok=True)
-    web27_paper_data.main(run, DATA)
+    web27_paper_data.main(run, DATA, extra)
     market_tables(run)
     main_tables(run)
     family_shares(run)
@@ -246,4 +248,4 @@ def main(run, out):
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]), Path(sys.argv[2]))
+    main(Path(sys.argv[1]), Path(sys.argv[2]), [Path(a) for a in sys.argv[3:]])

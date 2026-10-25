@@ -2,7 +2,10 @@ r"""Data for the empirical section and appendix of the WEB27 submission: pgfplot
 type-distribution background images and LaTeX table rows, from the paper run
 (configs/paper_run.toml).
 
-    python scripts/web27_paper_data.py RUN OUT_DIR
+    python scripts/web27_paper_data.py RUN OUT_DIR [EXTRA_RUN ...]
+
+EXTRA_RUN: further runs read by family_figures_data.py after RUN (the run of
+configs/vcg_guarantee_run.toml for the γ cutoff).
 
 Type-plane panels use zoomed views (zoomed_view with VIEW_OPTIONS); the IVCG-PA type-plane
 figure of harmful-middle (types_hm) shows the whole support. Writes to OUT_DIR:
@@ -112,9 +115,9 @@ def load_types(run, family):
 
 def existing(path):
     """`path`, or, for runs made before threshold-response ascent was renamed from best-response
-    ascent, the same path with its old optimizer label ("nodes_tr" for "nodes_tr")."""
+    ascent, the same path with its old optimizer label ("nodes_br" for "nodes_tr")."""
     path = Path(path)
-    old = Path(str(path).replace("nodes_tr", "nodes_tr"))
+    old = Path(str(path).replace("nodes_tr", "nodes_br"))
     return old if not path.exists() and old.exists() else path
 
 
@@ -349,7 +352,7 @@ def write_shapes(run, family, view, out):
     (out / f"shapes_fill_{family}.tex").write_text("\n".join(fills) + "\n")
 
 
-def main(run, out):
+def main(run, out, extra=()):
     out.mkdir(parents=True, exist_ok=True)
     limits = []
     write_table(run, out)
@@ -420,8 +423,8 @@ def main(run, out):
     (out / "limits.tex").write_text("\n".join(limits) + "\n")
 
     import family_figures_data
-    family_figures_data.main(out, [run])
+    family_figures_data.main(out, [run, *extra])
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]), Path(sys.argv[2]))
+    main(Path(sys.argv[1]), Path(sys.argv[2]), [Path(a) for a in sys.argv[3:]])
