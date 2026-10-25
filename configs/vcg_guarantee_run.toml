@@ -1,0 +1,39 @@
+# VCG-PA guarantee cutoff (submission Prop 6.6 [prop:vcg-guarantee]) on the paper run's
+# distributions and markets: python run.py configs/vcg_guarantee_run.toml
+# τ(e) = max(0, c − e) with Pr[v + e > c] = min{q̂, Pr[v + e > 0]}, q̂ the maximizer of γ_{n,k};
+# check vcg_guarantee: W^VCG(τ)/FB ≥ γ_{n,k}. Paper figures read it together with the paper run:
+#   python scripts/family_figures_data.py OUT runs/<paper-run> runs/<this run>
+
+kind = "evaluate"
+name = "vcg-guarantee"
+description = "WEB27 submission: welfare cutoff of the VCG-PA guarantee γ_{n,k} (Prop 6.6) on the paper run's four distributions and 19 markets with k < n."
+
+[[distributions]]
+source = "independent"
+
+[[distributions]]
+source = "harmful_middle"
+
+[[distributions]]
+source = "heavy_tail"
+
+[[distributions]]
+source = "harm_rises"
+
+[markets]
+pairs = [[2, 1], [4, 1], [8, 1], [16, 1], [32, 1],
+         [4, 2], [8, 2], [16, 2], [32, 2],
+         [8, 4], [16, 4], [32, 4],
+         [16, 8], [32, 8],
+         [4, 3], [8, 6], [16, 12],   # k/n = 3/4
+         [8, 7], [16, 14]]           # k/n = 7/8
+
+[[thresholds]]
+label = "vcg-guarantee"
+cutoff = "vcg_guarantee"
+
+[evaluation]
+num_simulated_auctions = 5000
+
+[checks]
+grid_refinement = true

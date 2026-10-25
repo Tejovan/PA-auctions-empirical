@@ -292,13 +292,12 @@ def threshold_from_spec(spec, parameters=None):
     return form.threshold(spec["parameters"] if parameters is None else parameters)
 
 
-def ex_ante_cutoff(type_distribution, num_bidders, num_goods):
-    """Welfare cutoff w* of the ex ante relaxation for k identical goods (paper Thm 8.9
-    [thm:k-goods]): Pr[v + e > w*] = q* = min{k/n, Pr[v + e > 0]}, w* >= 0.
+def welfare_cutoff_for_probability(type_distribution, probability):
+    """Welfare cutoff c >= 0 with Pr[v + e > c] = min{probability, Pr[v + e > 0]}.
 
     The welfare contribution w = v + e is uniform on [lower + e, upper + e] within a
     cell. For atomic distributions, Pr[w > c] is a step function; the cutoff is then the
-    smallest c with Pr[w > c] <= q*, without the boundary mixing of the paper.
+    smallest c with Pr[w > c] <= the target, without the boundary mixing of the paper.
     """
     low = type_distribution.valuation_lower + type_distribution.externalities
     high = type_distribution.valuation_upper + type_distribution.externalities
@@ -310,7 +309,7 @@ def ex_ante_cutoff(type_distribution, num_bidders, num_goods):
                                                0.0, 1.0), (low > c).astype(float))
         return float(np.sum(probabilities * fraction))
 
-    target = min(num_goods / num_bidders, mass_above(0.0))
+    target = min(probability, mass_above(0.0))
     if mass_above(0.0) <= target:
         return 0.0
     left, right = 0.0, float(high.max())
@@ -321,6 +320,44 @@ def ex_ante_cutoff(type_distribution, num_bidders, num_goods):
         else:
             right = middle
     return right
+
+
+def ex_ante_cutoff(type_distribution, num_bidders, num_goods):
+    """Welfare cutoff w* of the ex ante relaxation for k identical goods (submission Cor 6.5(3)
+    [cor:domains]): Pr[v + e > w*] = q* = min{k/n, Pr[v + e > 0]}, w* >= 0."""
+    return welfare_cutoff_for_probability(type_distribution, num_goods / num_bidders)
+
+
+def _vcg_guarantee_terms(n, k, q):
+    """(E[min{k, Bin(n, q)}]/k, Pr[Bin(n − 1, q) <= k − 1])."""
+    from math import comb
+
+    filled = sum(min(k, j) * comb(n, j) * q ** j * (1 - q) ** (n - j) for j in range(n + 1)) / k
+    free = sum(comb(n - 1, j) * q ** j * (1 - q) ** (n - 1 - j) for j in range(k))
+    return filled, free
+
+
+def vcg_guarantee(num_bidders, num_goods):
+    """(γ_{n,k}, q̂) of submission Prop 6.6 [prop:vcg-guarantee]: γ_{n,k} = max_q min{
+    E[min{k, Bin(n, q)}]/k, Pr[Bin(n − 1, q) <= k − 1]}, attained at q̂. The first term
+    increases and the second decreases in q, so q̂ is where they cross (bisection)."""
+    left, right = 0.0, 1.0
+    for _ in range(200):
+        middle = 0.5 * (left + right)
+        filled, free = _vcg_guarantee_terms(num_bidders, num_goods, middle)
+        if filled < free:
+            left = middle
+        else:
+            right = middle
+    q = 0.5 * (left + right)
+    return min(_vcg_guarantee_terms(num_bidders, num_goods, q)), q
+
+
+def vcg_guarantee_cutoff(type_distribution, num_bidders, num_goods):
+    """Welfare cutoff c of submission Prop 6.6 [prop:vcg-guarantee]: Pr[v + e > c] =
+    min{q̂, Pr[v + e > 0]}; VCG-PA with it attains γ_{n,k} of the first best."""
+    return welfare_cutoff_for_probability(type_distribution,
+                                          vcg_guarantee(num_bidders, num_goods)[1])
 
 
 def ex_ante_guarantee(num_bidders, num_goods):

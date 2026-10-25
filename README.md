@@ -264,7 +264,7 @@ Given τ, evaluated like an optimized τ in every market: required in evaluate r
 |---|---|---|
 | `polynomial` | `[0.0, -1.0]` | Σ_m β_m e^m (coefficients from degree 0) |
 | `constant` | `0.3` | 0.3 |
-| `cutoff` | `0.0` or `"ex_ante"` | max(0, w − e) for welfare cutoff w; `0.0` gives the zero-welfare threshold τ⁰; `"ex_ante"` gives the ex ante cutoff w* with Pr[v + e > w*] = min{k/n, Pr[v + e > 0]} (paper Thm 8.9), computed on the training distribution for each n, k |
+| `cutoff` | `0.0`, `"ex_ante"` or `"vcg_guarantee"` | max(0, w − e) for welfare cutoff w; `0.0` gives the zero-welfare threshold τ⁰; `"ex_ante"` gives the ex ante cutoff w* with Pr[v + e > w*] = min{k/n, Pr[v + e > 0]} (paper Thm 8.9); `"vcg_guarantee"` gives the cutoff c with Pr[v + e > c] = min{q̂, Pr[v + e > 0]} of the VCG-PA guarantee γ_{n,k} (submission Prop 6.6); both computed on the training distribution for each n, k |
 | `relaxation` | `true` | the τ read off the symmetric relaxation for this n, k ([symmetric relaxation](#symmetric-relaxation)), on the `nodes` form: the same τ as the ascent's `relaxation` start; skipped where k ≥ n or the training data are atomic |
 | `tabulated` | `{externalities = [-1, 0], values = [1, 0]}` | piecewise linear through the points, constant outside |
 | `tau_file` | `"runs/<run>/<path>/tau.json"` | a τ saved by an earlier run |
@@ -418,6 +418,7 @@ Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves
 | `grid_refinement` | largest relative change of a gain over VCG on a finer grid, τ fixed | pass if < `grid_relative_tolerance` |
 | `bandwidth_sensitivity` | spread of the gain over VCG across bandwidths | pass if ≤ the width of its bootstrap interval |
 | `ex_ante_guarantee` | W*(τ*)/FB for the ex ante cutoff τ* on the training distribution | pass if ≥ max{β_{n,k}, 1 − 1/e} (paper Thm 8.9); info for atomic training data |
+| `vcg_guarantee` | W^VCG(τ)/FB for the cutoff `"vcg_guarantee"` on the training distribution | pass if ≥ γ_{n,k} (submission Prop 6.6); info for atomic training data |
 | `sufficient_condition` | G(τ)/(FB − W_VCG) for VCG-PA on the design distribution (the continuous version of the training data when `continuous`), G(τ) = E[M^τ⁻ 1{participate} + M^τ⁺ 1{abstain}] = the largest welfare gain from one bidder changing its participation set (any set, rivals fixed) | info; 0 if and only if τ is best among all symmetric participation rules for VCG-PA, and then best among all common τ (paper v3, sufficiency theorem) |
 | `symmetric_relaxation` | (W^VCG(τ) − W_VCG)/(J − W_VCG) on the training grid, J = welfare of the best symmetric participation rule for VCG-PA (an upper bound on VCG-PA welfare over all common τ; midpoint estimate, error of order (interval width)², so values slightly above 1 occur) | info; near 1 means no common τ does much better; the message says whether the best symmetric rule is a threshold rule |
 

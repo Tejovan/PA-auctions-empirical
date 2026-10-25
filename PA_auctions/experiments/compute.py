@@ -71,6 +71,8 @@ from ..threshold_forms import (
     build_threshold_form,
     ex_ante_cutoff,
     ex_ante_guarantee,
+    vcg_guarantee,
+    vcg_guarantee_cutoff,
     externality_nodes,
     threshold_from_spec,
 )
@@ -211,7 +213,8 @@ def given_threshold(entry, training, num_bidders, num_goods):
     """(threshold function, tau.json payload, kind) of a [[thresholds]] entry.
 
     cutoff: τ(e) = max(0, w − e) (excluded if w − e > v̄); "ex_ante" computes the welfare
-    cutoff w* of the ex ante relaxation on the training distribution for this n, k.
+    cutoff w* of the ex ante relaxation on the training distribution for this n, k, and
+    "vcg_guarantee" the welfare cutoff of the VCG-PA guarantee γ_{n,k} (Prop 6.6).
     relaxation: the τ read off the symmetric relaxation for this n, k (the ascent's
     "relaxation" start), on the nodes form.
     """
@@ -220,7 +223,8 @@ def given_threshold(entry, training, num_bidders, num_goods):
     externality_range = (float(nodes[0]), float(nodes[-1]))
     if source == "cutoff":
         cutoff = (ex_ante_cutoff(training, num_bidders, num_goods) if value == "ex_ante"
-                  else float(value))
+                  else vcg_guarantee_cutoff(training, num_bidders, num_goods)
+                  if value == "vcg_guarantee" else float(value))
         form = ThresholdForm("cutoff", 1, np.empty(0), float(training.maximum_valuation),
                              externality_range)
         return form.threshold([cutoff]), {"spec": form.spec([cutoff])}, "form"
@@ -616,6 +620,21 @@ def _checks(combination, config, prepared, threshold, evaluation, first_order, s
                              "W*(τ*)/FB on the training distribution against max{β_{n,k}, "
                              "1 − 1/e} (paper Thm 8.9)" + ("; atomic: no boundary mixing"
                                                           if atomic else "")))
+
+    # VCG-PA guarantee: VCG-PA with the cutoff of q̂ attains γ_{n,k} of the first best
+    # (submission Prop 6.6 [prop:vcg-guarantee]); checked on the training distribution.
+    if entry is not None and entry["source"] == "cutoff" and entry["value"] == "vcg_guarantee":
+        training_outcomes = exact_outcomes(prepared.training, threshold, combination.num_bidders,
+                                           combination.num_goods)
+        ratio = (training_outcomes["vcg_pa"]["welfare"]
+                 / training_outcomes["first_best"]["welfare"])
+        bound = vcg_guarantee(combination.num_bidders, combination.num_goods)[0]
+        atomic = prepared.training.is_atomic
+        checks.append(_check(path, "vcg_guarantee", ratio, bound,
+                             "info" if atomic else "pass" if ratio >= bound - 1e-9 else "fail",
+                             "W^VCG(τ)/FB on the training distribution against γ_{n,k} "
+                             "(submission Prop 6.6)" + ("; atomic: no boundary mixing"
+                                                       if atomic else "")))
 
     # Sufficient condition for VCG-PA (paper v3 Thm [thm:vcg-sufficient]): informational.
     sufficiency = sufficiency or {}

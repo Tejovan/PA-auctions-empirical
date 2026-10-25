@@ -254,21 +254,28 @@ def test_ex_ante_cutoff_meets_the_paper_guarantee_and_gaps_are_reported(tmp_path
     # β_{n,k} table of the paper (Thm 8.9 [thm:k-goods]); the bound is max{β, 1 − 1/e}.
     for (n, k), beta in {(2, 1): 0.750, (10, 5): 0.877, (20, 10): 0.912}.items():
         assert ex_ante_guarantee(n, k) == pytest.approx(beta, abs=5e-4)
+    from PA_auctions.threshold_forms import vcg_guarantee
+    # γ_{n,k} of the submission (Prop 6.6 [prop:vcg-guarantee])
+    for (n, k), gamma in {(2, 1): 0.618, (3, 1): 0.570, (10, 1): 0.518, (10, 5): 0.745}.items():
+        assert vcg_guarantee(n, k)[0] == pytest.approx(gamma, abs=5e-4)
     config_file = tmp_path / "evaluate.toml"
     config_file.write_text(to_toml({
         "kind": "evaluate", "name": "cutoffs",
         "distributions": [{"source": "harm_rises", **SMALL}],
         "markets": {"num_bidders": [4], "num_goods": [1, 2]},
         "thresholds": [{"label": "zero-welfare", "cutoff": 0.0},
-                       {"label": "ex-ante", "cutoff": "ex_ante"}],
+                       {"label": "ex-ante", "cutoff": "ex_ante"},
+                       {"label": "vcg-guarantee", "cutoff": "vcg_guarantee"}],
         "evaluation": {"num_simulated_auctions": 200},
         "output": {"base": str(tmp_path / "runs"), "workers": 1}}))
     folder = run(config_file, assume_yes=True)
     checks = pd.read_csv(folder / "checks.csv")
     guarantee = checks[checks.check == "ex_ante_guarantee"]
     assert len(guarantee) == 2 and (guarantee.verdict == "pass").all()
+    guarantee = checks[checks.check == "vcg_guarantee"]
+    assert len(guarantee) == 2 and (guarantee.verdict == "pass").all()
     gaps = pd.read_csv(folder / "gap-decomposition.csv")
-    assert set(gaps.threshold_class) == {"zero-welfare", "ex-ante"}
+    assert set(gaps.threshold_class) == {"zero-welfare", "ex-ante", "vcg-guarantee"}
     assert (gaps.fb_minus_opt >= -1e-12).all() and (gaps.opt_vcg_minus_class >= -1e-12).all()
     assert "Decomposition of the welfare gap" in (folder / "README.md").read_text()
 

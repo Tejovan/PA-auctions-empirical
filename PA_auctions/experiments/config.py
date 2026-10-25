@@ -245,9 +245,10 @@ def resolve_threshold(table):
     if len(sources) != 1:
         raise ConfigError(f"each [[thresholds]] table needs exactly one of {THRESHOLD_SOURCES}")
     source = sources[0]
-    if source == "cutoff" and not (table["cutoff"] == "ex_ante"
+    if source == "cutoff" and not (table["cutoff"] in ("ex_ante", "vcg_guarantee")
                                    or isinstance(table["cutoff"], (int, float))):
-        raise ConfigError('cutoff must be a number (welfare cutoff w) or "ex_ante"')
+        raise ConfigError('cutoff must be a number (welfare cutoff w), "ex_ante" or '
+                          '"vcg_guarantee"')
     if source == "relaxation" and table["relaxation"] is not True:
         raise ConfigError("relaxation = true is the only value (τ read off the symmetric "
                           "relaxation)")

@@ -10,11 +10,13 @@ Each value is taken from the first run that has it. Type-plane panels are zoomed
 on a linear valuation axis (web27_paper_data.zoomed_view: externality quantiles 0.5% and 99.5%,
 valuation quantiles 0.5% and 99%; VIEW_OPTIONS for independent and heavy-tail). Writes to OUT_DIR:
   family_share_n<n>k<k>.dat        x (distribution index), family, tau0 cutoff affine relaxtau
-                                   vcgpa ivcgpa ivcgaffine exante exanteivcg bound guarantee (share
-                                   of the first-best gain, %, nan where a run lacks the design;
-                                   exante, exanteivcg = VCG-PA, IVCG-PA with the ex ante welfare
-                                   cutoffs, guarantee = the share of max{β_{n,k}, 1 − 1/e}·FB); for
-                                   exante, exanteivcg and guarantee also <c>low
+                                   vcgpa ivcgpa ivcgaffine exante exanteivcg gammacut bound
+                                   guarantee gammabound (share of the first-best gain, %, nan where
+                                   a run lacks the design; exante, exanteivcg = VCG-PA, IVCG-PA with
+                                   the ex ante welfare cutoffs; gammacut = VCG-PA with the cutoff of
+                                   the VCG-PA guarantee (run of configs/vcg_guarantee_run.toml);
+                                   guarantee, gammabound = the shares of max{β_{n,k}, 1 − 1/e}·FB
+                                   and γ_{n,k}·FB); for the columns of LOW_HEIGHTS also <c>low
                                    (the value where it is below SHARE_FLOOR, else nan) and <c>lowy
                                    (LOW_HEIGHTS[c] there, else nan): where to draw marks below the
                                    plotted range
@@ -43,7 +45,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from PA_auctions import figures  # noqa: E402
-from PA_auctions.threshold_forms import ex_ante_guarantee  # noqa: E402
+from PA_auctions.threshold_forms import ex_ante_guarantee, vcg_guarantee  # noqa: E402
 from web27_paper_data import (VIEW_OPTIONS, label, limit_macros, load_data, load_types, padded,  # noqa: E402
                               at_support_top, zoomed_view)
 
@@ -55,9 +57,10 @@ SHARE_KEYS = {"tau0": ("zero-welfare", "share_vcg_pa"), "cutoff": ("vcg_pa_cutof
               "affine": ("vcg_pa_poly1", "share_vcg_pa"), "relaxtau": ("relaxation", "share_vcg_pa"),
               "vcgpa": ("vcg_pa_nodes", "share_vcg_pa"), "ivcgpa": ("ivcg_pa_nodes", "share_ivcg_pa"),
               "ivcgaffine": ("ivcg_pa_poly1", "share_ivcg_pa"), "exante": ("ex-ante", "share_vcg_pa"),
-              "exanteivcg": ("ex-ante", "share_ivcg_pa")}
+              "exanteivcg": ("ex-ante", "share_ivcg_pa"), "gammacut": ("vcg-guarantee", "share_vcg_pa")}
 SHARE_FLOOR = -8.0  # %: lower values are drawn below the axis range and labeled with their value
-LOW_HEIGHTS = {"exante": -9.0, "exanteivcg": -9.0, "guarantee": -19.0}  # % heights of those marks
+LOW_HEIGHTS = {"exante": -8.0, "exanteivcg": -8.0, "gammacut": -8.0, "guarantee": -21.0,
+               "gammabound": -21.0}  # % heights of those marks
 FORM_KEYS = {"tau0": "zero-welfare", "cutoff": "vcg_pa_cutoff", "affine": "vcg_pa_poly1",
              "nodes": "vcg_pa_nodes", "relaxtau": "relaxation", "exante": "ex-ante"}
 FORM_MARKETS = [(2, 1), (8, 1), (16, 4)]
@@ -159,14 +162,18 @@ class Runs:
                 return float(rows.share_vcg_pa.max() + nodes.relaxation_minus_opt_vcg_share.iloc[0])
         return np.nan
 
-    def guarantee(self, family, n, k):
-        """Share of the first-best gain of max{β_{n,k}, 1 − 1/e}·FB (ex ante guarantee)."""
-        _, rows = self.rows(family, n, k, "ex-ante")
-        if rows is None or k >= n:
+    def guarantee(self, family, n, k, factor=ex_ante_guarantee):
+        """Share of the first-best gain of factor(n, k)·FB: max{β_{n,k}, 1 − 1/e} (ex ante
+        guarantee, IVCG-PA) or γ_{n,k} (VCG-PA guarantee)."""
+        if k >= n:
             return np.nan
-        row = rows.iloc[0]
-        first_best, vcg = row.welfare_first_best, row.welfare_vcg
-        return float((ex_ante_guarantee(n, k) * first_best - vcg) / (first_best - vcg))
+        for summary in self.summaries:
+            rows = summary[(summary.distribution == family) & (summary.num_bidders == n)
+                           & (summary.num_goods == k)]
+            if len(rows):
+                first_best, vcg = rows.welfare_first_best.iloc[0], rows.welfare_vcg.iloc[0]
+                return float((factor(n, k) * first_best - vcg) / (first_best - vcg))
+        return np.nan
 
     def vcg_fraction(self, family, n, k):
         """Welfare of VCG without audits as a fraction of the first best."""
@@ -198,6 +205,15 @@ class Runs:
         raise FileNotFoundError(family)
 
 
+BOUNDS = ["bound", "guarantee", "gammabound"]
+
+
+def bounds(runs, family, n, k):
+    """Relaxation bound, ex ante guarantee and VCG-PA guarantee γ_{n,k}, as shares."""
+    return [runs.bound(family, n, k), runs.guarantee(family, n, k),
+            runs.guarantee(family, n, k, lambda n, k: vcg_guarantee(n, k)[0])]
+
+
 def percent(value):
     return "nan" if not np.isfinite(value) else f"{100 * value:.2f}"
 
@@ -218,22 +234,22 @@ def main(out, folders):
     for n, k in markets:
         with open(out / f"family_share_n{n}k{k}.dat", "w") as file:
             extra = [f"{c}{suffix}" for c in LOW_HEIGHTS for suffix in ("low", "lowy")]
-            file.write("x family " + " ".join(list(SHARE_KEYS) + ["bound", "guarantee"] + extra) + "\n")
+            file.write("x family " + " ".join(list(SHARE_KEYS) + BOUNDS + extra) + "\n")
             for index, family in enumerate(families):
                 values = [runs.share(family, n, k, *SHARE_KEYS[c]) for c in SHARE_KEYS]
-                values += [runs.bound(family, n, k), runs.guarantee(family, n, k)]
-                named = dict(zip(list(SHARE_KEYS) + ["bound", "guarantee"], values))
+                values += bounds(runs, family, n, k)
+                named = dict(zip(list(SHARE_KEYS) + BOUNDS, values))
                 for column in LOW_HEIGHTS:
                     low = np.isfinite(named[column]) and 100 * named[column] < SHARE_FLOOR
                     values += [named[column] if low else np.nan, LOW_HEIGHTS[column] / 100 if low else np.nan]
                 file.write(f"{index} {family} " + " ".join(percent(v) for v in values) + "\n")
         # The same designs in % of the first best: W/FB = W0/FB + share·(1 − W0/FB), W0 = VCG without audits.
         with open(out / f"family_fb_n{n}k{k}.dat", "w") as file:
-            file.write("x family " + " ".join(list(SHARE_KEYS) + ["bound", "guarantee", "vcg"]) + "\n")
+            file.write("x family " + " ".join(list(SHARE_KEYS) + BOUNDS + ["vcg"]) + "\n")
             for index, family in enumerate(families):
                 base = runs.vcg_fraction(family, n, k)
                 values = [runs.share(family, n, k, *SHARE_KEYS[c]) for c in SHARE_KEYS]
-                values += [runs.bound(family, n, k), runs.guarantee(family, n, k)]
+                values += bounds(runs, family, n, k)
                 values = [base + v * (1 - base) for v in values] + [base]
                 file.write(f"{index} {family} " + " ".join(percent(v) for v in values) + "\n")
 

@@ -40,7 +40,7 @@ Experiments with figures: `python run.py configs/standard_test.toml` (top-level 
 | `exact_computation.py` | Quantile representation of a mechanism, exact ironing, interim allocation with ties, exact integration of welfare, revenue and the allocation integral R(b) (the penalty); `continuous_bid_segments` for continuous versions. |
 | `auction_simulation.py` | Vectorized Monte Carlo of a score-based auction on sampled type profiles. |
 | `threshold_evaluation.py` | `evaluate_threshold` (main entry point), `ThresholdEvaluation`, `expected_welfare` (optimization objective), `ivcg_scoring_rule_for` (IVCG-PA design to apply elsewhere), `penalty_from_table`, `grid_refinement_check`. |
-| `threshold_forms.py` | Forms of τ searched by the optimizers: `poly<d>`, `knots<K>` (+ exclusion cutoff), `bins<K>`, `cutoff`, `nodes`; `build_threshold_form`, `threshold_from_spec`; `ex_ante_cutoff`, `ex_ante_guarantee` (paper Thm 8.9 [thm:k-goods]). |
+| `threshold_forms.py` | Forms of τ searched by the optimizers: `poly<d>`, `knots<K>` (+ exclusion cutoff), `bins<K>`, `cutoff`, `nodes`; `build_threshold_form`, `threshold_from_spec`; `ex_ante_cutoff`, `ex_ante_guarantee`, `vcg_guarantee`, `vcg_guarantee_cutoff` (paper Thm 8.9 [thm:k-goods]). |
 | `genetic_search.py` | Genetic search over a form's parameters with the exact welfare objective: genetic stage, then Nelder–Mead refinement (default). |
 | `grid_search.py` | Exhaustive grid of the `cutoff` and `poly1` forms with the exact welfare objective, then Nelder–Mead from the best separated grid local maxima. |
 | `marginal_contribution.py` | Exact marginal contribution M^τ(e, v) = (v + e) X^τ(v) − L^τ(v) of a participating type for a fixed auction (rival welfare loss L^τ), as Chebyshev series between breakpoints. |
