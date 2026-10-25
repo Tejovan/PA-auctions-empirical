@@ -110,8 +110,16 @@ def load_types(run, family):
         return {key: data[key] for key in data.files}
 
 
+def existing(path):
+    """`path`, or, for runs made before threshold-response ascent was renamed from best-response
+    ascent, the same path with its old optimizer label ("nodes_tr" for "nodes_tr")."""
+    path = Path(path)
+    old = Path(str(path).replace("nodes_tr", "nodes_tr"))
+    return old if not path.exists() and old.exists() else path
+
+
 def load_data(leaf):
-    with np.load(leaf / "data.npz", allow_pickle=False) as data:
+    with np.load(existing(leaf) / "data.npz", allow_pickle=False) as data:
         return {key: data[key] for key in data.files}
 
 
@@ -310,7 +318,7 @@ def write_shapes(run, family, view, out):
     for n, k in SHAPE_MARKETS:
         color = RATIO_COLORS[min(RATIO_COLORS, key=lambda r: abs(r - n / k))]
         for objective in ["vcgpa"] + (["ivcgpa"] if (n, k) == SHAPE_PAIR[family] else []):
-            data = load_data(run / family / "z1" / f"n{n}-k{k}" / f"{objective}_nodes_br")
+            data = load_data(run / family / "z1" / f"n{n}-k{k}" / f"{objective}_nodes_tr")
             mechanism = "ivcg_pa" if objective == "ivcgpa" else "vcg_pa"
             name = f"{objective}n{n}k{k}"
             columns += [shown_threshold(data, view), at_support_top(data[f"penalty_{mechanism}"], low, vbar)]
@@ -367,7 +375,7 @@ def main(run, out):
         limits.append(limit_macros(macro, view))
         columns, e_grid = [], None
         for n in SHAPE_BIDDERS:
-            data = load_data(run / family / "z1" / f"n{n}-k1" / "vcgpa_nodes_br")
+            data = load_data(run / family / "z1" / f"n{n}-k1" / "vcgpa_nodes_tr")
             e_grid = data["e_grid"]
             columns.append(shown_threshold(data, view))
         np.savetxt(out / f"tau_{family}.dat", np.column_stack([e_grid] + columns),
@@ -375,7 +383,7 @@ def main(run, out):
         write_shapes(run, family, view, out)
         if family in MAP_FAMILIES:
             n, k = MAP_MARKET
-            data = load_data(run / family / "z1" / f"n{n}-k{k}" / "vcgpa_nodes_br")
+            data = load_data(run / family / "z1" / f"n{n}-k{k}" / "vcgpa_nodes_tr")
             mview = map_view(types, family)
             limits.append(limit_macros("Map" + macro, mview, image=False))
             marginal_background(data, mview, out / f"mc_{family}.png")
@@ -385,7 +393,7 @@ def main(run, out):
             columns, names = [], []
             for (n, k) in sorted(main_table, key=lambda m: (m[0] / m[1], m[1])):
                 if k < n:
-                    data = load_data(run / family / "z1" / f"n{n}-k{k}" / "vcgpa_nodes_br")
+                    data = load_data(run / family / "z1" / f"n{n}-k{k}" / "vcgpa_nodes_tr")
                     columns.append(shown_threshold(data, view))
                     names.append(f"n{n}k{k}")
             np.savetxt(out / "tau_markets.dat", np.column_stack([data["e_grid"]] + columns),
@@ -394,7 +402,7 @@ def main(run, out):
     # IVCG-PA type-plane figure, whole support: τ is drawn only where it is inside the view
     # (column tau, nan above it, for a line with jumps); taufill clips it to the top of the view
     # for the abstention region.
-    leaf = run / MAIN_FAMILY / "z1" / "n4-k1" / "ivcgpa_nodes_br"
+    leaf = run / MAIN_FAMILY / "z1" / "n4-k1" / "ivcgpa_nodes_tr"
     data, types = load_data(leaf), load_types(run, MAIN_FAMILY)
     view = background(types, out / "bg_types_hm.png", view=figures.type_view(types, "linear"))
     limits.append(limit_macros("Types", view))

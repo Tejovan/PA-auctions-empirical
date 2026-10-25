@@ -45,7 +45,7 @@ python3 -m venv .venv
 
 The command prints the plan and a time estimate, asks to proceed, computes, draws the figures, and writes the run folder `runs/<date>_<time>_optimize_smoke-test/`. Open its `README.md` for the results.
 
-**A minimal configuration** (`configs/my_run.toml`). It optimizes τ for n ∈ {4, 8, 16}, one good, on the synthetic family `harm_rises`, with two forms of τ, by best-response ascent:
+**A minimal configuration** (`configs/my_run.toml`). It optimizes τ for n ∈ {4, 8, 16}, one good, on the synthetic family `harm_rises`, with two forms of τ, by threshold-response ascent:
 
 ```toml
 kind = "optimize"
@@ -62,7 +62,7 @@ num_goods = [1]
 objectives = ["vcg_pa"]
 
 [[optimizers]]
-method = "best_response"
+method = "threshold_response"
 threshold_forms = ["knots6", "nodes"]
 ```
 
@@ -114,7 +114,7 @@ Unknown keys are an error. Example files in [configs/](configs/):
 | [smoke_test.toml](configs/smoke_test.toml) | smoke test for code changes: 6 combinations (three optimizers, two distributions) through every stage, about 15 s; results not meaningful |
 | [standard_test.toml](configs/standard_test.toml) | standard test: every feature on small grids, 120 combinations, about 3 min with 12 workers |
 | [evaluate_example.toml](configs/evaluate_example.toml) | evaluate run: the zero-welfare threshold τ⁰, the ex ante cutoff τ*, and the optima of an earlier run |
-| [nodes_run.toml](configs/nodes_run.toml) | nodes form, best-response ascent and symmetric relaxation: harmful_middle and tweets (ζ 1, 10, 100), n ∈ {4, 8}, k ∈ {1, 4} (k = n: no competition), both objectives; default grids, 56 combinations, about 5 min with 12 workers |
+| [nodes_run.toml](configs/nodes_run.toml) | nodes form, threshold-response ascent and symmetric relaxation: harmful_middle and tweets (ζ 1, 10, 100), n ∈ {4, 8}, k ∈ {1, 4} (k = n: no competition), both objectives; default grids, 56 combinations, about 5 min with 12 workers |
 | [paper_run.toml](configs/paper_run.toml) | WEB27 paper and supplement in one run: independent, harmful_middle, heavy_tail, harm_rises; 20 markets (k/n from 1/32 to 1); optimized τ for both objectives, best cutoff and best clipped affine τ by [grid search](#grid-search), given τ⁰, τ* and relaxation τ; 716 combinations |
 | [optimize_example.toml](configs/optimize_example.toml) | research-size optimize run on the tweet data (several ζ, per-node τ) |
 
@@ -179,16 +179,16 @@ The forms of τ are set per optimizer (`threshold_forms` in [`[[optimizers]]`](#
 
 ### 3.5 `[[optimizers]]`
 
-Optimize runs only; default: one best-response optimizer. Each table is one optimizer with its own forms of τ; the run computes every objective × optimizer × form of that optimizer (objectives: `[design]`, or the table's own `objectives`). Keys: [every method](#every-method), [genetic search](#genetic-search), [best-response ascent](#best-response-ascent), [symmetric relaxation](#symmetric-relaxation), [grid search](#grid-search).
+Optimize runs only; default: one threshold-response optimizer. Each table is one optimizer with its own forms of τ; the run computes every objective × optimizer × form of that optimizer (objectives: `[design]`, or the table's own `objectives`). Keys: [every method](#every-method), [genetic search](#genetic-search), [threshold-response ascent](#threshold-response-ascent), [symmetric relaxation](#symmetric-relaxation), [grid search](#grid-search).
 
 <a id="every-method"></a>**Every method:**
 
 | Key | Default | Meaning |
 |---|---|---|
-| `method` | required | `genetic` (genetic stage + Nelder–Mead), `best_response` (best-response ascent + gradient polish), `genetic+best_response` (ascent also started from a genetic result), `relaxation` (ascent from the symmetric relaxation only; below), `grid` (every point of a grid + Nelder–Mead; `cutoff` and `poly1` only; below) |
+| `method` | required | `genetic` (genetic stage + Nelder–Mead), `threshold_response` (threshold-response ascent + gradient polish), `genetic+threshold_response` (ascent also started from a genetic result), `relaxation` (ascent from the symmetric relaxation only; below), `grid` (every point of a grid + Nelder–Mead; `cutoff` and `poly1` only; below) |
 | `threshold_forms` | `["knots6"]`; `["nodes"]` for `relaxation`; `["poly1"]` for `grid` | forms of τ this optimizer searches (table below); a form the method cannot search is an error |
 | `objectives` | the `[design]` objectives | objectives of this optimizer only (e.g. `["vcg_pa"]`) |
-| `label` | `ga`, `br`, `ga-br`, `relax`, `grid` | optimizer label in folder names; several tables may share a label if they share the method and give different folders (e.g. one `grid` table per set of objectives) |
+| `label` | `ga`, `tr`, `ga-tr`, `relax`, `grid` | optimizer label in folder names; several tables may share a label if they share the method and give different folders (e.g. one `grid` table per set of objectives) |
 | `time_limit_minutes` | 60 | search time per combination (all stages and starts); past it, each stage stops after its current iteration, later starts are skipped, the best τ so far is kept, and check `search_stop` fails; 0 = no limit |
 
 | Form | τ(e) | Methods |
@@ -197,9 +197,9 @@ Optimize runs only; default: one best-response optimizer. Each table is one opti
 | `knots<K>` | continuous piecewise linear with K knots, plus an exclusion cutoff | all |
 | `bins<K>` | constant on K bins | all |
 | `cutoff` | common welfare cutoff w: τ(e) = max(0, w − e), excluded if w − e > v̄ | genetic, grid |
-| `nodes` | free value at every externality node | best response, genetic+best response, relaxation |
+| `nodes` | free value at every externality node | threshold response, genetic+threshold response, relaxation |
 
-Example: genetic search on a polynomial and a piecewise-linear τ, best-response ascent per node:
+Example: genetic search on a polynomial and a piecewise-linear τ, threshold-response ascent per node:
 
 ```toml
 [[optimizers]]
@@ -207,11 +207,11 @@ method = "genetic"
 threshold_forms = ["poly2", "knots6"]
 
 [[optimizers]]
-method = "best_response"
+method = "threshold_response"
 threshold_forms = ["nodes"]
 ```
 
-<a id="genetic-search"></a>**Genetic search** (`genetic`, and the genetic stage of `genetic+best_response`):
+<a id="genetic-search"></a>**Genetic search** (`genetic`, and the genetic stage of `genetic+threshold_response`):
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -227,7 +227,7 @@ threshold_forms = ["nodes"]
 | `num_local_starts` | 5 | Nelder–Mead starts |
 | `local_max_evaluations` | 2000 | evaluations per Nelder–Mead start |
 
-<a id="best-response-ascent"></a>**Best-response ascent** (`best_response`, `genetic+best_response`):
+<a id="threshold-response-ascent"></a>**Threshold-response ascent** (`threshold_response`, `genetic+threshold_response`):
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -237,13 +237,13 @@ threshold_forms = ["nodes"]
 | `relative_tolerance` | 1e-10 | stop when relative welfare gains fall below this |
 | `polish_rounds` | 3 | gradient polishes (L-BFGS-B, at most 500 welfare evaluations each) |
 | `short_genetic_generations` | 40 | generations of the `short_genetic` start |
-| `genetic_form` | same form, or `knots6` for `nodes` | `genetic+best_response` only: form of the genetic stage |
+| `genetic_form` | same form, or `knots6` for `nodes` | `genetic+threshold_response` only: form of the genetic stage |
 | `warm_start_across_zeta` | false | also start from the optimum at the previous ζ, rescaled: τ(e) = τ_prev(e ζ_prev / ζ); the ζ values of a distribution then run in sequence |
 
-<a id="symmetric-relaxation"></a>**Symmetric relaxation** (`relaxation`). A linear program (`symmetric_relaxation.py`, about 5 s per distribution, n, k) finds the best symmetric participation rule for VCG-PA: each type participates with some probability, the same for all bidders. Its value J bounds the VCG-PA welfare of every common τ from above (midpoint estimate, error of order (interval width)²). The method reads τ off it (each node's threshold is the first valuation at which at least half of the node participates; 0 if that is the node's lowest valuation), projects it on the form, and runs best-response ascent from that single start with the [best-response keys](#best-response-ascent) (`starts` and `num_random_starts` are ignored).
+<a id="symmetric-relaxation"></a>**Symmetric relaxation** (`relaxation`). A linear program (`symmetric_relaxation.py`, about 5 s per distribution, n, k) finds the best symmetric participation rule for VCG-PA: each type participates with some probability, the same for all bidders. Its value J bounds the VCG-PA welfare of every common τ from above (midpoint estimate, error of order (interval width)²). The method reads τ off it (each node's threshold is the first valuation at which at least half of the node participates; 0 if that is the node's lowest valuation), projects it on the form, and runs threshold-response ascent from that single start with the [threshold-response keys](#threshold-response-ascent) (`starts` and `num_random_starts` are ignored).
 
 - **Record:** `results.json` → `search.relaxation`: `value` (J), `threshold_rule` (true: the best symmetric rule is a threshold rule, and the τ read off it is a best common τ for VCG-PA up to the discretization, paper v3), `largest_drop`, `seconds`.
-- **As a start:** the same τ is a default `starts` entry of `best_response`, where the best start is kept; the separate method shows what the relaxation gives alone.
+- **As a start:** the same τ is a default `starts` entry of `threshold_response`, where the best start is kept; the separate method shows what the relaxation gives alone.
 - **Scope:** with the objective `ivcg_pa` it is a start only. Needs k < n and a piecewise-uniform training distribution; other combinations are skipped and listed in the plan.
 
 <a id="grid-search"></a>**Grid search** (`grid`; `grid_search.py`). Exhaustive search of the one- and two-parameter forms, then Nelder–Mead. `cutoff`: `grid_points` welfare cutoffs w, evenly spaced on the genetic search range. `poly1`: `grid_points` × `grid_points` lines in the box of the type plane, by angle θ ∈ (0, π) and offset between the box's lowest and highest corner, so steep and flat lines are equally dense (θ → 0: vertical boundary, τ decreasing; offset 0: all participate; offset 1: all excluded). Nelder–Mead then starts from the best grid points that are strict local maxima of the grid, more than three grid spacings apart. Every evaluation is exact, so the result is at least the best grid value; about 1 ms per VCG-PA evaluation, so 121 × 121 lines take 15 s on one worker (grid points run in parallel).
@@ -365,7 +365,7 @@ Mechanisms: VCG, VCG-PA, IVCG-PA, first best (the welfare-maximizing allocation 
 | `gap-decomposition.csv` | per distribution, ζ, market and class T of thresholds: FB − OPT, OPT − OPT^VCG, OPT^VCG − OPT^VCG_T, also as shares of the first-best gain (paper §10). OPT and OPT^VCG are the best values found in the run, so they are lower bounds; include the `nodes` form for OPT^VCG close to the supremum. With the relaxation: `relaxation_vcg`, `relaxation_minus_opt_vcg` and `relaxation_basis` ([§4.4](#44-checks)) |
 | `tau.json` | τ of the combination; reusable in evaluate runs (`tau_file`, `from_run`) |
 | `tau.csv` | per externality node: mass, τ, excluded flag, penalty for VCG-PA and IVCG-PA |
-| `first-order.csv` | per node and mechanism: threshold status, allocation, penalty, own-allocation charge, displaced term, marginal contribution M, best-response gap, first-order violation, Pigouvian charge |
+| `first-order.csv` | per node and mechanism: threshold status, allocation, penalty, own-allocation charge, displaced term, marginal contribution M, threshold-response gap, first-order violation, Pigouvian charge |
 | `results.json` | every statistic of the combination: settings (`distribution_settings.continuous`), exact outcomes, changes over VCG, shares, bootstrap intervals, search record (with `relaxation` for the relaxation method), sufficiency measures, checks, timings |
 | `data.npz` | arrays behind the figures: simulated and bootstrap draws, ironing intervals, allocation curves, τ and penalty grids, tried τ curves |
 | `types.npz` | grids, density and nodes of the type distribution |
@@ -386,7 +386,7 @@ Every figure is a vector PDF; dense parts (scatter points, maps, tried τ curves
 | `marginal` | `6_marginal-contribution.pdf` | maps of marginal contribution M(e, v) for VCG-PA and IVCG-PA; penalty r(e) vs Pigouvian charge; M at the threshold types | always |
 | `tried` | `search/tried-taus.pdf` | thresholds tried by the search, behind the best one | optimize runs |
 | `trace` | `search/convergence.pdf` | training objective against time, per start and stage | optimize runs |
-| `iterations` | `search/iterations.pdf` | per iteration: share of the first-best gain, distance to the best W, stationarity, first-order violation in M, best-response gap | optimize runs with a search history |
+| `iterations` | `search/iterations.pdf` | per iteration: share of the first-best gain, distance to the best W, stationarity, first-order violation in M, threshold-response gap | optimize runs with a search history |
 
 **Comparisons** (in `compare/` folders):
 
@@ -536,7 +536,7 @@ Every family is a piecewise-uniform distribution on a grid: externalities on nod
 
 | Stage | Distribution |
 |---|---|
-| search (genetic objective, best responses, gradient polish), `first_order` check, symmetric relaxation | the grid, where per-node best responses and gradients are exact |
+| search (genetic objective, threshold responses, gradient polish), `first_order` check, symmetric relaxation | the grid, where per-node threshold responses and gradients are exact |
 | exact outcomes, penalties, simulated auctions, bootstrap of smoothed resamples, IVCG-PA scoring rule, ironing figure, marginal-contribution maps, `sufficient_condition` check | the continuous version: each node's mass spread uniformly over its externality interval (midpoint to midpoint), and the valuation density piecewise linear between cell midpoints |
 
 The continuous version differs from the grid by an error of the same order as the grid's own (second order in the spacing); the exact computation on it is accurate to second order in the piece widths instead of exact, and takes about 5× as long per evaluation. τ is used between the nodes as its form defines it (the `nodes` form interpolates linearly). Atomic data (the test rows by default) and `example_n` (two externality values) keep their externalities. Methods: [PA_auctions/README.md](PA_auctions/README.md#continuous-versions).
@@ -594,11 +594,11 @@ The set has 11,811 tweets created between 2022-12-16 and 2025-01-18, each with a
 | `evaluate_threshold(distribution, τ, n, k, num_simulated_draws=...)` | `threshold_evaluation` | exact outcomes, penalties, simulated auctions |
 | `exact_outcomes(distribution, τ, n, k)` | `threshold_evaluation` | exact outcomes only (welfare and its parts, revenue, penalties, bidder utility) |
 | `expected_welfare(distribution, τ, n, k, mechanism)` | `threshold_evaluation` | the optimization objective |
-| `optimize_threshold(training, form, n, k, objective, optimizer)` | `pipeline` | search for τ (`optimizer`: `genetic`, `best_response`, `genetic+best_response`, `relaxation`, `grid`) |
-| `run_genetic_search`, `run_best_response_ascent` | `genetic_search`, `best_response_ascent` | the two search algorithms |
+| `optimize_threshold(training, form, n, k, objective, optimizer)` | `pipeline` | search for τ (`optimizer`: `genetic`, `threshold_response`, `genetic+threshold_response`, `relaxation`, `grid`) |
+| `run_genetic_search`, `run_threshold_response_ascent` | `genetic_search`, `threshold_response_ascent` | the two search algorithms |
 | `symmetric_relaxation(distribution, n, k)` | `symmetric_relaxation` | best symmetric participation rule for VCG-PA (bound and τ) |
-| `participation_gap(distribution, τ, n, k)` | `best_response_ascent` | G(τ) of the sufficient condition |
-| `first_order_check(distribution, τ, n, k, mechanism)` | `best_response_ascent` | marginal contribution and Pigouvian charge at each threshold |
+| `participation_gap(distribution, τ, n, k)` | `threshold_response_ascent` | G(τ) of the sufficient condition |
+| `first_order_check(distribution, τ, n, k, mechanism)` | `threshold_response_ascent` | marginal contribution and Pigouvian charge at each threshold |
 | `build_threshold_form(label, distribution)`, `threshold_from_spec(spec)` | `threshold_forms` | forms of τ |
 | `run(config_file)`, `make_report(run_folder)` | `experiments.runner`, `experiments.report` | a whole run; its figures |
 

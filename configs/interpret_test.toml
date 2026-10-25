@@ -41,8 +41,8 @@ local_max_evaluations = 60
 num_restarts = 2                 # enough to exercise restarts (default 4)
 
 [[optimizers]]
-label = "br"                     # best-response ascent
-method = "best_response"
+label = "tr"                     # threshold-response ascent
+method = "threshold_response"
 threshold_forms = ["knots8"]
 max_iterations = 100
 num_random_starts = 2            # default 3

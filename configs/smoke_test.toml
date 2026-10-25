@@ -2,7 +2,7 @@
 # figures); for checking code changes in seconds.
 #   python run.py configs/smoke_test.toml --yes
 # Two distributions (synthetic, tweets at one ζ) × one market × three optimizers (genetic and
-# best response on knots4, relaxation on nodes) = 6 combinations, very short searches, coarse
+# threshold response on knots4, relaxation on nodes) = 6 combinations, very short searches, coarse
 # grids, continuous evaluation. Results are not meaningful.
 # Full coverage of the run features: configs/standard_test.toml (96 combinations).
 
@@ -41,15 +41,15 @@ local_max_evaluations = 20
 num_restarts = 2                 # restarts and starts only to exercise them, not to optimize
 
 [[optimizers]]
-label = "br"
-method = "best_response"
+label = "tr"
+method = "threshold_response"
 threshold_forms = ["knots4"]
 max_iterations = 5
 num_random_starts = 1
 short_genetic_generations = 3
 
 [[optimizers]]
-label = "relax"                  # symmetric relaxation, then best-response ascent from it
+label = "relax"                  # symmetric relaxation, then threshold-response ascent from it
 method = "relaxation"
 threshold_forms = ["nodes"]
 max_iterations = 5

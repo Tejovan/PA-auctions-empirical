@@ -1,5 +1,5 @@
 """
-Tests of the threshold forms, the marginal contribution, best-response ascent and the
+Tests of the threshold forms, the marginal contribution, threshold-response ascent and the
 gradient polish. Run from the repository root with
 
     .venv/bin/python -m pytest tests -q
@@ -9,9 +9,9 @@ import numpy as np
 import pytest
 
 from PA_auctions import synthetic_distribution
-from PA_auctions.best_response_ascent import (
+from PA_auctions.threshold_response_ascent import (
     first_order_check,
-    run_best_response_ascent,
+    run_threshold_response_ascent,
     welfare_and_gradient,
 )
 from PA_auctions.marginal_contribution import RivalWelfareLoss
@@ -97,34 +97,34 @@ def test_gradient_matches_finite_differences(mechanism):
 
 
 @pytest.mark.parametrize("label", ["nodes", "knots3", "bins2"])
-def test_best_response_ascent_recovers_example_n(label):
+def test_threshold_response_ascent_recovers_example_n(label):
     c = 0.6
     distribution = synthetic_distribution("example_n", harm=c, num_valuation_cells=60)
-    result = run_best_response_ascent(distribution, label, 2, 1, verbose=False)
+    result = run_threshold_response_ascent(distribution, label, 2, 1, verbose=False)
     assert result.welfare == pytest.approx(example_n_welfare(c, 4 * c / 3), abs=1e-10)
 
 
 def test_optimum_has_zero_marginal_contribution_at_interior_thresholds():
     distribution = synthetic_distribution("harmful_middle", **SMALL_GRID)
-    result = run_best_response_ascent(distribution, "nodes", 6, 2, verbose=False)
+    result = run_threshold_response_ascent(distribution, "nodes", 6, 2, verbose=False)
     form = build_threshold_form("nodes", distribution)
     check = first_order_check(distribution, form.threshold(result.coefficients), 6, 2)
     interior = check[check.status == "interior"]
     assert len(interior) > 0
     assert check.first_order_violation.max() < 1e-4
-    assert check.best_response_gap.sum() < 1e-8
+    assert check.threshold_response_gap.sum() < 1e-8
 
 
-def test_best_response_beats_or_matches_polynomial_genetic_search():
+def test_threshold_response_beats_or_matches_polynomial_genetic_search():
     prepared = prepare_distributions("harm_rises", **SMALL_GRID)
     ga_options = {"num_generations": 15}
     genetic = optimize_threshold(prepared.training, "poly1", 5, 2, optimizer="genetic",
                                  ga_options=ga_options, ga_seed=0, verbose=False)
     combined = optimize_threshold(prepared.training, "knots4", 5, 2,
-                                  optimizer="genetic+best_response", genetic_form="poly1",
+                                  optimizer="genetic+threshold_response", genetic_form="poly1",
                                   ga_options=ga_options, ga_seed=0, verbose=False)
     nodes = optimize_threshold(prepared.training, "nodes", 5, 2, verbose=False)
-    assert combined["optimizer"] == "genetic+best_response"
+    assert combined["optimizer"] == "genetic+threshold_response"
     assert combined["welfare"] >= genetic["welfare"] - 1e-12
     assert nodes["welfare"] >= combined["welfare"] - 1e-9
     assert nodes["form"].kind == "nodes"
@@ -133,24 +133,24 @@ def test_best_response_beats_or_matches_polynomial_genetic_search():
     assert all(len(trace) > 0 for trace in traces)
 
 
-def test_genetic_search_rejects_nodes_and_best_response_rejects_polynomials():
+def test_genetic_search_rejects_nodes_and_threshold_response_rejects_polynomials():
     prepared = prepare_distributions("harm_rises", **SMALL_GRID)
     with pytest.raises(ValueError):
         optimize_threshold(prepared.training, "nodes", 4, 1, optimizer="genetic", verbose=False)
     with pytest.raises(ValueError):
-        optimize_threshold(prepared.training, "poly1", 4, 1, optimizer="best_response",
+        optimize_threshold(prepared.training, "poly1", 4, 1, optimizer="threshold_response",
                            verbose=False)
 
 
 def test_ascent_history_reaches_first_order_conditions():
     distribution = synthetic_distribution("harmful_middle", **SMALL_GRID)
-    result = run_best_response_ascent(distribution, "nodes", 6, 2, verbose=False)
+    result = run_threshold_response_ascent(distribution, "nodes", 6, 2, verbose=False)
     for start in result.summary["starts"]:
         assert start["stop_reason"] in ("no_improving_step", "small_gain")
         last = start["history"][-1]
         assert last["max_marginal"] < 1e-4 and last["stationarity"] < 1e-4
     # τ ≡ 0 satisfies the first-order conditions (a bidder with v = 0 never wins, so
-    # M(e, 0) = 0) but is not optimal; the best-response gap detects it.
+    # M(e, 0) = 0) but is not optimal; the threshold-response gap detects it.
     zero = next(s for s in result.summary["starts"] if s["start"] == "zero")
     assert zero["history"][0]["stationarity"] < 1e-12
     assert zero["history"][0]["gap"] > 1e-3
@@ -161,7 +161,7 @@ def test_time_limit_stops_gracefully():
     import time
 
     distribution = synthetic_distribution("harmful_middle", **SMALL_GRID)
-    result = run_best_response_ascent(distribution, "nodes", 6, 2, verbose=False,
+    result = run_threshold_response_ascent(distribution, "nodes", 6, 2, verbose=False,
                                       deadline=time.time())
     reasons = [s["stop_reason"] for s in result.summary["starts"]]
     assert reasons[0] == "time_limit" and len(reasons) == 7  # 4 named + 3 random starts
@@ -176,7 +176,7 @@ def test_time_limit_stops_gracefully():
 
 
 def test_participation_gap_and_relaxation():
-    from PA_auctions.best_response_ascent import participation_gap
+    from PA_auctions.threshold_response_ascent import participation_gap
     from PA_auctions.symmetric_relaxation import symmetric_relaxation
     from PA_auctions.threshold_functions import polynomial_threshold, tabulated_threshold
 
@@ -204,9 +204,9 @@ def test_nodes_thresholds_take_the_smallest_equivalent_value():
     positive = distribution.probabilities > 0
     lowest = np.full(len(nodes), np.inf)
     np.minimum.at(lowest, node_of_cell[positive], distribution.valuation_lower[positive])
-    for optimizer in ("best_response", "relaxation"):
+    for optimizer in ("threshold_response", "relaxation"):
         result = optimize_threshold(distribution, "nodes", 4, 1, optimizer=optimizer,
-                                    best_response_options={"max_iterations": 20},
+                                    threshold_response_options={"max_iterations": 20},
                                     verbose=False)
         parameters = np.asarray(result["parameters"])
         assert not np.any((parameters > 0) & (parameters <= lowest)), optimizer

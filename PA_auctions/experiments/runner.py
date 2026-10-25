@@ -134,19 +134,19 @@ def _evaluations_per_search(optimizer):
         genetic["population_size"] * genetic["num_generations"]
         + (genetic["num_local_starts"] * genetic["local_max_evaluations"]
            if genetic["local_refinement"] == "nelder_mead" else 0))
-    best_response = optimizer["best_response"]
-    iterations = min(best_response["max_iterations"], 15)
-    num_starts = len(best_response["starts"]) + best_response["num_random_starts"]
-    best_response_count = (30 * best_response["short_genetic_generations"]
-                           if "short_genetic" in best_response["starts"] else 0) + num_starts * (
-        iterations * 4 * (1 + best_response["polish_rounds"]) + 40 * best_response["polish_rounds"])
-    relaxation_count = iterations * 4 * (1 + best_response["polish_rounds"]) + 40 * best_response[
+    threshold_response = optimizer["threshold_response"]
+    iterations = min(threshold_response["max_iterations"], 15)
+    num_starts = len(threshold_response["starts"]) + threshold_response["num_random_starts"]
+    threshold_response_count = (30 * threshold_response["short_genetic_generations"]
+                           if "short_genetic" in threshold_response["starts"] else 0) + num_starts * (
+        iterations * 4 * (1 + threshold_response["polish_rounds"]) + 40 * threshold_response["polish_rounds"])
+    relaxation_count = iterations * 4 * (1 + threshold_response["polish_rounds"]) + 40 * threshold_response[
         "polish_rounds"]  # one start (the linear program is timed as RELAXATION_SECONDS)
     grid = optimizer.get("grid") or {"grid_points": 121, "grid_local_starts": 5,
                                       "grid_local_max_evaluations": 500}
     grid_count = grid["grid_points"] ** 2 + grid["grid_local_starts"] * 150  # poly1 (bound)
-    return {"genetic": genetic_count, "best_response": best_response_count,
-            "genetic+best_response": genetic_count + best_response_count,
+    return {"genetic": genetic_count, "threshold_response": threshold_response_count,
+            "genetic+threshold_response": genetic_count + threshold_response_count,
             "relaxation": relaxation_count, "grid": grid_count}[optimizer["method"]]
 
 

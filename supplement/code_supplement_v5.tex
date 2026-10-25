@@ -46,7 +46,7 @@ Module & Implements \\
 \code{exact\_computation.py} & exact expected outcomes in quantile space: bid segments, ironing, interim allocations, Gauss--Legendre integration; continuous bid segments \\
 \code{marginal\_contribution.py} & marginal contributions $M^\tau$, rival welfare loss $L^\tau$, Pigouvian charges, participation gap \\
 \code{genetic\_search.py} & genetic search with Nelder--Mead refinement \\
-\code{best\_response\_ascent.py} & best-response ascent, starts, line search, L-BFGS-B polish, per-iteration diagnostics \\
+\code{best\_response\_ascent.py} & threshold-response ascent, starts, line search, L-BFGS-B polish, per-iteration diagnostics \\
 \code{symmetric\_relaxation.py} & linear program of the symmetric relaxation and the threshold function read from it \\
 \code{threshold\_evaluation.py} & entry point: outcomes of the four mechanisms for a distribution and $\tau$, exact and simulated \\
 \code{auction\_simulation.py} & simulated auctions on sampled type profiles (common random numbers) \\
@@ -105,7 +105,7 @@ Rerunning the saved \code{config.toml} at the recorded commit reproduces the run
 \paragraph{Test runs.} Two configurations test the code.
 \begin{itemize}
     \item \code{configs/smoke\_test.toml}: 6 combinations through every stage on coarse grids, about 15 seconds; for code changes.
-    \item \code{configs/standard\_test.toml}: every feature, about three minutes. It has two distributions: \code{harmful\_middle}, and the tweet data at $\zeta\in\{5,50\}$. It runs $n\in\{4,8\}$, $k\in\{1,2\}$, both objectives, and three optimizers: genetic search on \code{poly1}, \code{knots4} and \code{cutoff}, best-response ascent on \code{knots4}, and the relaxation on \code{nodes}, with short searches on coarse grids: 120 combinations.
+    \item \code{configs/standard\_test.toml}: every feature, about three minutes. It has two distributions: \code{harmful\_middle}, and the tweet data at $\zeta\in\{5,50\}$. It runs $n\in\{4,8\}$, $k\in\{1,2\}$, both objectives, and three optimizers: genetic search on \code{poly1}, \code{knots4} and \code{cutoff}, threshold-response ascent on \code{knots4}, and the relaxation on \code{nodes}, with short searches on coarse grids: 120 combinations.
 \end{itemize}
 
 \paragraph{Experiments of the main paper.} The main paper and the empirical supplement use one run, \code{configs/paper\_run.toml} (716 combinations). With its run folder \code{RUN},
@@ -145,7 +145,7 @@ File & Contents \\
 \code{gap-decomposition.csv} & the three gaps per distribution, $\zeta$, market and class of thresholds; the relaxation value $J$ and its gap to the best VCG-PA welfare found, with the distribution on which both are measured \\
 \code{tau.json}, \code{tau.csv} & $\tau$ (rebuildable, reusable in evaluate runs); $\tau(e)$ and both penalty functions at the externality nodes \\
 \code{results.json} & every statistic of a combination, including bootstrap intervals, search statistics, convergence trace, the relaxation record and the sufficient-condition measures \\
-\code{first-order.csv} & per node and mechanism: threshold, $X^\tau$, penalty, Pigouvian charge, marginal contribution, best-response gap, first-order violation \\
+\code{first-order.csv} & per node and mechanism: threshold, $X^\tau$, penalty, Pigouvian charge, marginal contribution, threshold-response gap, first-order violation \\
 \code{data.npz} & arrays behind the figures: simulated outcomes, bootstrap resamples, ironing segments, maps of $M^\tau$, tried thresholds \\
 \code{types.npz} & per distribution and $\zeta$: the type distribution drawn behind the figures \\
 \code{README.md} (combination) & results table, files, each figure with its description and preview, figures not drawn and why \\
@@ -170,7 +170,7 @@ Figure & Shows & Drawn \\
 6 marginal contribution & maps of $M^\tau(e,v)$ with the zero contour and $\tau$; penalty against Pigouvian charge; $M^\tau$ at threshold types & always \\
 search: tried & tried thresholds behind the best one & optimize \\
 search: convergence & training objective against time, per start and stage & optimize \\
-search: iterations & per iteration: share of the first-best gain, distance to the best welfare found, stationarity, first-order violation, best-response gap & optimize \\
+search: iterations & per iteration: share of the first-best gain, distance to the best welfare found, stationarity, first-order violation, threshold-response gap & optimize \\
 compare: $\tau$ & $\tau$ of combinations that differ in one input (market, form, optimizer, objective, threshold); and $\tau$ by $n$ at fixed $k$, by $k$ at fixed $n$, and by $k$ at fixed $n/k$ & $\geq 2$ such \\
 compare: $\zeta$ & welfare and gains over VCG against $\zeta$ & several $\zeta$ \\
 compare: share & share of the first-best gain of every combination & always \\

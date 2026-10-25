@@ -36,4 +36,4 @@ from .type_distributions import (
     synthetic_distribution,
 )
 from .threshold_forms import ThresholdForm, build_threshold_form, threshold_from_spec
-from .best_response_ascent import first_order_check, run_best_response_ascent
+from .threshold_response_ascent import first_order_check, run_threshold_response_ascent

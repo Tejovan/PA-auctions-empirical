@@ -7,8 +7,8 @@ Building blocks of one combination of a run (used by experiments/compute.py):
                           and the one it is evaluated on (evaluation)
   optimize_threshold      search for τ in a threshold form (threshold_forms.py)
                           with the exact objective: genetic search,
-                          best-response ascent, both, the symmetric
-                          relaxation followed by best-response ascent, or
+                          threshold-response ascent, both, the symmetric
+                          relaxation followed by threshold-response ascent, or
                           an exhaustive grid with polish (cutoff, poly1)
   bandwidth_sensitivity   redesign τ on the training half smoothed with other
                           bandwidths and evaluate each design on the test half
@@ -18,8 +18,8 @@ distribution (H is known; no sampling uncertainty). Optional grid-refinement
 check of the discretization error.
 
 Continuous evaluation (continuous=True, the default of runs): the search uses
-the piecewise-uniform training distribution, where the best-response ascent's
-per-node best responses and gradients are exact. Everything after the search
+the piecewise-uniform training distribution, where the threshold-response ascent's
+per-node threshold responses and gradients are exact. Everything after the search
 uses continuous versions (TypeDistribution.continuous_version): the evaluation
 distribution (unless atomic), and the design distribution on which the IVCG-PA
 scoring rule, the ironing figure, the marginal-contribution maps and the
@@ -54,20 +54,20 @@ from .empirical import (
     truncate_sample,
     valuation_bound,
 )
-from .best_response_ascent import run_best_response_ascent
+from .threshold_response_ascent import run_threshold_response_ascent
 from .genetic_search import run_genetic_search
 from .grid_search import GRID_FORMS, run_grid_search
 from .parallel import split_workers, parallel_map
 from .symmetric_relaxation import symmetric_relaxation
 from .threshold_evaluation import (AUDITED_MECHANISMS, MECHANISMS, expected_welfare,
                                    ivcg_scoring_rule_for)
-from .threshold_forms import BEST_RESPONSE_FORMS, GENETIC_FORMS, build_threshold_form
+from .threshold_forms import THRESHOLD_RESPONSE_FORMS, GENETIC_FORMS, build_threshold_form
 from .type_distributions import SYNTHETIC_FAMILIES, TypeDistribution, synthetic_distribution
 
 SYNTHETIC_GRID_DEFAULTS = {"num_externality_nodes": 151, "num_valuation_cells": 150}
 EMPIRICAL_GRID_DEFAULTS = {"num_externality_nodes": 241, "num_valuation_cells": 400}
 EVALUATION_CHOICES = ("atomic", "smoothed")
-OPTIMIZERS = ("auto", "genetic", "best_response", "genetic+best_response", "relaxation", "grid")
+OPTIMIZERS = ("auto", "genetic", "threshold_response", "genetic+threshold_response", "relaxation", "grid")
 
 
 def is_synthetic_source(source) -> bool:
@@ -165,17 +165,17 @@ def designed_ivcg_rule(prepared, design_distribution, threshold, num_bidders, nu
 
 
 def resolve_optimizer(optimizer, form_kind):
-    """'auto': genetic search for polynomials, best-response ascent for the other forms."""
+    """'auto': genetic search for polynomials, threshold-response ascent for the other forms."""
     if optimizer not in OPTIMIZERS:
         raise ValueError(f"optimizer must be one of {OPTIMIZERS}")
     if optimizer == "auto":
-        return "genetic" if form_kind == "polynomial" else "best_response"
+        return "genetic" if form_kind == "polynomial" else "threshold_response"
     if optimizer == "grid":
         return optimizer  # form checked in optimize_threshold (cutoff or poly1 only)
     if optimizer == "genetic" and form_kind not in GENETIC_FORMS:
         raise ValueError(f"the genetic search needs a form in {GENETIC_FORMS}")
-    if optimizer != "genetic" and form_kind not in BEST_RESPONSE_FORMS:  # incl. relaxation
-        raise ValueError(f"best-response ascent needs a form in {BEST_RESPONSE_FORMS}")
+    if optimizer != "genetic" and form_kind not in THRESHOLD_RESPONSE_FORMS:  # incl. relaxation
+        raise ValueError(f"threshold-response ascent needs a form in {THRESHOLD_RESPONSE_FORMS}")
     return optimizer
 
 
@@ -187,40 +187,40 @@ def _genetic_restart(options):
 def optimize_threshold(training, threshold_form, num_bidders, num_goods,
                        objective_mechanism="vcg_pa", optimizer="auto", ga_options=None,
                        ga_seed=0, num_restarts=1, initial_solution=None, genetic_form=None,
-                       best_response_options=None, warm_starts=(), verbose=True,
+                       threshold_response_options=None, warm_starts=(), verbose=True,
                        time_limit=None, workers=1, grid_options=None):
     """Search for τ in threshold_form on the training distribution.
 
     threshold_form : label ("poly2", "knots6", "bins10", "nodes") or polynomial degree
-    optimizer      : "auto", "genetic", "best_response", "genetic+best_response"
+    optimizer      : "auto", "genetic", "threshold_response", "genetic+threshold_response"
                      (genetic search in genetic_form, default the same form or knots6
-                     for nodes, then best-response ascent started from its result
+                     for nodes, then threshold-response ascent started from its result
                      as well as from the default starts) or "relaxation" (the
                      thresholds of the best symmetric participation rule for VCG-PA,
                      symmetric_relaxation.py, projected on the form, then
-                     best-response ascent from that single start; piecewise-uniform
+                     threshold-response ascent from that single start; piecewise-uniform
                      training distributions with k < n) or "grid" (every point of a
                      grid of the cutoff or poly1 form, then Nelder–Mead from the best
                      grid local maxima; grid_search.py; options in grid_options)
     initial_solution : genetic search warm start (parameters of the genetic form)
-    warm_starts    : threshold functions used as extra best-response starts
-    best_response_options : keyword options of run_best_response_ascent (starts,
+    warm_starts    : threshold functions used as extra threshold-response starts
+    threshold_response_options : keyword options of run_threshold_response_ascent (starts,
                      max_iterations, relative_tolerance, short_genetic_generations)
     time_limit     : seconds for the whole search; past it, every stage stops gracefully
                      and the best τ found so far is returned (None: no limit)
     workers        : processes: the genetic restarts run simultaneously (the workers
                      left per restart run its Nelder–Mead starts), then the
-                     best-response starts
+                     threshold-response starts
     Returns a dict: form, parameters, welfare, optimizer, search_summaries,
     benchmarks (training welfare of VCG and the first best), and the
     trajectory: candidate parameter vectors as (form index, parameters) pairs, with
-    trajectory_forms the specs of the forms (genetic and best-response forms differ
-    for genetic+best_response).
+    trajectory_forms the specs of the forms (genetic and threshold-response forms differ
+    for genetic+threshold_response).
     """
     form = build_threshold_form(threshold_form, training)
     optimizer = resolve_optimizer(optimizer, form.kind)
     ga_options = dict(ga_options or {})
-    best_response_options = dict(best_response_options or {})
+    threshold_response_options = dict(threshold_response_options or {})
     trajectory, summaries, trajectory_forms = [], [], []
     warm_starts = list(warm_starts)
     deadline = None if time_limit is None else time.time() + time_limit
@@ -247,7 +247,7 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
                 "optimizer": optimizer, "trajectory": trajectory, "benchmarks": benchmarks,
                 "trajectory_forms": trajectory_forms, "search_summaries": summaries}
 
-    if optimizer in ("genetic", "genetic+best_response"):
+    if optimizer in ("genetic", "genetic+threshold_response"):
         if optimizer == "genetic":
             search_form = form
         else:
@@ -289,12 +289,12 @@ def optimize_threshold(training, threshold_form, num_bidders, num_goods,
                               "threshold_rule": bool(relaxation.is_threshold_rule),
                               "largest_drop": relaxation.largest_drop,
                               "seconds": time.time() - begin}
-        best_response_options.update(starts=["relaxation"], num_random_starts=0)
+        threshold_response_options.update(starts=["relaxation"], num_random_starts=0)
         warm_starts = []
-    search = run_best_response_ascent(
+    search = run_threshold_response_ascent(
         training, form, num_bidders, num_goods, objective_mechanism=objective_mechanism,
         warm_starts=warm_starts, seed=ga_seed, verbose=verbose, deadline=deadline, scale=scale,
-        workers=workers, **best_response_options)
+        workers=workers, **threshold_response_options)
     record_trajectory(form, search.trajectory)
     if relaxation_summary is not None:
         search.summary["relaxation"] = relaxation_summary

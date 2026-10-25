@@ -1253,7 +1253,7 @@ def search_history(results, data, types, path_tried, path_trace):
         for point in trace:
             if point["stage"] == "end":
                 continue
-            label = (point["stage"] if point["optimizer"] == "best_response"
+            label = (point["stage"] if point["optimizer"] in ("threshold_response", "best_response")
                      else f"{point['stage']} (run {point['run']})")
             groups.setdefault((point["optimizer"], label), []).append(point)
         for index, ((optimizer, label), points) in enumerate(groups.items()):
@@ -1294,7 +1294,7 @@ def search_iterations(results, path, tolerances):
     (a) share of the first-best gain (W − W_VCG)/(FB − W_VCG) on the training
     distribution; (b) distance to the best welfare found, in units of the first-best
     gain; (c) stationarity (projected gradient of W in the form's parameters); (d)
-    largest violation of the first-order conditions in M(e, τ(e))/v̄; (e) best-response
+    largest violation of the first-order conditions in M(e, τ(e))/v̄; (e) threshold-response
     gap. tolerances: target levels drawn in (b)–(e).
     """
     combination, search = results["combination"], results["search"]
@@ -1348,7 +1348,7 @@ def search_iterations(results, path, tolerances):
                    "(c) Stationarity in the form's parameters θ"),
                   (axes[1, 1], "max_marginal", "first-order violation in M / v̄",
                    "(d) Zero marginal contribution"),
-                  (axes[2, 0], "gap", "best-response gap / (FB − W_VCG)",
+                  (axes[2, 0], "gap", "threshold-response gap / (FB − W_VCG)",
                    "(e) Gain of one bidder deviating alone"))
         for ax, key, label, title in panels:
             ax.set_title(title, loc="left")
@@ -1356,7 +1356,7 @@ def search_iterations(results, path, tolerances):
             ax.xaxis.set_tick_params(labelbottom=True)
             if not diagnostics:
                 ax.set_yticks([])
-                ax.text(0.5, 0.5, "best-response ascent only\n(forms knots, bins, nodes)",
+                ax.text(0.5, 0.5, "threshold-response ascent only\n(forms knots, bins, nodes)",
                         transform=ax.transAxes, ha="center", va="center", fontsize=7,
                         color=INK_SECONDARY)
                 continue
@@ -1366,7 +1366,7 @@ def search_iterations(results, path, tolerances):
         _shared_legend(fig, handles, columns=2)
         note = (f"Training distribution: W_VCG = {compact(benchmarks['vcg'])}, "
                 f"FB = {compact(benchmarks['first_best'])}, best W found = {compact(best)}. "
-                f"(c)–(e): best-response ascent, at the τ of each iteration; hollow circles in "
+                f"(c)–(e): threshold-response ascent, at the τ of each iteration; hollow circles in "
                 f"(a): after a gradient polish. (c) is zero at a stationary point in the form, (d) "
                 f"at a τ that meets the first-order conditions node by node (|M| at interior τ, "
                 f"M(e, 0) < 0 at τ = 0, M(e, v̄) > 0 at exclusion; need not reach zero for "

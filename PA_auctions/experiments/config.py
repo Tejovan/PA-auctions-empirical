@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..grid_search import GRID_FORMS
-from ..threshold_forms import BEST_RESPONSE_FORMS, GENETIC_FORMS, parse_form_label
+from ..threshold_forms import THRESHOLD_RESPONSE_FORMS, GENETIC_FORMS, parse_form_label
 from ..type_distributions import SYNTHETIC_FAMILIES
 
 CODE_ROOT = Path(__file__).resolve().parents[2]
@@ -39,12 +39,16 @@ DATA_SETS = {"tweets": "data/samples/g_full_tweets.csv"}
 RUN_KINDS = ("optimize", "evaluate")
 OBJECTIVES = ("vcg_pa", "ivcg_pa")
 OBJECTIVE_SHORT = {"vcg_pa": "vcgpa", "ivcg_pa": "ivcgpa"}
-METHODS = ("genetic", "best_response", "genetic+best_response", "relaxation", "grid")
-METHOD_LABELS = {"genetic": "ga", "best_response": "br", "genetic+best_response": "ga-br",
+METHODS = ("genetic", "threshold_response", "genetic+threshold_response", "relaxation", "grid")
+METHOD_LABELS = {"genetic": "ga", "threshold_response": "tr", "genetic+threshold_response": "ga-tr",
                  "relaxation": "relax", "grid": "grid"}
+# Method names before best-response ascent was renamed threshold-response ascent (old configs and
+# run.toml files).
+LEGACY_METHODS = {"best_response": "threshold_response",
+                  "genetic+best_response": "genetic+threshold_response"}
 # Threshold forms of an [[optimizers]] table without threshold_forms.
-DEFAULT_FORMS = {"genetic": ["knots6"], "best_response": ["knots6"],
-                 "genetic+best_response": ["knots6"], "relaxation": ["nodes"],
+DEFAULT_FORMS = {"genetic": ["knots6"], "threshold_response": ["knots6"],
+                 "genetic+threshold_response": ["knots6"], "relaxation": ["nodes"],
                  "grid": ["poly1"]}
 
 SYNTHETIC_DEFAULTS = {
@@ -78,7 +82,7 @@ GENETIC_DEFAULTS = {
     "local_max_evaluations": 2000,
     "num_restarts": 4,
 }
-BEST_RESPONSE_DEFAULTS = {
+THRESHOLD_RESPONSE_DEFAULTS = {
     "starts": ["zero", "zero_welfare", "short_genetic", "relaxation"],
     "num_random_starts": 3,
     "max_iterations": 100,
@@ -93,8 +97,8 @@ GRID_DEFAULTS = {  # grid search (grid_search.py): cutoff and poly1 forms only
 }
 OPTIMIZER_OTHER_DEFAULTS = {
     "objectives": None,  # None: the [design] objectives; else a subset for this optimizer
-    "genetic_form": None,  # genetic+best_response: form of the genetic stage
-    "warm_start_across_zeta": False,  # best response: also start from the previous ζ's optimum
+    "genetic_form": None,  # genetic+threshold_response: form of the genetic stage
+    "warm_start_across_zeta": False,  # threshold response: also start from the previous ζ's optimum
     "time_limit_minutes": 60,  # per combination's search; 0 = no limit
 }
 SECTION_DEFAULTS = {
@@ -189,15 +193,16 @@ def method_accepts_form(method, form_label):
         return str(form_label).strip().lower() in GRID_FORMS
     if method == "genetic":
         return kind in GENETIC_FORMS
-    return kind in BEST_RESPONSE_FORMS
+    return kind in THRESHOLD_RESPONSE_FORMS
 
 
 def resolve_optimizer(table):
     """An [[optimizers]] table: label, method, threshold forms and the method's parameters."""
     table = dict(table)
-    for group in ("genetic", "best_response", "grid"):  # nested in a resolved configuration
+    for group in ("genetic", "threshold_response", "best_response", "grid"):  # nested in a resolved configuration
         table.update(table.pop(group, {}))
     method = table.pop("method", None)
+    method = LEGACY_METHODS.get(method, method)
     if method not in METHODS:
         raise ConfigError(f"[[optimizers]] method must be one of {METHODS}, got {method!r}")
     label = table.pop("label", METHOD_LABELS[method])
@@ -206,14 +211,14 @@ def resolve_optimizer(table):
         parse_form_label(form)  # raises on an unknown label
         if not method_accepts_form(method, form):
             accepted = {"genetic": GENETIC_FORMS, "grid": GRID_FORMS}.get(method,
-                                                                         BEST_RESPONSE_FORMS)
+                                                                         THRESHOLD_RESPONSE_FORMS)
             raise ConfigError(f"optimizer {label}: method {method} cannot search form {form!r} "
                               f"(form kinds: {', '.join(accepted)})")
-    allowed = {**GENETIC_DEFAULTS, **BEST_RESPONSE_DEFAULTS, **GRID_DEFAULTS,
+    allowed = {**GENETIC_DEFAULTS, **THRESHOLD_RESPONSE_DEFAULTS, **GRID_DEFAULTS,
                **OPTIMIZER_OTHER_DEFAULTS}
     _check_keys(table, allowed, f"optimizer {label}")
     genetic = {key: table.get(key, value) for key, value in GENETIC_DEFAULTS.items()}
-    best_response = {key: table.get(key, value) for key, value in BEST_RESPONSE_DEFAULTS.items()}
+    threshold_response = {key: table.get(key, value) for key, value in THRESHOLD_RESPONSE_DEFAULTS.items()}
     grid = {key: table.get(key, value) for key, value in GRID_DEFAULTS.items()}
     other = {key: table.get(key, value) for key, value in OPTIMIZER_OTHER_DEFAULTS.items()}
     if other["objectives"] is not None:
@@ -225,7 +230,7 @@ def resolve_optimizer(table):
     if not (isinstance(grid["grid_points"], int) and grid["grid_points"] >= 3):
         raise ConfigError(f"optimizer {label}: grid_points must be an integer >= 3")
     return {"label": label, "method": method, "threshold_forms": forms, "genetic": genetic,
-            "best_response": best_response, "grid": grid, **other}
+            "threshold_response": threshold_response, "grid": grid, **other}
 
 
 THRESHOLD_SOURCES = ("polynomial", "constant", "tabulated", "cutoff", "relaxation", "tau_file",
@@ -305,7 +310,7 @@ def resolve_config(raw):
     if kind == "optimize":
         # Given τ are evaluated next to the optimized ones (benchmarks)
         config["thresholds"] = [resolve_threshold(t) for t in raw.get("thresholds", [])]
-        optimizers = raw.get("optimizers") or [{"method": "best_response"}]
+        optimizers = raw.get("optimizers") or [{"method": "threshold_response"}]
         config["optimizers"] = [resolve_optimizer(t) for t in optimizers]
         # Tables may share a label (e.g. one grid table per set of objectives) if they share
         # the method; expand() then checks that no two combinations share a folder.

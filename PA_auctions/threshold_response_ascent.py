@@ -1,7 +1,7 @@
 """
-best_response_ascent.py
+threshold_response_ascent.py
 
-Best-response ascent: search for a common threshold function τ (in a
+Threshold-response ascent: search for a common threshold function τ (in a
 threshold_forms.ThresholdForm of kind knots, bins or nodes) that maximizes the
 exact expected welfare of VCG-PA or IVCG-PA.
 
@@ -13,16 +13,16 @@ bidder's participation set (Prop. 7.4 [prop:decomposition]):
     g_e(t) = E[1{v >= t, e_i = e} M^τ(e, v)],
 
 with the marginal contribution M^τ(e, v) = A^τ(v) + e X^τ(v) (marginal_contribution.py).
-The best response of one bidder maximizes Σ_e g_e(τ(e)) over the form
-(Cor. 7.5 [cor:best-response]). For a common τ (all bidders move together), the derivative
+The threshold response of one bidder maximizes Σ_e g_e(τ(e)) over the form
+(Cor. 7.5 [cor:threshold-response]). For a common τ (all bidders move together), the derivative
 of W in τ(e) is −n Pr[e] f(τ(e) | e) M^τ(e, τ(e)) (Prop. 7.9 [prop:zero-marginal-equal]),
-so the best response
+so the threshold response
 is an ascent direction but not an improvement guarantee: each iteration
 
   1. computes A^τ, X^τ exactly for the current τ (one model of the objective
      auction; for IVCG-PA the ironed scores of the current τ are held fixed,
      justified at a joint optimum, §7.6 [sec:joint]),
-  2. computes the best response τ' within the form:
+  2. computes the threshold response τ' within the form:
        nodes, bins : for each node (bin), the exact maximizer of g (of the sum
                      of g over the bin's nodes) over t ∈ [0, v̄] ∪ {v̄⁺}:
                      candidates are the breakpoints of the valuation grid and
@@ -37,8 +37,8 @@ is an ascent direction but not an improvement guarantee: each iteration
 It stops when no step raises W, when the relative gain of two consecutive
 iterations is below relative_tolerance, or after max_iterations.
 
-Gradient polish. A profile of best responses need not maximize W over common
-thresholds (a best response moves one bidder; the common τ moves all n), so the
+Gradient polish. A profile of threshold responses need not maximize W over common
+thresholds (a threshold response moves one bidder; the common τ moves all n), so the
 ascent can stop short of the optimum. After it stops, L-BFGS-B maximizes W
 over the form's parameters with the exact gradient
 
@@ -91,13 +91,13 @@ Per-iteration diagnostics (history of each start), at the current τ:
                     max(0, M(e, v̄)) at exclusion, counted only at nodes where moving
                     τ(e) in the improving direction changes W: the joint density of
                     (e, v) on that side of τ(e) times |M| is above NEGLIGIBLE_SLOPE.
-  gap               best-response gap Σ_e max_t g_e(t) − Σ_e g_e(τ(e)), in units of
+  gap               threshold-response gap Σ_e max_t g_e(t) − Σ_e g_e(τ(e)), in units of
                     scale: the gain one bidder could get by deviating alone.
-Not zero at an optimum in general: a common optimum need not be a best response.
+Not zero at an optimum in general: a common optimum need not be a threshold response.
 
 Diagnostics: first_order_check reports, at each externality node, the marginal
 contribution of the threshold type, the penalty, the own-allocation charge −e X^τ,
-the displaced welfare term, and the best-response gap.
+the displaced welfare term, and the threshold-response gap.
 """
 
 import time
@@ -111,7 +111,7 @@ from .marginal_contribution import RivalWelfareLoss, valuation_functions
 from .parallel import parallel_map
 from .threshold_evaluation import build_mechanism_model, expected_welfare
 from .threshold_functions import constant_threshold, tabulated_threshold
-from .threshold_forms import BEST_RESPONSE_FORMS, build_threshold_form, externality_nodes
+from .threshold_forms import THRESHOLD_RESPONSE_FORMS, build_threshold_form, externality_nodes
 
 DEFAULT_STARTS = ("zero", "zero_welfare", "short_genetic", "relaxation")
 # A node's first-order condition is checked only where one bidder's welfare slope in its
@@ -265,7 +265,7 @@ class ParticipationPayoffs:
         return self._best_atomic() if self.atomic else self._best_piecewise_uniform()
 
 
-# ─── Best response within a form ──────────────────────────────────────────────
+# ─── Threshold response within a form ──────────────────────────────────────────────
 
 
 def _group_of_cells(form, type_distribution):
@@ -333,7 +333,7 @@ def _knot_dynamic_program(payoffs, form, node_values, grids):
     return np.append(values, cutoff), float(cut_values[best])
 
 
-def _knot_best_response(payoffs, form, type_distribution, current_parameters):
+def _knot_threshold_response(payoffs, form, type_distribution, current_parameters):
     node_values, _, _ = externality_nodes(type_distribution)
     base = _knot_value_grid(type_distribution, form, KNOT_GRID_SIZE)
     grids = [np.unique(np.append(base, value)) for value in current_parameters[:-1]]
@@ -349,9 +349,9 @@ def _knot_best_response(payoffs, form, type_distribution, current_parameters):
     return parameters, value
 
 
-def best_response(type_distribution, form, current_parameters, num_bidders, num_goods,
+def threshold_response(type_distribution, form, current_parameters, num_bidders, num_goods,
                   mechanism):
-    """Best-response parameters of the form against the current τ, the current and best
+    """Threshold-response parameters of the form against the current τ, the current and best
     one-bidder payoffs Σ g, and the payoffs object (for diagnostics)."""
     threshold = form.threshold(current_parameters)
     model = build_mechanism_model(mechanism, type_distribution, threshold, num_bidders, num_goods)
@@ -363,7 +363,7 @@ def best_response(type_distribution, form, current_parameters, num_bidders, num_
                                             len(node_values))
         current_value = float(np.sum(node_payoffs.payoff(
             np.arange(len(node_values)), form.finite_values(current_parameters, node_values))))
-        parameters, best_value = _knot_best_response(node_payoffs, form, type_distribution,
+        parameters, best_value = _knot_threshold_response(node_payoffs, form, type_distribution,
                                                      current_parameters)
         return parameters, current_value, max(best_value, current_value), node_payoffs
     groups, num_groups = _group_of_cells(form, type_distribution)
@@ -522,7 +522,7 @@ def median_valuation(type_distribution):
 def ascend(type_distribution, form, parameters, num_bidders, num_goods, mechanism,
            max_iterations=100, relative_tolerance=1e-10, verbose=False, deadline=None,
            scale=None, first_iteration=0):
-    """Best-response ascent from one start; returns (parameters, welfare, history,
+    """Threshold-response ascent from one start; returns (parameters, welfare, history,
     stop_reason). History entries: iteration, welfare, step, gap, stationarity,
     max_marginal (measures at that entry's τ), parameters, time."""
     parameters = np.asarray(parameters, dtype=float)
@@ -541,7 +541,7 @@ def ascend(type_distribution, form, parameters, num_bidders, num_goods, mechanis
         if _past(deadline):
             stop_reason = "time_limit"
             break
-        target, current_payoff, best_payoff, payoffs = best_response(
+        target, current_payoff, best_payoff, payoffs = threshold_response(
             type_distribution, form, parameters, num_bidders, num_goods, mechanism)
         gap = best_payoff - current_payoff
         stationarity, max_marginal = first_order_measures(
@@ -565,7 +565,7 @@ def ascend(type_distribution, form, parameters, num_bidders, num_goods, mechanis
                         "parameters": parameters.tolist(), "time": time.time()})
         if verbose:
             print(f"    iteration {iteration:3d}  welfare={welfare:.10g}  step={step:g}  "
-                  f"best-response gap={gap:.3g}")
+                  f"threshold-response gap={gap:.3g}")
         small_gains = small_gains + 1 if gain < relative_tolerance else 0
         if small_gains >= 2:
             stop_reason = "small_gain"
@@ -678,7 +678,7 @@ def _complete_measures(type_distribution, form, entry, num_bidders, num_goods, m
     """Fill the gap and first-order measures of a history entry that has none."""
     if entry["max_marginal"] is not None:
         return
-    target, current_payoff, best_payoff, payoffs = best_response(
+    target, current_payoff, best_payoff, payoffs = threshold_response(
         type_distribution, form, entry["parameters"], num_bidders, num_goods, mechanism)
     stationarity, max_marginal = first_order_measures(
         type_distribution, form, entry["parameters"], num_bidders, payoffs.functions,
@@ -750,7 +750,7 @@ def _run_start(job):
             "trajectory": trajectory, "trace": trace}
 
 
-def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num_goods,
+def run_threshold_response_ascent(type_distribution, threshold_form, num_bidders, num_goods,
                              objective_mechanism="vcg_pa", starts=DEFAULT_STARTS,
                              warm_starts=(), max_iterations=100, relative_tolerance=1e-10,
                              short_genetic_generations=40, polish_rounds=DEFAULT_POLISH_ROUNDS,
@@ -773,12 +773,12 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
     """
     form = (threshold_form if not isinstance(threshold_form, str)
             else build_threshold_form(threshold_form, type_distribution))
-    if form.kind not in BEST_RESPONSE_FORMS:
-        raise ValueError(f"best-response ascent needs a form in {BEST_RESPONSE_FORMS}")
+    if form.kind not in THRESHOLD_RESPONSE_FORMS:
+        raise ValueError(f"threshold-response ascent needs a form in {THRESHOLD_RESPONSE_FORMS}")
     start_list = _start_list(list(starts) + list(warm_starts), num_random_starts,
                              type_distribution, seed, num_bidders, num_goods)
     if verbose:
-        print(f"Best-response ascent ({objective_mechanism}, {form.label}, "
+        print(f"Threshold-response ascent ({objective_mechanism}, {form.label}, "
               f"{form.num_parameters} parameters, {len(start_list)} starts, "
               f"{min(workers, len(start_list))} processes)")
     options = {"max_iterations": max_iterations, "relative_tolerance": relative_tolerance,
@@ -802,7 +802,7 @@ def run_best_response_ascent(type_distribution, threshold_form, num_bidders, num
                   f"{result['stop_reason']})")
     best = max((r for r in summaries if r["welfare"] is not None), key=lambda r: r["welfare"])
     parameters = _lowest_equivalent_thresholds(type_distribution, form, best["parameters"])
-    summary = {"optimizer": "best_response", "form": form.spec(parameters),
+    summary = {"optimizer": "threshold_response", "form": form.spec(parameters),
                "starts": summaries, "trace": trace}
     return SearchResult([float(p) for p in parameters], float(best["welfare"]),
                         trajectory, summary)
@@ -834,7 +834,7 @@ def first_order_check(type_distribution, threshold_function, num_bidders, num_go
     R(τ(e)), own-allocation charge −e X^τ(τ), displaced term L^τ(τ) − p(τ)
     (rival welfare loss minus the critical-value payment; the displaced
     externality Δ^τ in VCG-PA), marginal contribution M^τ(e, τ(e)) = r − (−e X^τ +
-    displaced), the best-response gap max_t g_e(t) − g_e(τ(e)), and first_order_violation
+    displaced), the threshold-response gap max_t g_e(t) − g_e(τ(e)), and first_order_violation
     (/ v̄; 0 where moving τ(e) cannot change W, see first_order_violation).
 
     At an optimal common τ, interior thresholds where the density of v given e
@@ -863,7 +863,7 @@ def first_order_check(type_distribution, threshold_function, num_bidders, num_go
         "allocation": allocation, "penalty": penalty, "own_allocation_charge": -nodes * allocation,
         "displaced_term": loss - payment,
         "marginal_contribution": np.where(raw >= maximum, np.nan, marginal),
-        "best_response_gap": np.maximum(best_value - current, 0.0),
+        "threshold_response_gap": np.maximum(best_value - current, 0.0),
         "first_order_violation": first_order_violation(type_distribution, raw, marginal),
     })
 
@@ -879,7 +879,7 @@ def participation_gap(type_distribution, threshold_function, num_bidders, num_go
         G(τ) = E[M^τ(e, v)^- 1{v >= τ(e)} + M^τ(e, v)^+ 1{v < τ(e)}],
 
     the largest gain over all participation sets, not only threshold sets
-    (best_response_gap of first_order_check is the gain over threshold sets
+    (threshold_response_gap of first_order_check is the gain over threshold sets
     of one node). G(τ) = 0 if and only if every participant has M^τ >= 0 and
     every non-participant M^τ <= 0: for VCG-PA, the condition under which τ
     maximizes welfare among all symmetric participation rules, and hence among

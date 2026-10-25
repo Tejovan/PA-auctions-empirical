@@ -29,7 +29,7 @@ def optimize_config(**sections):
            "distributions": [{"source": "harmful_middle", **SMALL}],
            "markets": {"num_bidders": [4], "num_goods": [1]},
            "design": {"objectives": ["vcg_pa"]},
-           "optimizers": [SHORT_GENETIC, {"method": "best_response", "threshold_forms": ["knots3"],
+           "optimizers": [SHORT_GENETIC, {"method": "threshold_response", "threshold_forms": ["knots3"],
                                           "max_iterations": 10}],
            "evaluation": {"num_simulated_auctions": 300, "num_bootstrap": 4}}
     raw.update(sections)
@@ -49,7 +49,7 @@ def test_configuration_errors_name_the_problem():
     with pytest.raises(ConfigError, match="thresholds"):
         resolve_config({"kind": "evaluate", "distributions": [{"source": "harmful_middle"}]})
     with pytest.raises(ConfigError, match="cannot search form 'poly1'"):
-        resolve_config(optimize_config(optimizers=[{"method": "best_response",
+        resolve_config(optimize_config(optimizers=[{"method": "threshold_response",
                                                     "threshold_forms": ["poly1"]}]))
     with pytest.raises(ConfigError, match="per optimizer"):
         resolve_config(optimize_config(design={"threshold_forms": ["knots3"]}))
@@ -60,14 +60,14 @@ def test_configuration_errors_name_the_problem():
 def test_expansion_runs_every_valid_combination():
     config = resolve_config(optimize_config(
         markets={"num_bidders": [2, 4], "num_goods": [1, 2]},
-        optimizers=[SHORT_GENETIC, {"method": "best_response", "threshold_forms": ["knots3"]},
+        optimizers=[SHORT_GENETIC, {"method": "threshold_response", "threshold_forms": ["knots3"]},
                     {"method": "relaxation"}]))
     combinations, skipped = expand(config)
-    # 4 markets × (ga: poly1, knots3; br: knots3; relax: nodes), relax skipped for n2-k2.
+    # 4 markets × (ga: poly1, knots3; tr: knots3; relax: nodes), relax skipped for n2-k2.
     assert len(combinations) == 15
     assert any("k < n" in reason for _, reason in skipped)
     paths = {c.path for c in combinations}
-    assert {"harmful-middle/z1/n4-k2/vcgpa_knots3_br",
+    assert {"harmful-middle/z1/n4-k2/vcgpa_knots3_tr",
             "harmful-middle/z1/n4-k2/vcgpa_nodes_relax"} <= paths
     assert "harmful-middle/z1/n2-k2/vcgpa_nodes_relax" not in paths
     assert len(paths) == len(combinations)
@@ -76,11 +76,11 @@ def test_expansion_runs_every_valid_combination():
 def test_market_pairs_and_given_thresholds_in_optimize_runs():
     config = resolve_config(optimize_config(
         markets={"pairs": [[4, 1], [8, 2], [2, 2]]},
-        optimizers=[{"method": "best_response", "threshold_forms": ["knots3"]}],
+        optimizers=[{"method": "threshold_response", "threshold_forms": ["knots3"]}],
         thresholds=[{"label": "zero-welfare", "cutoff": 0.0},
                     {"label": "relaxation", "relaxation": True}]))
     combinations, skipped = expand(config)
-    # 3 markets × (br knots3 + τ⁰) + relaxation τ in the two markets with k < n
+    # 3 markets × (tr knots3 + τ⁰) + relaxation τ in the two markets with k < n
     assert len(combinations) == 3 * 2 + 2
     assert {(c.num_bidders, c.num_goods) for c in combinations} == {(4, 1), (8, 2), (2, 2)}
     assert any("relaxation" in d and "n2-k2" in d for d, _ in skipped)
@@ -95,16 +95,16 @@ def test_market_pairs_and_given_thresholds_in_optimize_runs():
 
 def test_market_comparisons_one_direction_at_a_time():
     summary = pd.DataFrame([{"distribution": "d", "zeta": 1.0, "num_bidders": n, "num_goods": k,
-                             "objective": "vcg_pa", "threshold_form": "nodes", "optimizer": "br",
-                             "tau_label": np.nan, "path": f"d/z1/n{n}-k{k}/vcgpa_nodes_br"}
+                             "objective": "vcg_pa", "threshold_form": "nodes", "optimizer": "tr",
+                             "tau_label": np.nan, "path": f"d/z1/n{n}-k{k}/vcgpa_nodes_tr"}
                             for n, k in [(4, 1), (8, 1), (8, 2), (4, 2), (16, 4)]])
     targets = {job[1][3].rsplit("/", 1)[1] for job in report.comparison_jobs("x", summary,
                                                                               "optimize")
                if job[0] == "overlay"}
-    assert {"tau-by-bidders_k1_vcgpa_nodes_br.pdf", "tau-by-bidders_k2_vcgpa_nodes_br.pdf",
-            "tau-by-goods_n8_vcgpa_nodes_br.pdf", "tau-by-goods_n4_vcgpa_nodes_br.pdf",
-            "tau-by-goods-at-fixed-ratio_nk4_vcgpa_nodes_br.pdf",
-            "tau-by-market_vcgpa_nodes_br.pdf"} <= targets
+    assert {"tau-by-bidders_k1_vcgpa_nodes_tr.pdf", "tau-by-bidders_k2_vcgpa_nodes_tr.pdf",
+            "tau-by-goods_n8_vcgpa_nodes_tr.pdf", "tau-by-goods_n4_vcgpa_nodes_tr.pdf",
+            "tau-by-goods-at-fixed-ratio_nk4_vcgpa_nodes_tr.pdf",
+            "tau-by-market_vcgpa_nodes_tr.pdf"} <= targets
     # single-market groups get no figure
     assert not any(tag in t for t in targets for tag in ("_k4_", "_n16_", "_nk2_", "_nk8_"))
 
@@ -118,7 +118,7 @@ def test_toml_writer_round_trip():
 
 def test_synthetic_combination_files_and_accounting(tmp_path):
     config = resolve_config(optimize_config(checks={"grid_refinement": True}))
-    combination = next(c for c in expand(config)[0] if c.optimizer["method"] == "best_response")
+    combination = next(c for c in expand(config)[0] if c.optimizer["method"] == "threshold_response")
     row, checks, threshold = compute_combination(combination, config, tmp_path)
     folder = tmp_path / combination.path
     for name in ("tau.json", "tau.csv", "results.json", "first-order.csv", "data.npz",
@@ -151,7 +151,7 @@ def test_empirical_combination_bootstrap_and_sensitivity(tmp_path):
                   "v_score": rng.lognormal(0.0, 0.8, 1500)}).to_csv(path, index=False)
     config = resolve_config(optimize_config(
         distributions=[{"source": str(path), "label": "toy", **SMALL}],
-        optimizers=[{"method": "best_response", "threshold_forms": ["knots3"],
+        optimizers=[{"method": "threshold_response", "threshold_forms": ["knots3"],
                      "max_iterations": 10}],
         checks={"bandwidth_sensitivity": [0.5, 2.0]}))
     combination = expand(config)[0][0]
@@ -278,7 +278,7 @@ def test_optimize_run_with_given_thresholds_reports_them_as_classes(tmp_path):
     config_file.write_text(to_toml({
         **optimize_config(
             markets={"pairs": [[4, 1]]},
-            optimizers=[{"method": "best_response", "threshold_forms": ["nodes"],
+            optimizers=[{"method": "threshold_response", "threshold_forms": ["nodes"],
                          "max_iterations": 5, "num_random_starts": 0,
                          "short_genetic_generations": 2, "polish_rounds": 1}],
             thresholds=[{"label": "zero-welfare", "cutoff": 0.0},
@@ -293,7 +293,7 @@ def test_optimize_run_with_given_thresholds_reports_them_as_classes(tmp_path):
                                          "tau-relaxation"}
     # The relaxation τ is the ascent's "relaxation" start: same VCG-PA welfare on the grid
     leaf = summary.set_index("path")
-    ascent = json.loads((folder / "harmful-middle/z1/n4-k1/vcgpa_nodes_br/results.json"
+    ascent = json.loads((folder / "harmful-middle/z1/n4-k1/vcgpa_nodes_tr/results.json"
                          ).read_text())
     start = next(s for s in ascent["search"]["starts"] if s["start"] == "relaxation")
     given = leaf.loc["harmful-middle/z1/n4-k1/tau-relaxation"]
@@ -313,7 +313,7 @@ def test_inner_parallelism_matches_serial(tmp_path):
                   "v_score": rng.lognormal(0.0, 0.8, 600)}).to_csv(path, index=False)
     config = resolve_config(optimize_config(
         distributions=[{"source": str(path), "label": "toy", **SMALL}],
-        optimizers=[{"method": "genetic+best_response", "threshold_forms": ["knots3"],
+        optimizers=[{"method": "genetic+threshold_response", "threshold_forms": ["knots3"],
                      "max_iterations": 3,
                      "num_generations": 3, "population_size": 6, "num_parents_mating": 3,
                      "num_restarts": 2, "num_local_starts": 2, "local_max_evaluations": 10,

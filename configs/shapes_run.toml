@@ -14,7 +14,7 @@
 
 kind = "optimize"
 name = "shapes-run"
-description = "Shapes of VCG-PA-optimal τ and penalties: independent, harmful_middle, heavy_tail, two-modes (mixture d); k = 1 with n ∈ {2,4,8,16}, plus (8,2), (16,4); nodes by best-response ascent, cutoff and linear τ by genetic search, τ⁰ given."
+description = "Shapes of VCG-PA-optimal τ and penalties: independent, harmful_middle, heavy_tail, two-modes (mixture d); k = 1 with n ∈ {2,4,8,16}, plus (8,2), (16,4); nodes by threshold-response ascent, cutoff and linear τ by genetic search, τ⁰ given."
 
 [[distributions]]
 source = "independent"
@@ -36,8 +36,8 @@ pairs = [[2, 1], [4, 1], [8, 1], [16, 1], [8, 2], [16, 4]]
 objectives = ["vcg_pa"]
 
 [[optimizers]]
-label = "br"                     # starts: zero, zero_welfare, relaxation, 6 random
-method = "best_response"
+label = "tr"                     # starts: zero, zero_welfare, relaxation, 6 random
+method = "threshold_response"
 threshold_forms = ["nodes"]
 starts = ["zero", "zero_welfare", "relaxation"]
 max_iterations = 100

@@ -29,15 +29,15 @@ FOOTER = "\\bottomrule\n\\end{tabular}\n"
 
 # Run figures copied as they are: (run, path in the run, name in figures/).
 COPIED = [
-    ("harmful-middle/z1/n8-k1/vcgpa_nodes_br/2_expected-outcomes.pdf", "outcomes_n8k1.pdf"),
-    ("harmful-middle/z1/n8-k1/vcgpa_nodes_br/3_outcome-distributions.pdf", "distributions_n8k1.pdf"),
-    ("harmful-middle/z1/n8-k1/vcgpa_nodes_br/6_marginal-contribution.pdf", "marginal_n8k1.pdf"),
-    ("harm-rises/z1/n8-k1/vcgpa_nodes_br/6_marginal-contribution.pdf", "marginal_harm-rises_n8k1.pdf"),
-    ("harmful-middle/z1/n4-k1/ivcgpa_nodes_br/5_ironing.pdf", "ironing_n4k1.pdf"),
-    ("harmful-middle/z1/compare/tau-by-objective_n4-k1_nodes_br.pdf", "tau_by_objective_n4k1.pdf"),
-    ("harmful-middle/z1/compare/tau-by-goods_n32_vcgpa_nodes_br.pdf", "tau_by_goods_n32.pdf"),
-    ("harmful-middle/z1/compare/tau-by-goods-at-fixed-ratio_nk4_vcgpa_nodes_br.pdf", "tau_by_goods_nk4.pdf"),
-    ("harmful-middle/z1/n32-k8/vcgpa_nodes_br/search/convergence.pdf", "convergence_n32k8.pdf"),
+    ("harmful-middle/z1/n8-k1/vcgpa_nodes_tr/2_expected-outcomes.pdf", "outcomes_n8k1.pdf"),
+    ("harmful-middle/z1/n8-k1/vcgpa_nodes_tr/3_outcome-distributions.pdf", "distributions_n8k1.pdf"),
+    ("harmful-middle/z1/n8-k1/vcgpa_nodes_tr/6_marginal-contribution.pdf", "marginal_n8k1.pdf"),
+    ("harm-rises/z1/n8-k1/vcgpa_nodes_tr/6_marginal-contribution.pdf", "marginal_harm-rises_n8k1.pdf"),
+    ("harmful-middle/z1/n4-k1/ivcgpa_nodes_tr/5_ironing.pdf", "ironing_n4k1.pdf"),
+    ("harmful-middle/z1/compare/tau-by-objective_n4-k1_nodes_tr.pdf", "tau_by_objective_n4k1.pdf"),
+    ("harmful-middle/z1/compare/tau-by-goods_n32_vcgpa_nodes_tr.pdf", "tau_by_goods_n32.pdf"),
+    ("harmful-middle/z1/compare/tau-by-goods-at-fixed-ratio_nk4_vcgpa_nodes_tr.pdf", "tau_by_goods_nk4.pdf"),
+    ("harmful-middle/z1/n32-k8/vcgpa_nodes_tr/search/convergence.pdf", "convergence_n32k8.pdf"),
 ]
 
 
@@ -155,8 +155,8 @@ def curves(run):
         write_family_curves(run, family, view)
     view = web27_paper_data.linear_view(load_types(run, MAIN), MAIN)
     leaves = {"tau0": "tau-zero-welfare", "exante": "tau-ex-ante", "relaxation": "tau-relaxation",
-              "cutoff": "vcgpa_cutoff_grid", "affine": "vcgpa_poly1_grid", "vcgpa": "vcgpa_nodes_br",
-              "ivcgpa": "ivcgpa_nodes_br"}
+              "cutoff": "vcgpa_cutoff_grid", "affine": "vcgpa_poly1_grid", "vcgpa": "vcgpa_nodes_tr",
+              "ivcgpa": "ivcgpa_nodes_tr"}
     columns, e_grid = [], None
     for leaf in leaves.values():
         data = load_data(run / MAIN / "z1" / "n8-k1" / leaf)
@@ -168,7 +168,7 @@ def curves(run):
 
 def write_family_curves(run, family, view):
     leaves = {"tau0": "tau-zero-welfare", "cutoff": "vcgpa_cutoff_grid", "line": "vcgpa_poly1_grid",
-              "nodes": "vcgpa_nodes_br"}
+              "nodes": "vcgpa_nodes_tr"}
     columns, e_grid = [], None
     for leaf in leaves.values():
         data = load_data(run / family / "z1" / "n8-k1" / leaf)
@@ -178,7 +178,7 @@ def write_family_curves(run, family, view):
                header="e " + " ".join(leaves), comments="", fmt="%.5g")
     columns = []
     for n in SHAPE_BIDDERS:
-        data = load_data(run / family / "z1" / f"n{n}-k1" / "vcgpa_nodes_br")
+        data = load_data(run / family / "z1" / f"n{n}-k1" / "vcgpa_nodes_tr")
         columns.append(np.asarray(data["penalty_vcg_pa"], dtype=float))
     np.savetxt(DATA / f"penalty_{family}.dat", np.column_stack([e_grid] + columns),
                header="e " + " ".join(f"n{n}" for n in SHAPE_BIDDERS), comments="", fmt="%.5g")
@@ -242,7 +242,7 @@ def main(run, out):
     curves(run)
     harm_figures(run)
     for path, name in COPIED:
-        shutil.copyfile(run / path, FIGURES / name)
+        shutil.copyfile(web27_paper_data.existing(run / path), FIGURES / name)
 
 
 if __name__ == "__main__":

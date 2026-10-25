@@ -10,10 +10,15 @@ Each value is taken from the first run that has it. Type-plane panels are zoomed
 on a linear valuation axis (web27_paper_data.zoomed_view: externality quantiles 0.5% and 99.5%,
 valuation quantiles 0.5% and 99%; VIEW_OPTIONS for independent and heavy-tail). Writes to OUT_DIR:
   family_share_n<n>k<k>.dat        x (distribution index), family, tau0 cutoff affine relaxtau
-                                   vcgpa ivcgpa ivcgaffine bound (share of the first-best gain,
-                                   %, nan where a run lacks the design)
-  family_forms_n<n>k<k>_<family>.dat    e tau0 cutoff affine nodes relaxtau (VCG-PA τ of each form, and
-                                       the relaxation τ)
+                                   vcgpa ivcgpa ivcgaffine exante bound guarantee (share of the
+                                   first-best gain, %, nan where a run lacks the design; exante =
+                                   VCG-PA with the ex ante welfare cutoffs, guarantee = the share of
+                                   max{β_{n,k}, 1 − 1/e}·FB); for exante and guarantee also <c>low
+                                   (the value where it is below SHARE_FLOOR, else nan) and <c>lowy
+                                   (LOW_HEIGHTS[c] there, else nan): where to draw marks below the
+                                   plotted range
+  family_forms_n<n>k<k>_<family>.dat    e tau0 cutoff affine nodes relaxtau exante (VCG-PA τ of each
+                                       form, the relaxation τ and the ex ante welfare cutoffs)
   family_tau_<family>.dat           e and one column n<n>k<k> per market with k < n
   family_tau_<family>.tex           pgfplots commands drawing those τ (color n/k, style n; solid
                                    lines first, dotted last, so dashed and dotted stay visible)
@@ -35,6 +40,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 from PA_auctions import figures  # noqa: E402
+from PA_auctions.threshold_forms import ex_ante_guarantee  # noqa: E402
 from web27_paper_data import (VIEW_OPTIONS, label, limit_macros, load_data, load_types, padded,  # noqa: E402
                               at_support_top, zoomed_view)
 
@@ -45,9 +51,11 @@ MACROS = {"independent": "Independent", "harmful-middle": "HarmfulMiddle",
 SHARE_KEYS = {"tau0": ("zero-welfare", "share_vcg_pa"), "cutoff": ("vcg_pa_cutoff", "share_vcg_pa"),
               "affine": ("vcg_pa_poly1", "share_vcg_pa"), "relaxtau": ("relaxation", "share_vcg_pa"),
               "vcgpa": ("vcg_pa_nodes", "share_vcg_pa"), "ivcgpa": ("ivcg_pa_nodes", "share_ivcg_pa"),
-              "ivcgaffine": ("ivcg_pa_poly1", "share_ivcg_pa")}
+              "ivcgaffine": ("ivcg_pa_poly1", "share_ivcg_pa"), "exante": ("ex-ante", "share_vcg_pa")}
+SHARE_FLOOR = -8.0  # %: lower values are drawn below the axis range and labeled with their value
+LOW_HEIGHTS = {"exante": -5.0, "guarantee": -12.0}  # % heights of those marks
 FORM_KEYS = {"tau0": "zero-welfare", "cutoff": "vcg_pa_cutoff", "affine": "vcg_pa_poly1",
-             "nodes": "vcg_pa_nodes", "relaxtau": "relaxation"}
+             "nodes": "vcg_pa_nodes", "relaxtau": "relaxation", "exante": "ex-ante"}
 FORM_MARKETS = [(2, 1), (8, 1), (16, 4)]
 # Figure (2): color by bidders per good n/k (viridis, figstyle sevenA–G), line style by n.
 RATIO_COLORS = {8 / 7: "sevenA", 4 / 3: "sevenB", 2: "sevenC", 4: "sevenD", 8: "sevenE",
@@ -147,6 +155,15 @@ class Runs:
                 return float(rows.share_vcg_pa.max() + nodes.relaxation_minus_opt_vcg_share.iloc[0])
         return np.nan
 
+    def guarantee(self, family, n, k):
+        """Share of the first-best gain of max{β_{n,k}, 1 − 1/e}·FB (ex ante guarantee)."""
+        _, rows = self.rows(family, n, k, "ex-ante")
+        if rows is None or k >= n:
+            return np.nan
+        row = rows.iloc[0]
+        first_best, vcg = row.welfare_first_best, row.welfare_vcg
+        return float((ex_ante_guarantee(n, k) * first_best - vcg) / (first_best - vcg))
+
     def leaf(self, family, n, k, key):
         folder, rows = self.rows(family, n, k, key)
         if rows is None:
@@ -187,10 +204,14 @@ def main(out, folders):
     markets = sorted(set().union(*(set(runs.markets(f)) for f in families)))
     for n, k in markets:
         with open(out / f"family_share_n{n}k{k}.dat", "w") as file:
-            file.write("x family " + " ".join(list(SHARE_KEYS) + ["bound"]) + "\n")
+            extra = [f"{c}{suffix}" for c in LOW_HEIGHTS for suffix in ("low", "lowy")]
+            file.write("x family " + " ".join(list(SHARE_KEYS) + ["bound", "guarantee"] + extra) + "\n")
             for index, family in enumerate(families):
                 values = [runs.share(family, n, k, *SHARE_KEYS[c]) for c in SHARE_KEYS]
-                values.append(runs.bound(family, n, k))
+                values += [runs.bound(family, n, k), runs.guarantee(family, n, k)]
+                for column, value in zip(LOW_HEIGHTS, (values[list(SHARE_KEYS).index("exante")], values[-1])):
+                    low = np.isfinite(value) and 100 * value < SHARE_FLOOR
+                    values += [value if low else np.nan, LOW_HEIGHTS[column] / 100 if low else np.nan]
                 file.write(f"{index} {family} " + " ".join(percent(v) for v in values) + "\n")
 
     for n, k in FORM_MARKETS:

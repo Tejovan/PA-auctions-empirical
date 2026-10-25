@@ -675,7 +675,7 @@ def _leaf_readme(folder, row, files):
               "- `tau.csv`: per externality node: mass, τ, exclusion, penalties of VCG-PA and "
               "IVCG-PA",
               "- `first-order.csv`: per node and mechanism: marginal contribution M, its terms, "
-              "best-response gap, Pigouvian charge",
+              "threshold-response gap, Pigouvian charge",
               "- `results.json`: every statistic; `data.npz`: arrays behind the figures", "",
               "## Figures", ""]
     lines += _gallery(folder, files, path, FIGURE_INFO)

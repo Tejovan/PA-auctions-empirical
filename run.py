@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 def list_options():
     from PA_auctions.experiments.config import (
-        BEST_RESPONSE_DEFAULTS,
+        THRESHOLD_RESPONSE_DEFAULTS,
         DATA_SETS,
         EMPIRICAL_DEFAULTS,
         GENETIC_DEFAULTS,
@@ -50,7 +50,7 @@ def list_options():
     for title, defaults in (("synthetic distribution keys", SYNTHETIC_DEFAULTS),
                             ("empirical distribution keys", EMPIRICAL_DEFAULTS),
                             ("genetic keys", GENETIC_DEFAULTS),
-                            ("best-response keys", BEST_RESPONSE_DEFAULTS),
+                            ("threshold-response keys", THRESHOLD_RESPONSE_DEFAULTS),
                             *((f"[{s}]", d) for s, d in SECTION_DEFAULTS.items())):
         print(f"\n{title} (defaults):")
         for key, value in defaults.items():

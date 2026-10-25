@@ -43,7 +43,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ..best_response_ascent import first_order_check, participation_gap
+from ..threshold_response_ascent import first_order_check, participation_gap
 from ..empirical import bootstrap_welfare
 from ..marginal_contribution import RivalWelfareLoss
 from ..pipeline import (
@@ -275,7 +275,7 @@ def _search(combination, prepared, config, warm_start):
                           optimizer=optimizer["method"], ga_options=genetic,
                           ga_seed=config["seeds"]["search"], num_restarts=num_restarts,
                           genetic_form=optimizer["genetic_form"],
-                          best_response_options=dict(optimizer["best_response"]), verbose=False,
+                          threshold_response_options=dict(optimizer["threshold_response"]), verbose=False,
                           time_limit=(60.0 * optimizer["time_limit_minutes"]
                                       if optimizer["time_limit_minutes"] else None),
                           workers=config.get("inner_workers", 1))
@@ -312,8 +312,8 @@ def _history(result):
     (generation for the genetic stage), for search/iterations.pdf."""
     lines = []
     for index, summary in enumerate(result["search_summaries"]):
-        if summary.get("optimizer") == "best_response":
-            lines.extend({"optimizer": "best_response", "start": s["start"],
+        if summary.get("optimizer") == "threshold_response":
+            lines.extend({"optimizer": "threshold_response", "start": s["start"],
                           "stop_reason": s["stop_reason"], "points": s["history"]}
                          for s in summary["starts"] if s["history"])
             continue
@@ -338,8 +338,8 @@ def _search_summary(result):
     """Search statistics for results.json (without parameter vectors and traces)."""
     starts = []
     for summary in result["search_summaries"]:
-        if summary.get("optimizer") == "best_response":
-            starts.extend({"optimizer": "best_response", "start": s["start"],
+        if summary.get("optimizer") == "threshold_response":
+            starts.extend({"optimizer": "threshold_response", "start": s["start"],
                            "start_welfare": s["start_welfare"], "welfare": s["welfare"],
                            "iterations": s["iterations"], "seconds": s["seconds"],
                            "polishes": len(s["polish_gains"]), "stop_reason": s["stop_reason"],
@@ -488,7 +488,7 @@ def _sufficiency(prepared, threshold, combination, relaxation_wanted):
     relaxation on the (piecewise-uniform) training distribution.
 
     participation_gap: G(τ) = E[M^- 1{participate} + M^+ 1{abstain}], the largest welfare
-      gain from one bidder changing its participation set (best_response_ascent.
+      gain from one bidder changing its participation set (threshold_response_ascent.
       participation_gap); share = G / (FB − W_VCG). G = 0 for VCG-PA if and only if τ
       maximizes VCG-PA welfare over all symmetric participation rules.
     relaxation: best symmetric participation rule for VCG-PA (symmetric_relaxation), an

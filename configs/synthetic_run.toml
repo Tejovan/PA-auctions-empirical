@@ -1,5 +1,5 @@
 # WEB27 empirical section, synthetic part: harmful_middle (ironing binds), markets with
-# competition (k < n), both objectives; nodes by best-response ascent, the best common welfare
+# competition (k < n), both objectives; nodes by threshold-response ascent, the best common welfare
 # cutoff by genetic search, and three given benchmark τ evaluated in the same run.
 #   python run.py configs/synthetic_run.toml --dry-run
 #   python run.py configs/synthetic_run.toml --yes
@@ -20,7 +20,7 @@
 
 kind = "optimize"
 name = "synthetic-run"
-description = "Synthetic part of the WEB27 empirical section: harmful_middle, 14 markets with k < n (n ≤ 32, k ≤ 8) plus n = k = 4, VCG-PA and IVCG-PA objectives; nodes by best-response ascent, common welfare cutoff by genetic search; given τ⁰, ex ante cutoff τ* and relaxation τ."
+description = "Synthetic part of the WEB27 empirical section: harmful_middle, 14 markets with k < n (n ≤ 32, k ≤ 8) plus n = k = 4, VCG-PA and IVCG-PA objectives; nodes by threshold-response ascent, common welfare cutoff by genetic search; given τ⁰, ex ante cutoff τ* and relaxation τ."
 
 [[distributions]]
 source = "harmful_middle"        # default options and grid (151 × 150)
@@ -36,8 +36,8 @@ pairs = [[2, 1], [4, 1], [8, 1], [16, 1], [32, 1],
 objectives = ["vcg_pa", "ivcg_pa"]
 
 [[optimizers]]
-label = "br"                     # starts: zero, zero_welfare, relaxation, 6 random (no genetic
-method = "best_response"         # start: genetic search only on the cutoff form below)
+label = "tr"                     # starts: zero, zero_welfare, relaxation, 6 random (no genetic
+method = "threshold_response"         # start: genetic search only on the cutoff form below)
 threshold_forms = ["nodes"]
 starts = ["zero", "zero_welfare", "relaxation"]
 max_iterations = 100

@@ -15,7 +15,7 @@
 # relaxation skipped).
 #
 # Designs per market (folder <objective>_<form>_<optimizer> or tau-<label>):
-#   vcgpa_nodes_br, ivcgpa_nodes_br   optimized τ (best-response ascent; starts zero,
+#   vcgpa_nodes_tr, ivcgpa_nodes_tr   optimized τ (threshold-response ascent; starts zero,
 #                                     zero_welfare, relaxation + 6 random)
 #   vcgpa_poly1_grid, ivcgpa_poly1_grid
 #                                     best clipped affine τ(e) = min{v̄, max{0, β₀ + β₁e}}:
@@ -37,7 +37,7 @@
 
 kind = "optimize"
 name = "paper-run"
-description = "WEB27 paper and supplement: independent, harmful_middle, heavy_tail, harm_rises; 20 markets (n ≤ 32, k/n from 1/32 to 1); optimized τ, best cutoff and best clipped affine τ for VCG-PA and IVCG-PA (best-response ascent; grid + Nelder–Mead), given τ⁰, τ* and relaxation τ."
+description = "WEB27 paper and supplement: independent, harmful_middle, heavy_tail, harm_rises; 20 markets (n ≤ 32, k/n from 1/32 to 1); optimized τ, best cutoff and best clipped affine τ for VCG-PA and IVCG-PA (threshold-response ascent; grid + Nelder–Mead), given τ⁰, τ* and relaxation τ."
 
 [[distributions]]
 source = "independent"
@@ -64,8 +64,8 @@ pairs = [[2, 1], [4, 1], [8, 1], [16, 1], [32, 1],
 objectives = ["vcg_pa", "ivcg_pa"]
 
 [[optimizers]]
-label = "br"
-method = "best_response"
+label = "tr"
+method = "threshold_response"
 threshold_forms = ["nodes"]
 starts = ["zero", "zero_welfare", "relaxation"]
 max_iterations = 100

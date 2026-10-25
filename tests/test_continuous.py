@@ -81,7 +81,7 @@ def test_ironing_pools_decreasing_segments():
 def test_relaxation_method_reports_the_bound():
     distribution = synthetic_distribution("example_n", num_valuation_cells=60)
     result = optimize_threshold(distribution, "nodes", 2, 1, optimizer="relaxation",
-                                best_response_options={"max_iterations": 10}, verbose=False)
+                                threshold_response_options={"max_iterations": 10}, verbose=False)
     summary = result["search_summaries"][0]
     assert [start["start"] for start in summary["starts"]] == ["relaxation"]
     relaxation = summary["relaxation"]

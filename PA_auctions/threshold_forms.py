@@ -2,7 +2,7 @@
 threshold_forms.py
 
 Parametric families ("forms") of the common threshold function τ(e) searched
-by the optimizers (genetic_search.py, best_response_ascent.py).
+by the optimizers (genetic_search.py, threshold_response_ascent.py).
 
   polynomial (label "poly<d>")  τ(e) = Σ_m β_m e^m, d + 1 parameters.
                                  Genetic search only.
@@ -20,7 +20,7 @@ by the optimizers (genetic_search.py, best_response_ascent.py).
                                  [thm:k-goods]). Genetic search only.
   nodes      (label "nodes")    one value per externality node of the
                                  distribution (its distinct externality values),
-                                 linear interpolation in between. Best-response
+                                 linear interpolation in between. Threshold-response
                                  ascent only.
 
 Knots and bin edges are evenly spaced quantiles of the marginal distribution of
@@ -50,7 +50,7 @@ import numpy as np
 
 FORM_KINDS = ("polynomial", "knots", "bins", "cutoff", "nodes")
 GENETIC_FORMS = ("polynomial", "knots", "bins", "cutoff")
-BEST_RESPONSE_FORMS = ("knots", "bins", "nodes")
+THRESHOLD_RESPONSE_FORMS = ("knots", "bins", "nodes")
 
 
 def parse_form_label(label):

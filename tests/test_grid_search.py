@@ -64,17 +64,17 @@ def test_grid_optimizer_configuration():
     raw = {"kind": "optimize", "distributions": [{"source": "harmful_middle", **SMALL}],
            "markets": {"pairs": [[4, 1], [4, 3]]},
            "design": {"objectives": ["vcg_pa", "ivcg_pa"]},
-           "optimizers": [{"method": "best_response", "threshold_forms": ["nodes"]},
+           "optimizers": [{"method": "threshold_response", "threshold_forms": ["nodes"]},
                           {"method": "grid", "threshold_forms": ["poly1", "cutoff"],
                            "objectives": ["vcg_pa"], "grid_points": 31}]}
     config = resolve_config(raw)
     combinations, _ = expand(config)
-    # 2 markets × (br nodes × 2 objectives + grid × 2 forms × VCG-PA)
+    # 2 markets × (tr nodes × 2 objectives + grid × 2 forms × VCG-PA)
     assert len(combinations) == 2 * (2 + 2)
     paths = {c.path for c in combinations}
     assert "harmful-middle/z1/n4-k3/vcgpa_poly1_grid" in paths
     assert "harmful-middle/z1/n4-k3/ivcgpa_poly1_grid" not in paths
-    assert "harmful-middle/z1/n4-k3/ivcgpa_nodes_br" in paths
+    assert "harmful-middle/z1/n4-k3/ivcgpa_nodes_tr" in paths
     # one label for two grid tables with different objectives; equal folders are an error
     shared = {**raw, "optimizers": [
         {"method": "grid", "threshold_forms": ["poly1"], "objectives": ["vcg_pa"]},
@@ -84,7 +84,7 @@ def test_grid_optimizer_configuration():
         expand(resolve_config({**raw, "optimizers": [{"method": "grid"}, {"method": "grid"}]}))
     with pytest.raises(ConfigError, match="different methods"):
         resolve_config({**raw, "optimizers": [{"method": "grid", "label": "x"},
-                                              {"method": "best_response", "label": "x"}]})
+                                              {"method": "threshold_response", "label": "x"}]})
     with pytest.raises(ConfigError, match="cannot search form 'poly2'"):
         resolve_config({**raw, "optimizers": [{"method": "grid", "threshold_forms": ["poly2"]}]})
     with pytest.raises(ConfigError, match="objectives must be in"):
