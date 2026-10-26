@@ -1,43 +1,37 @@
-# WEB27 empirical section and supplement, one run (replaces synthetic_run.toml and
-# shapes_run.toml): four synthetic families × 20 markets; optimized τ for VCG-PA and IVCG-PA,
-# the best common welfare cutoff and the best clipped affine τ by exhaustive grid + polish,
-# and the given τ⁰, τ* and relaxation τ.
+# The run of the paper's empirical section (Section 7, Appendix A) and of the empirical
+# supplement: four synthetic distributions × 20 markets; optimized τ for VCG-PA and IVCG-PA, the
+# best common welfare cutoff and the best clipped affine τ by exhaustive grid + Nelder–Mead, and
+# the given τ⁰, τ^EA and relaxation τ.
 #   python run.py configs/paper_run.toml --dry-run
 #   python run.py configs/paper_run.toml --yes
 #
-# Families: independent (v ⟂ e), harmful_middle (harm rises with v, non-monotone ridge;
-# ironing binds), heavy_tail (heavy-tailed v, harm ∝ √v), harm_rises (bivariate normal,
-# correlation −0.6). Default options and grid (151 × 150).
+# Distributions: independent (v independent of e), harmful_middle (harm rises with v, faster in a
+# band around v = 1; ironing binds), heavy_tail (heavy-tailed v, harm ∝ √v), harm_rises (bivariate
+# normal, correlation −0.6). Default options and grid (151 × 150).
 #
-# Markets (n, k): the cells with k < n of n ∈ {2, 4, 8, 16, 32} × k ∈ {1, 2, 4, 8} (14 markets,
-# n/k ∈ {2, 4, 8, 16, 32}); more than half of the bidders allocated: k/n = 3/4 at (4,3), (8,6),
-# (16,12); almost all: k/n = 7/8 at (8,7), (16,14); all: n = k = 4 (no competition: τ⁰ optimal,
-# relaxation skipped).
+# Markets (n, k): the pairs with k < n of n ∈ {2, 4, 8, 16, 32} × k ∈ {1, 2, 4, 8} (14 markets,
+# n/k ∈ {2, 4, 8, 16, 32}); k/n = 3/4 at (4,3), (8,6), (16,12); k/n = 7/8 at (8,7), (16,14); and
+# n = k = 4 (no competition: τ⁰ optimal, relaxation skipped).
 #
 # Designs per market (folder <objective>_<form>_<optimizer> or tau-<label>):
 #   vcgpa_nodes_tr, ivcgpa_nodes_tr   optimized τ (threshold-response ascent; starts zero,
 #                                     zero_welfare, relaxation + 6 random)
 #   vcgpa_poly1_grid, ivcgpa_poly1_grid
-#                                     best clipped affine τ(e) = min{v̄, max{0, β₀ + β₁e}}:
-#                                     grid of lines (angle, offset; 121 × 121 for VCG-PA, 81 × 81
-#                                     for IVCG-PA, whose evaluations cost 3–70 ms instead of 1 ms)
+#                                     best clipped affine τ(e) = min{v̄, max{0, a − θe}}: grid of
+#                                     lines (angle, offset; 121 × 121 for VCG-PA, 81 × 81 for
+#                                     IVCG-PA, whose evaluations cost 3–70 ms instead of 1 ms)
 #                                     + Nelder–Mead from the 5 best separated grid local maxima
 #   vcgpa_cutoff_grid, ivcgpa_cutoff_grid
-#                                     best common welfare cutoff τ(e) = max(0, w − e): 121 (81)
-#                                     values of w + Nelder–Mead
-#   tau-zero-welfare                  τ⁰(e) = max(0, −e)
-#   tau-ex-ante                       τ*(e) = max(0, w* − e), Pr[v + e > w*] = min{k/n,
-#                                     Pr[v + e > 0]} (supplement only; deferred item 1)
-#   tau-relaxation                    τ read off the symmetric relaxation (no ascent); its
-#                                     VCG-PA welfare is a threshold rule's, below the bound
-# The relaxation bound J (VCG-PA, equal τ) comes from the symmetric_relaxation check (default
-# on), for every combination with k < n.
-# No genetic search: the grid covers both small forms, and the ascent's starts exclude
-# short_genetic.
+#                                     best common welfare cutoff τ(e) = max{0, c − e}: 121 (81)
+#                                     values of c + Nelder–Mead
+#   tau-zero-welfare                  τ⁰(e) = max{0, −e}
+#   tau-ex-ante                       ex ante welfare cutoff τ^EA(e) = max{0, w^EA − e},
+#                                     Pr[v + e > w^EA] = min{k/n, Pr[v + e > 0]} (Corollary 6.5(3))
+#   tau-relaxation                    τ read from the symmetric relaxation, without ascent
 
 kind = "optimize"
 name = "paper-run"
-description = "WEB27 paper and supplement: independent, harmful_middle, heavy_tail, harm_rises; 20 markets (n ≤ 32, k/n from 1/32 to 1); optimized τ, best cutoff and best clipped affine τ for VCG-PA and IVCG-PA (threshold-response ascent; grid + Nelder–Mead), given τ⁰, τ* and relaxation τ."
+description = "Paper and empirical supplement: independent, harmful_middle, heavy_tail, harm_rises; 20 markets (n ≤ 32, k/n from 1/32 to 1); optimized τ, best cutoff and best clipped affine τ for VCG-PA and IVCG-PA (threshold-response ascent; grid + Nelder–Mead), given τ⁰, τ^EA and relaxation τ."
 
 [[distributions]]
 source = "independent"

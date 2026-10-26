@@ -1,0 +1,175 @@
+\documentclass[11pt]{article}
+\usepackage[left=1in, right=1in, top=1in, bottom=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath, amssymb, mathtools}
+\usepackage{booktabs,tabularx,array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{natbib}
+\usepackage{hyperref}
+\usepackage{cleveref}
+
+\hypersetup{colorlinks=true, linkcolor=blue!60!black, citecolor=blue!60!black, urlcolor=blue!60!black}
+\setlist{nosep, leftmargin=*}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+\renewcommand{\arraystretch}{1.2}
+\emergencystretch=2em
+\newcommand{\vplus}{\bar v^{+}}
+\newcommand{\W}{\mathcal{W}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\FB}{\mathrm{FB}}
+\newcommand{\OPT}{\mathrm{OPT}}
+
+\title{Code Supplement: Implementation and User Guide\\for Auctions with Participant Audits}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Overview}\label{sec:overview}
+
+This supplement documents the code behind the numerical results of the paper: how the package is organized, how experiments are run, and what they output. The methods it implements (type distributions, exact computation of the four mechanisms, threshold-response ascent and grid search, checks) are described in the empirical supplement, Section~1. The code is the Python package \code{PA\_auctions} in this repository. The configuration keys, outputs and Python interface are documented in \code{docs/user\_guide.md}, and \code{PA\_auctions/README.md} documents the methods at the level of functions.
+
+\section{Package Layout}\label{sec:layout}
+
+\begin{table}[ht]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}l L@{}}
+\toprule
+Module & Implements \\
+\midrule
+\code{type\_distributions.py} & type distributions as lists of cells (piecewise uniform, atomic), the synthetic distributions, continuous and refined versions \\
+\code{threshold\_functions.py} & threshold functions $\tau(e)$ (picklable classes: polynomial, piecewise linear, cutoff, tabulated) \\
+\code{threshold\_forms.py} & parametric forms of $\tau$ searched by the optimizers (\code{nodes}, \code{poly<d>} with the clipped affine \code{poly1}, \code{cutoff}, \code{knots<K>}, \code{bins<K>}) and the ex ante welfare cutoff \\
+\code{scoring\_rules.py} & score-based auctions: VCG, VCG-PA, IVCG-PA, first best \\
+\code{exact\_computation.py} & exact expected outcomes in quantile space: bid segments, ironing, interim allocations, Gauss--Legendre integration; continuous bid segments \\
+\code{marginal\_contribution.py} & marginal contributions $M^\tau$, rival welfare loss $L^\tau$, Pigouvian charges \\
+\code{threshold\_response\_ascent.py} & threshold-response ascent: starts, threshold responses, line search, L-BFGS-B refinement, per-iteration diagnostics \\
+\code{grid\_search.py} & exhaustive grid search over the best cutoff and the best clipped affine $\tau$, with Nelder--Mead refinement \\
+\code{genetic\_search.py} & genetic search with Nelder--Mead refinement (not used in the paper) \\
+\code{symmetric\_relaxation.py} & linear program over symmetric participation rules and the threshold function read from it (the relaxation start of the ascent) \\
+\code{threshold\_evaluation.py} & entry point: outcomes of the four mechanisms for a distribution and $\tau$, exact and simulated \\
+\code{auction\_simulation.py} & simulated auctions on sampled type profiles (common random numbers) \\
+\code{empirical.py}, \code{smoothing.py} & populations given as a table of scores: split, truncation, kernel smoothing, bootstrap (not used in the paper) \\
+\code{pipeline.py}, \code{parallel.py} & building blocks of one combination; process-level parallelism within a combination \\
+\code{figures.py} & the figures of a run, drawn from saved files \\
+\code{experiments/} & \code{config.py} (read, complete, validate and expand a TOML file), \code{runner.py} (plan, time estimate, parallel combinations), \code{compute.py} (one combination and its files), \code{report.py} (figures and README files), \code{provenance.py} (git, versions, host, seeds) \\
+\bottomrule
+\end{tabularx}
+\caption{Modules of \code{PA\_auctions}.}
+\label{tab:modules}
+\end{table}
+
+\code{run.py} is the command-line entry point. \code{scripts/} holds the data scripts of the paper and the empirical supplement and the previews of the synthetic distributions in \code{docs/distributions/}. \code{tests/} holds the test suite (\code{pytest}).
+
+\section{Running Experiments}\label{sec:running}
+
+A run is described by a TOML file and started with \code{python run.py CONFIG.toml}. Every list in the file is a set of values, and the run computes every combination; combinations that cannot run, such as the relaxation start with $k\geq n$, are skipped and listed. There are two kinds of run.
+\begin{itemize}
+    \item \code{optimize}: the sets are distributions, markets, objectives (VCG-PA or IVCG-PA welfare), and optimizers. Each optimizer has a method (\code{threshold\_response}, \code{grid}, \code{genetic}, \code{genetic+threshold\_response}, \code{relaxation}), its parameters, and its own list of threshold forms; a form the method cannot search is a configuration error. Given threshold functions (below) may be added as benchmarks; each is evaluated in every market.
+    \item \code{evaluate}: the sets are distributions, markets, and given threshold functions. A threshold function is given as a polynomial, a constant, a tabulated function, a welfare cutoff (a number, or the ex ante welfare cutoff), the threshold function of the symmetric relaxation, a saved \code{tau.json}, or every optimum of an earlier run.
+\end{itemize}
+Markets are either all pairs of the lists $n\in N$, $k\in K$, or an explicit list of pairs $(n,k)$ (key \code{pairs}).
+The option \code{continuous} (default true) selects evaluation on continuous versions (empirical supplement, Section~1.2). Before running, the code prints the plan and a time estimate, calibrated by timing exact evaluations on each distribution. A search stopped by the time limit (default 60 minutes per combination) returns the best $\tau$ found so far, and the check \code{search\_stop} fails for that combination. Combinations run in parallel worker processes (default: number of cores minus 2). Workers beyond one per combination run the parallel stages within a combination: search starts and Nelder--Mead starts. \Cref{tab:cli} lists the command-line options.
+
+\begin{table}[ht]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}l L@{}}
+\toprule
+Command & Does \\
+\midrule
+\code{run.py CONFIG.toml} & plan, time estimate, confirmation, computation, figures, README files \\
+\quad\code{-{}-dry-run} & plan and time estimate only \\
+\quad\code{-{}-yes} & no confirmation (batch jobs) \\
+\quad\code{-{}-workers N} & number of worker processes \\
+\quad\code{-{}-no-report} & computation only, no figures \\
+\code{run.py -{}-report RUN} & figures and README files of an existing run, from its saved files \\
+\quad\code{-{}-paper [NAMES]} & figures for a paper: one PDF per panel (\cref{sec:outputs}) \\
+\code{run.py -{}-options} & distributions, forms, objectives, optimizers, threshold sources and all defaults \\
+\bottomrule
+\end{tabularx}
+\caption{Command-line options of \code{run.py}.}
+\label{tab:cli}
+\end{table}
+
+\paragraph{Reproducibility.} The run record \code{run.toml} stores the following.
+\begin{itemize}
+    \item The resolved configuration, with every default explicit.
+    \item The random seeds.
+    \item The git commit, and whether tracked files had uncommitted changes. If they had, their diff is saved as \code{code.patch}.
+    \item Package versions and the host (local machine, or a batch job with its job id and slots).
+    \item Start and end times, and the runtime of each stage.
+\end{itemize}
+Rerunning the saved \code{config.toml} at the recorded commit reproduces the run. Figures are drawn only from saved files, so \code{python run.py -{}-report RUN} redraws them without recomputation.
+
+\paragraph{Tests.} \code{python -m pytest} runs the test suite. \code{configs/smoke\_test.toml} runs the smallest experiment through every stage on coarse grids, in about 15 seconds; its results are not meaningful.
+
+\paragraph{Experiments of the paper.} The paper and the empirical supplement use one run, of the configuration \code{configs/\allowbreak paper\_run.toml}: four distributions, $20$ markets, $716$ combinations, about $51$ minutes on $28$ processor cores. On a cluster, it runs unchanged as a batch job, with \code{-{}-yes} and \code{-{}-workers N} for the number of cores \code{N} of the job. With its run folder \code{RUN},
+\begin{center}
+\code{python scripts/web27\_paper\_data.py RUN OUT}\\
+\code{python scripts/empirical\_supplement\_data.py RUN empirical\_supplement}
+\end{center}
+write the tables, curves, type backgrounds and axis limits from which the paper and the empirical supplement draw their figures and tables in \LaTeX. The first writes the data of the figures of the paper's Section~7 and Appendix~A to \code{OUT}; the second writes \code{empirical\_supplement/data/}, from which \code{empirical\_supplement\_v2.tex} compiles.
+
+\section{Outputs}\label{sec:outputs}
+
+A run writes one folder, \code{runs/<date>\_<time>\_<kind>\_<name>}, with the files of \cref{tab:files}. Each combination has a sub-folder
+\begin{center}
+\code{<distribution>/z<$\zeta$>/n<n>-k<k>/<design>},
+\end{center}
+where $\zeta$ is an externality scale ($1$ in the paper). The design label is \code{<objective>\_\allowbreak<form>\_\allowbreak<optimizer>} for an optimized $\tau$ and \code{tau-<label>} for a given one. A comparison figure goes in the \code{compare/} folder of the deepest level above every input it varies.
+
+\begin{table}[ht]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}l L@{}}
+\toprule
+File & Contents \\
+\midrule
+\code{README.md} & index: inputs, counts of check verdicts, results table with links to every figure, figure reference \\
+\code{config.toml}, \code{run.toml} & configuration as given; resolved configuration and provenance \\
+\code{code.patch}, \code{log.txt} & uncommitted changes of tracked code (if any); progress messages \\
+\code{summary.csv} & one row per combination: inputs, exact outcomes of the four mechanisms, gains, shares of the first-best gain, revenue changes, runtime \\
+\code{checks.csv} & one row per check and combination \\
+\code{gap-decomposition.csv} & per distribution, market and class of threshold functions: the gaps $\FB-\OPT$, $\OPT-\OPT^{\mathrm{VCG}}$ and $\OPT^{\mathrm{VCG}}-\OPT^{\mathrm{VCG}}_{\mathcal T}$, each with the best values found \\
+\code{tau.json}, \code{tau.csv} & $\tau$ (rebuildable, reusable in evaluate runs); $\tau(e)$ and both penalty functions at the externality nodes \\
+\code{results.json} & every statistic of a combination, including search statistics and convergence traces \\
+\code{first-order.csv} & per node and mechanism: threshold, $X^\tau$, penalty, Pigouvian charge, marginal contribution, threshold-response gap, first-order violation \\
+\code{data.npz} & arrays behind the figures: simulated outcomes, ironing segments, interim allocations, maps of $M^\tau$, tried thresholds \\
+\code{types.npz} & per distribution: the type density drawn behind the figures \\
+\code{README.md} (combination) & results table, files, each figure with its description and preview, figures not drawn and why \\
+\code{runs/index.csv} & one line per run: folder, kind, start, runtime, combinations, failures, failed checks, commit, host \\
+\bottomrule
+\end{tabularx}
+\caption{Files of a run and of each combination.}
+\label{tab:files}
+\end{table}
+
+\begin{table}[ht]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}l L l@{}}
+\toprule
+Figure & Shows & Drawn \\
+\midrule
+1 types, $\tau$, penalties & type distribution, $\tau$, abstention region, excluded externalities, zero-welfare line $v=-e$, bids pooled by IVCG-PA; penalty functions & always \\
+2 expected outcomes & expected welfare as bidder net utility + revenue + penalties + externality part, with the share of the first-best gain; changes over VCG of each quantity & always \\
+3 outcome distributions & per quantity: per-auction distribution of each mechanism in simulated auctions, and of the paired difference from VCG (with the share of exact zeros); exact means marked & always \\
+4 gain scatter & per simulated auction: captured gain against achievable gain; revenue change against welfare change & always \\
+5 ironing & $\hat w^\tau$ and $\bar\omega^\tau$ in quantile space, $\Psi$ and its convex hull, scores against bids, interim allocations & ironing binds \\
+6 marginal contribution & maps of $M^\tau(e,v)$ with the zero contour and $\tau$; penalty against Pigouvian charge; $M^\tau$ at threshold types & always \\
+search: tried & tried thresholds behind the best one & optimize \\
+search: convergence & training objective against time, per start and stage & optimize \\
+search: iterations & per iteration: share of the first-best gain, distance to the best welfare found, stationarity, first-order violation, threshold-response gap & optimize \\
+compare: $\tau$ & $\tau$ of combinations that differ in one input (market, form, optimizer, objective, threshold); $\tau$ by $n$ at fixed $k$, by $k$ at fixed $n$, and by $k$ at fixed $n/k$ & $\geq 2$ such \\
+compare: share & share of the first-best gain of every combination & always \\
+\bottomrule
+\end{tabularx}
+\caption{Figures of a run. All are PDF. Each mechanism has a fixed color and line style, chosen to remain distinguishable under color-vision deficiencies.}
+\label{tab:figures}
+\end{table}
+
+\paragraph{Previews and README files.} Every figure has a WebP preview in a \code{thumbs/} folder next to it. The README file of each combination and of each \code{compare/} folder shows the previews, each linked to its PDF and preceded by a description.
+
+\paragraph{Figures for a paper.} The option \code{-{}-paper} exports each panel of the selected figures as its own PDF at printed size, with fixed margins, so panels placed side by side align; legends and colorbars go to their own PDFs, and each figure gets a caption draft and a \LaTeX{} \code{figure} environment. The figures and tables of the paper and the empirical supplement do not use these exports: they are drawn in \LaTeX{} from the data written by the two scripts above.
+
+\end{document}
